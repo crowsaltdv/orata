@@ -1,8 +1,8 @@
 // Orate — sign in / sign up screen.
 import { html, useState, useEffect, useRef, cx, debounce, ls } from '/js/lib.js';
 import { state, set, useSel, toast } from '/js/store.js';
-import { api } from '/js/api.js';
-import { login, register, confirmRegistration, resendRegistrationCode } from '/js/events.js';
+import { api, gateway } from '/js/api.js';
+import { login, register, confirmRegistration, resendRegistrationCode, logout } from '/js/events.js';
 import { Icon, Logo } from '/js/icons.js';
 import { Btn, Field, TextInput, Spinner } from '/js/ui.js';
 import { t } from '/js/i18n.js';
@@ -164,7 +164,14 @@ export function AuthScreen() {
 
 export function Splash({ text }) {
   const [slow, setSlow] = useState(false);
+  const diag = useSel((s) => s.wsDiag); const signedIn = useSel((s) => !!s.token);
   useEffect(() => { const id = setTimeout(() => setSlow(true), 7000); return () => clearTimeout(id); }, []);
-  return html`<div class="splash"><div class="splash-mark"><${Logo} size=${96} /></div><div class="splash-text">${slow ? 'Still connecting… is the Orate server running?' : text || 'Connecting…'}</div></div>`;
+  const retry = () => { gateway.disconnect(); gateway.connect(); setSlow(false); setTimeout(() => setSlow(true), 7000); };
+  return html`<div class="splash"><div class="splash-mark"><${Logo} size=${96} /></div>
+    <div class="splash-text">${slow ? 'Still connecting…' : text || 'Connecting…'}</div>
+    ${slow ? html`<div class="splash-help">
+      <p>${t('The server may still be waking up (free hosts can take up to a minute), or the live connection is being blocked.')}${diag ? html` <small>${t('Attempt')} ${diag.attempt}${diag.code ? ` · ${t('code')} ${diag.code}` : ''}</small>` : null}</p>
+      <div class="splash-actions"><${Btn} variant="primary" onClick=${retry}>${t('Try again')}<//>${signedIn ? html`<${Btn} variant="ghost" onClick=${() => logout({ silent: true })}>${t('Sign out')}<//>` : null}</div>
+    </div>` : null}</div>`;
 }
 void toast;

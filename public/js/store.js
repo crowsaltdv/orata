@@ -15,7 +15,7 @@ export const state = {
   settings: deepMerge(DEFAULT_SETTINGS, migrateSettings(ls('settings', {}))),
   local: deepMerge(DEFAULT_LOCAL, ls('local', {})),
   focused: document.hasFocus(), idle: false, width: window.innerWidth, mobileNav: false,
-  gifOk: true, gated: false, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, replyTo: null, editing: null, searchQuery: '', speaking: {},
+  gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, replyTo: null, editing: null, searchQuery: '', speaking: {},
 };
 state.panel = state.local.panel;
 

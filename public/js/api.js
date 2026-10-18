@@ -63,15 +63,22 @@ export const gateway = {
     ws.onopen = () => { ws.send(JSON.stringify({ op: 'identify', d: { token: state.token } })); };
     ws.onmessage = (e) => {
       let m; try { m = JSON.parse(e.data); } catch { return; }
-      if (m.op === 'ready') { attempt = 0; lastPong = Date.now(); startHeartbeat(); set({ connection: 'online' }); }
+      if (m.op === 'ready') { attempt = 0; lastPong = Date.now(); startHeartbeat(); set({ connection: 'online', wsDiag: null }); }
       if (m.op === 'pong') lastPong = Date.now();
+      if (m.op === 'invalid_session') { wantOpen = false; hooks.unauthorized(); return; }   // our login is no longer known to the server (it was reset or restarted)
       for (const fn of handlers.get(m.op) || []) { try { fn(m.d); } catch (err) { console.error('[gateway]', m.op, err); } }
     };
     ws.onclose = (e) => {
       clearInterval(hb); ws = null;
       if (e.code === 4004 || e.code === 4001) { wantOpen = false; hooks.unauthorized(); return; }
-      set({ connection: 'offline' });
-      if (wantOpen) { attempt++; reconnectTimer = setTimeout(() => gateway.connect(), Math.min(15000, 600 * 2 ** Math.min(attempt, 5)) + Math.random() * 400); }
+      set({ connection: 'offline', wsDiag: { attempt: attempt + 1, code: e.code } });
+      if (wantOpen) {
+        attempt++;
+        // Hosts that reset their data (free plans) leave us with a login the server no longer knows, and a proxy may hide the reason the
+        // socket was refused. Ask over plain HTTP every other attempt: a 401 signs us out instead of retrying forever.
+        if (attempt >= 2 && attempt % 2 === 0) api.get('/me').catch(() => {});
+        reconnectTimer = setTimeout(() => gateway.connect(), Math.min(15000, 600 * 2 ** Math.min(attempt, 5)) + Math.random() * 400);
+      }
     };
     ws.onerror = () => {};
   },

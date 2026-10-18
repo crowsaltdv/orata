@@ -68,7 +68,7 @@ export function attachGateway(server) {
         if (op !== 'identify') return;
         const s = db.sessions[sha(String(d.token || ''))];
         const user = s && db.users[s.userId];
-        if (!user || user.deleted) return ws.close(4004, 'invalid token');
+        if (!user || user.deleted) { send(conn, 'invalid_session', {}); return ws.close(4004, 'invalid token'); }   // the message too: some proxies swallow custom close codes
         clearTimeout(authTimer);
         conn.userId = user.id;
         if (isGated(user)) {   // REQUIRE_EMAIL_VERIFICATION: an empty world, no events, no voice

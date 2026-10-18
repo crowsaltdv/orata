@@ -73,3 +73,8 @@
 .code-input:disabled { opacity: .6; }
 .auth-form .note-chip { text-align: left; }
 .verify-links .link-btn:disabled { opacity: .5; text-decoration: none; cursor: default; }
+
+/* loading screen help (shown when connecting takes long) */
+.splash-help { max-width: min(420px, calc(100vw - 40px)); text-align: center; color: var(--text-3); font-size: 14px; line-height: 1.5; animation: fade-in var(--t-med) ease both; }
+.splash-help small { display: block; margin-top: 4px; opacity: .8; }
+.splash-actions { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
