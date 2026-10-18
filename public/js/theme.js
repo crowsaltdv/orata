@@ -1,5 +1,6 @@
 // Orate — theme engine: turns settings into CSS variables, wallpaper layers, fonts, glass and rain.
 import { state, subscribe, toast } from '/js/store.js';
+import { DEFAULT_SETTINGS } from '/js/defaults.js';
 import { hexToRgb, luminance, mixHex, readableOn, ls } from '/js/lib.js';
 import { MESH_WALLPAPERS, PHOTO_WALLPAPERS } from '/js/defaults.js';
 import { rain } from '/js/rain.js';
@@ -43,10 +44,12 @@ export function drawMesh(ctx, w, h, def) {
     ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
   }
 }
-export function wallpaperSource(bg = state.settings.bg) {
+/** The look to render. Nobody signed in (the login / sign-up screens) always gets the default theme, never what a previous account left in this browser. */
+function look() { return state.token ? state.settings : DEFAULT_SETTINGS; }
+export function wallpaperSource(bg = look().bg) {
   switch (bg.type) {
     case 'mesh': { const def = MESH_WALLPAPERS.find((m) => m.id === bg.mesh) || MESH_WALLPAPERS[0]; return { kind: 'mesh', def, css: meshCss(def), key: 'mesh:' + def.id }; }
-    case 'photo': { const p = PHOTO_WALLPAPERS.find((x) => x.id === bg.photo) || PHOTO_WALLPAPERS[0]; return { kind: 'image', url: proxied(p.url), key: 'img:' + p.url }; }
+    case 'photo': { const p = PHOTO_WALLPAPERS.find((x) => x.id === bg.photo) || PHOTO_WALLPAPERS[0]; return { kind: 'image', url: p.local || proxied(p.url), key: 'img:' + p.url }; }
     case 'image': return bg.image ? { kind: 'image', url: proxied(bg.image), key: 'img:' + bg.image } : { kind: 'solid', css: bg.color, color: bg.color, key: 'solid' };
     case 'gradient': { const g = bg.gradient; return { kind: 'gradient', g, css: `linear-gradient(${g.angle}deg, ${g.c1}, ${g.c2})`, key: `grad:${g.c1}${g.c2}${g.angle}` }; }
     default: return { kind: 'solid', css: bg.color, color: bg.color, key: 'solid:' + bg.color };
@@ -60,7 +63,7 @@ function savePreview(key, im) {
 }
 function bootPreview() {
   try {
-    const p = JSON.parse(localStorage.getItem('orate:wpPreview') || 'null'); const src = wallpaperSource(state.settings.bg);
+    const p = JSON.parse(localStorage.getItem('orate:wpPreview') || 'null'); const src = wallpaperSource(look().bg);
     if (p && src.kind === 'image' && p.key === src.key) { const b = layers()[1]; b.style.backgroundImage = `url("${p.url}")`; b.classList.add('on'); }
   } catch { /* ignore */ }
 }
@@ -101,7 +104,7 @@ function applyWallpaper(s) {
         if (token !== loadToken) return;
         // the proxy can't reach some hosts (bot protection) — show the original directly; WebGL effects need CORS so rain is skipped
         const direct = src.url.startsWith('/api/img?url=') ? decodeURIComponent(src.url.slice('/api/img?url='.length)) : null;
-        if (direct) loadImg(direct, false, (img) => { if (token !== loadToken) return; currentImg = null; show(direct, true); $('#wallpaper').classList.add('rain-fallback'); if (state.settings.rain.enabled) toast('This wallpaper’s host blocks WebGL access, so the rain effect can’t use it. Pick another wallpaper for rain.', 'info', 6000); void img; }, () => { show(meshCss(MESH_WALLPAPERS[0]), false); syncRain(); });
+        if (direct) loadImg(direct, false, (img) => { if (token !== loadToken) return; currentImg = null; show(direct, true); $('#wallpaper').classList.add('rain-fallback'); if (look().rain.enabled) toast('This wallpaper’s host blocks WebGL access, so the rain effect can’t use it. Pick another wallpaper for rain.', 'info', 6000); void img; }, () => { show(meshCss(MESH_WALLPAPERS[0]), false); syncRain(); });
         else { show(meshCss(MESH_WALLPAPERS[0]), false); syncRain(); }
       });
     } else if (src.kind === 'solid') { const t = layers()[1 - activeLayer]; activeLayer = 1 - activeLayer; t.style.backgroundImage = 'none'; t.style.backgroundColor = src.css; t.classList.add('on'); layers()[1 - activeLayer].classList.remove('on'); syncRain(); }
@@ -122,7 +125,7 @@ function sourceFor(src) {
 /** Feeds the liquid-glass lenses the same wallpaper the user sees (they refract it). */
 let glassSig = '';
 function syncGlass() {
-  const s = state.settings; const src = wallpaperSource(s.bg); const source = sourceFor(src);
+  const s = look(); const src = wallpaperSource(s.bg); const source = sourceFor(src);
   if (!source) return;
   const light = isLightMode();
   const sig = JSON.stringify([src.key, !!currentImg, s.bg.brightness, s.bg.saturate, s.bg.posX, s.bg.posY, s.bg.zoom, s.bg.dim, s.theme.panelColor, light]);
@@ -132,7 +135,7 @@ function syncGlass() {
 
 let rainSig = '';
 function syncRain() {
-  const s = state.settings; const src = wallpaperSource(s.bg);
+  const s = look(); const src = wallpaperSource(s.bg);
   const wp = $('#wallpaper');
   const on = s.rain.enabled && !s.motion.reduce;
   wp.classList.toggle('rain-on', on);
@@ -146,7 +149,7 @@ function syncRain() {
 
 /* ------------------------------------------------------------------ colours */
 function isLightMode() {
-  const t = state.settings.theme;
+  const t = look().theme;
   let mode = t.mode; if (mode === 'auto') mode = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   const panelLum = luminance(t.panelColor);
   if (mode !== 'light' && panelLum > 0.62 && t.panelOpacity > 0.4) return true;
@@ -216,7 +219,7 @@ function applyMisc(s) {
 /* ------------------------------------------------------------------ main */
 let last = null; let raf = 0;
 export function applyTheme(force) {
-  const s = state.settings;
+  const s = look();
   if (!force && s === last) return;
   const prev = last; last = s;
   applyColors(s);
@@ -229,8 +232,8 @@ export function applyTheme(force) {
 export function initTheme() {
   bootPreview();
   applyTheme(true);
-  subscribe(() => { if (state.settings !== last) { clearTimeout(raf); raf = setTimeout(() => applyTheme(), 12); } });
-  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (state.settings.theme.mode === 'auto') applyTheme(true); });
+  subscribe(() => { if (look() !== last) { clearTimeout(raf); raf = setTimeout(() => applyTheme(), 12); } });
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (look().theme.mode === 'auto') applyTheme(true); });
   // gentle parallax on the wallpaper
   let tx = 0; let ty = 0; let cx = 0; let cy = 0; let running = false;
   const tick = () => {

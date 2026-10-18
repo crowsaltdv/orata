@@ -22,8 +22,10 @@ export async function resendVerification() {
 function AuthShell({ children }) {
   return html`<div class="auth-screen">
     <div class="auth-orb o1"></div><div class="auth-orb o2"></div><div class="auth-orb o3"></div>
-    <div class="auth-hero"><div class="auth-mark"><${Logo} size=${150} /></div><h1>Orate</h1></div>
-    <div class="auth-card panel"><div class="auth-card-in verify-card">${children}</div></div>
+    <div class="auth-col">
+      <div class="auth-hero panel"><div class="auth-mark"><${Logo} size=${52} /></div><h1>Orate</h1></div>
+      <div class="auth-card panel"><div class="auth-card-in verify-card">${children}</div></div>
+    </div>
   </div>`;
 }
 

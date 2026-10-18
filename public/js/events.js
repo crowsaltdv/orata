@@ -53,10 +53,12 @@ function bootstrap(d) {
   for (const v of d.voiceStates) (voiceStates[v.channelId] ||= {})[v.userId] = v;
 
   // settings: the account copy wins on a new device; otherwise push this device's choices up
+  const reconnect = state.phase === 'ready';
   let settings = state.settings;
   const remote = d.user.settings || {};
+  // an account that has never saved a look (a brand-new sign-up) starts from the default theme, not from whatever this browser had left over
   if (Object.keys(remote).length) settings = deepMerge(DEFAULT_SETTINGS, migrateSettings(remote));
-  const reconnect = state.phase === 'ready';
+  else if (!reconnect) settings = deepMerge(DEFAULT_SETTINGS, {});
   set({
     me: d.user, users, servers, dms, relationships: rel, reads: d.readStates, lastMsg, voice: { ...state.voice, states: voiceStates }, botId: d.botId, settings,
     sessionId: d.connId, phase: 'ready', typing: {}, gated: !!d.gated,

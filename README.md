@@ -172,7 +172,7 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 
 **Voice & video** — WebRTC mesh calls in voice channels and DMs, speaking indicators, mute / deafen, camera, screen share (with audio), per-user volume, push-to-talk, noise suppression, echo cancellation, device pickers and a mic level test. Incoming-call ring for DMs. Connects peer-to-peer using STUN; add a [TURN relay](#turn-relay-for-voice--video) for people behind strict NATs or firewalls.
 
-**Customization** (User Settings → Appearance) — new accounts start with a slate-blue dark theme, the Snow Peaks wallpaper, light rain and the Klee One font; everything below can be changed.
+**Customization** (User Settings → Appearance) — new accounts start with a slate-blue dark theme, the Snow Peaks wallpaper, light rain and the Montserrat font; everything below can be changed. The sign-in and sign-up screens always show this default look (a new account starts from it too), and your own look returns when you log in.
 
 * **Theme** — dark / light / midnight / system, solid or gradient accent, solid or gradient panels, panel opacity, panel blur, saturation, corner radius, spacing, custom text color.
 * **Wallpaper** — 8 built-in gradients, 6 photos, your own upload or image link, solid color or custom gradient; live brightness, saturation, zoom, position, mouse parallax, and two separate blur controls: **Wallpaper blur** (the picture itself) and **Panel blur** (the frosted glass of the panels in front of it). Both default to subtle values — set them to 0 for a crisp wallpaper.

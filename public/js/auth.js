@@ -142,14 +142,14 @@ export function AuthScreen() {
   const invite = state.route.param || ls('pendingInvite', null);
   return html`<div class="auth-screen">
     <div class="auth-orb o1"></div><div class="auth-orb o2"></div><div class="auth-orb o3"></div>
-    <div class="auth-hero">
-      <div class="auth-mark"><${Logo} size=${150} /></div>
+    <div class=${cx('auth-col', view)}>
+    <div class="auth-hero panel">
+      <div class="auth-mark"><${Logo} size=${52} /></div>
       <h1>Orate</h1>
     </div>
-    <div class=${cx('auth-card panel', view)}>
+    <div class="auth-card panel">
       <div class="auth-card-in" key=${view} data-dir=${dir}>
         <header>
-          <${Logo} size=${46} class="auth-logo" />
           <h2>${view === 'login' ? t('Welcome back!') : pending ? t('Check your email') : t('Create an account')}</h2>
           <p>${view === 'login' ? t("We're so excited to see you again!") : pending ? html`${t('We sent a 6-digit code to')} <b>${pending.email}</b>` : t('Join the conversation — it takes less than a minute.')}</p>
           ${invite && !pending ? html`<div class="invite-note"><${Icon} name="link" size=${15} /> You’ve been invited to join a server. ${view === 'login' ? 'Log in' : 'Sign up'} to accept.</div>` : null}
@@ -158,6 +158,7 @@ export function AuthScreen() {
           <div style=${pending ? 'display:none' : ''}><${RegisterForm} go=${go} onPending=${setPending} /></div>
           ${pending ? html`<${CodeForm} key=${pending.ticket} pending=${pending} onBack=${() => setPending(null)} />` : null}`}
       </div>
+    </div>
     </div>
   </div>`;
 }

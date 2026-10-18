@@ -3,7 +3,7 @@
 export const PHOTO_WALLPAPERS = [
   { id: 'photo-1', name: 'Misty Dawn', url: 'https://t4.ftcdn.net/jpg/12/93/55/89/360_F_1293558974_ILjrwntCvlZe1rWFZvbIpnb69nvrgBS9.jpg' },
   { id: 'photo-2', name: 'Mirror Lake', url: 'https://images.unsplash.com/photo-1580137189272-c9379f8864fd?q=80&w=1740&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D' },
-  { id: 'photo-3', name: 'Snow Peaks', url: 'https://images.pexels.com/photos/32574837/pexels-photo-32574837.jpeg?cs=srgb&dl=pexels-raulling-32574837.jpg&fm=jpg' },
+  { id: 'photo-3', name: 'Snow Peaks', url: 'https://images.pexels.com/photos/32574837/pexels-photo-32574837.jpeg?cs=srgb&dl=pexels-raulling-32574837.jpg&fm=jpg', local: '/img/wallpapers/snow-peaks.jpg' },   // the default theme's wallpaper ships with Orate (1920px copy) so the login screen shows it instantly
   { id: 'photo-4', name: 'Starry Pines', url: 'https://wallpapercave.com/wp/wp3946493.jpg' },
   { id: 'photo-5', name: 'Durdle Door', url: 'https://c4.wallpaperflare.com/wallpaper/149/190/473/nature-4k-computer-desktop-backgrounds-wallpaper-preview.jpg' },
   { id: 'photo-6', name: 'Turquoise Lake', url: 'https://i.pinimg.com/736x/8a/80/99/8a8099c1b53399dc2f22bc0ce3f940e4.jpg' },
@@ -40,13 +40,13 @@ export const DEFAULT_SETTINGS = {
     radius: 18, gap: 10, textColor: null, saturation: 1.15,
   },
   bg: {
-    type: 'photo', mesh: 'graphite', image: null, photo: 'photo-3', color: '#0b0a14', gradient: { c1: '#1e1b4b', c2: '#7c3aed', angle: 135 },
+    type: 'photo', mesh: 'sunset', image: null, photo: 'photo-3', color: '#0b0a14', gradient: { c1: '#1e1b4b', c2: '#7c3aed', angle: 135 },
     blur: 0, dim: 0.22, brightness: 1, saturate: 1.1, posX: 50, posY: 50, zoom: 1, parallax: true, library: [],
   },
   rain: { enabled: true, preset: 'rain', amount: 0.7, size: 0.88, speed: 1, refraction: 1, mist: 3, trails: 1, droplets: 50, lightning: 0, fps: 60 },
   glass: { style: 'off', last: 'liquid', intensity: 1, rail: true, nav: true, toolbar: true, buttons: true, composer: true, panels: true },
   fx: { particles: true, ripples: true, amount: 1 },
-  fonts: { ui: 'Klee One', chat: null, code: 'JetBrains Mono', size: 16, weight: 400, lineHeight: 1.45, letterSpacing: 0 },
+  fonts: { ui: 'Montserrat', chat: null, code: 'JetBrains Mono', size: 16, weight: 400, lineHeight: 1.45, letterSpacing: 0 },
   motion: { reduce: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, parallaxHover: true },
   chat: { compact: true, hour24: false, linkPreviews: true, inlineMedia: true, jumbo: true, showAvatars: true, spacing: 16, gifAutoplay: true, spoilerOnHover: false },
   notif: { desktop: true, sounds: true, volume: 0.5, mentionsOnly: false, flash: true },
