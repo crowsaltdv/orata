@@ -7,6 +7,7 @@ export class ApiError extends Error {
 export const hooks = { unauthorized: () => {} };
 
 async function req(method, url, body, extra = {}) {
+  const sentWith = state.token;
   const headers = { ...(state.token ? { authorization: 'Bearer ' + state.token } : {}), ...(state.sessionId ? { 'x-conn': state.sessionId } : {}), ...extra.headers };
   let payload;
   if (body !== undefined && !(body instanceof Blob) && !(body instanceof ArrayBuffer)) { headers['content-type'] = 'application/json'; payload = JSON.stringify(body); } else payload = body;
@@ -17,7 +18,7 @@ async function req(method, url, body, extra = {}) {
   }
   let data = null; try { data = await res.json(); } catch { /* empty */ }
   if (!res.ok) {
-    if (res.status === 401 && state.token && !url.startsWith('/auth/')) hooks.unauthorized();
+    if (res.status === 401 && sentWith && sentWith === state.token && !url.startsWith('/auth/')) hooks.unauthorized();
     throw new ApiError(res.status, data?.error || `Request failed (${res.status})`, data?.code);
   }
   return data;

@@ -1,6 +1,6 @@
 // Orate — right-hand panels: members, pinned messages, search, DM profile.
 import { html, useState, useEffect, useMemo, useRef, cx, formatStamp, debounce, memo } from '/js/lib.js';
-import { state, set, useSel, getChannel, dmName, dmUserId, openContext, openModal, hasPerm, nameOf, roleColor } from '/js/store.js';
+import { state, set, useSel, getChannel, dmName, dmUserId, openContext, openModal, hasPerm, hasChannelPerm, nameOf, roleColor } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, Empty, Spinner, IconBtn } from '/js/ui.js';
 import { api } from '/js/api.js';
@@ -78,7 +78,7 @@ export function PinsPanel({ chId }) {
   const ch = getChannel(chId); const [data, setData] = useState(null); const rev = useSel((s) => (s.msgs[chId]?.list || []).filter((m) => m.pinned).map((m) => m.id).join());
   useEffect(() => { let live = true; setData(null); api.get(`/channels/${chId}/pins`).then((r) => { if (live) { addUsers(r.users); setData(r.messages); } }).catch(() => live && setData([])); return () => { live = false; }; }, [chId, rev]);
   if (!ch) return null;
-  const can = ch.serverId ? hasPerm(ch.serverId, 'MANAGE_MESSAGES') : true;
+  const can = ch.serverId ? hasChannelPerm(ch, 'MANAGE_MESSAGES') : true;
   return html`<div class="panel-pane">
     <div class="pane-head"><b>${t('Pinned Messages')}</b><${IconBtn} icon="x" label="Close" glass=${null} onClick=${() => set({ panel: state.local.panel === 'pins' ? 'members' : state.local.panel })} /></div>
     <div class="pane-scroll">${!data ? html`<div class="pk-center"><${Spinner} /></div>` : data.length ? data.map((m) => html`<${MiniMessage} key=${m.id} m=${m} ch=${ch} onJump=${() => jumpToMessage(chId, m.id)} actions=${can ? html`<button type="button" class="mm-jump danger" onClick=${() => pinMessage(ch, m.id, false)}>${t('Unpin')}</button>` : null} />`)

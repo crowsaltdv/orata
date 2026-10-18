@@ -47,7 +47,7 @@ function Sessions() {
   useEffect(() => { load(); }, []);
   const label = (ua) => { const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser'; const o = /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Linux/.test(ua) ? 'Linux' : ''; return `${b}${o ? ' on ' + o : ''}`; };
   if (!list) return null;
-  return html`<div class="session-list">${list.map((s) => html`<div class="session-row" key=${s.id}><span class="ss-ic"><${Icon} name=${/Android|iPhone/.test(s.ua) ? 'phone' : 'monitor'} size=${22} /></span><div><b>${label(s.ua)}${s.current ? html`<em class="here">${t('This device')}</em>` : null}</b><small>${s.ip} · ${t('Last active')} ${relTime(s.lastUsed)}</small></div>${!s.current ? html`<${Btn} size="sm" variant="ghost" onClick=${async () => { await act(api.del(`/me/sessions/${s.id}`)); load(); }}>${t('Log out')}<//>` : null}</div>`)}</div>`;
+  return html`<div class="session-list">${list.map((s) => html`<div class="session-row" key=${s.id}><span class="ss-ic"><${Icon} name=${/Android|iPhone/.test(s.ua) ? 'phone' : 'monitor'} size=${22} /></span><div><b>${label(s.ua)}${s.current ? html`<em class="here">${t('This device')}</em>` : null}</b><small>${t('Last active')} ${relTime(s.lastUsed)}</small></div>${!s.current ? html`<${Btn} size="sm" variant="ghost" onClick=${async () => { await act(api.del(`/me/sessions/${s.id}`)); load(); }}>${t('Log out')}<//>` : null}</div>`)}</div>`;
 }
 function AccountPage() {
   const me = useSel((s) => s.me); const [reveal, setReveal] = useState(false);
@@ -161,7 +161,7 @@ function PrivacyPage() {
     <${Section} title=${t('Privacy')}>
       <${SettingRow} title=${t('Allow direct messages from server members')} desc=${t('You can always message friends.')}><${SToggle} path="privacy.dmFromServers" /><//>
       <${SettingRow} title=${t('Allow friend requests')}><${SToggle} path="privacy.friendRequests" /><//>
-      <${SettingRow} title=${t('Show my status to everyone')} desc=${t('Use Invisible from your user menu to appear offline.')}><${SToggle} path="privacy.showActivity" /><//>
+      <${SettingRow} title=${t('Show my status to everyone')} desc=${t('Includes the song you’re listening to. Use Invisible from your user menu to appear offline.')}><${SToggle} path="privacy.showActivity" /><//>
     <//>
     <${Section} title=${t('Blocked users')}>
       ${blocked.length ? blocked.map((id) => html`<div class="friend-row" key=${id}><${Avatar} user=${users[id]} size=${36} /><div class="fr-text"><div class="fr-name"><b>${users[id].displayName}</b><span class="fr-user" style="opacity:1">${users[id].username}</span></div></div><${Btn} size="sm" onClick=${() => act(api.del(`/relationships/${id}`))}>${t('Unblock')}<//></div>`) : html`<${Empty} icon="ban" title=${t('No one is blocked')} />`}

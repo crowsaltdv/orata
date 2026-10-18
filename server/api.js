@@ -7,7 +7,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import {
   db, save, newId, cmpId, sha, ENV, DATA_DIR, UPLOAD_DIR, ROOT, ApiError, bad, forbidden, notFound, byUsername, byEmail,
-  conns, emitTo, can, need, permsOf, topRolePos, canView, audienceOf, serverAudience, channelsOfServer, publicUser, selfUser,
+  conns, emitTo, can, need, permsOf, permsIn, canIn, needIn, listedFor, isSynced, overwritesOf, sanitizeOverwrites, topRolePos, canView, audienceOf, serverAudience, channelsOfServer, publicUser, selfUser,
   serverView, channelView, messageView, relatedUserIds, broadcastPresence, readStateFor, systemMessage, randomCode, RESERVED,
   ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId,
 } from './core.js';
@@ -15,6 +15,8 @@ import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './mes
 import { verificationMode, isGated, issueVerification, consumeVerification, resendWait, maskEmail } from './verify.js';
 import { beginSignup, confirmSignup, resendSignup } from './signup.js';
 import { closeConns, storeUpload, restoreUpload } from './core.js';
+import { createSession, findSession, touchSession, endSession, endUserSessions, listSessions } from './sessions.js';
+import { mountMusic, mountMusicPublic, musicConfigured } from './music.js';
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -48,12 +50,7 @@ function str(v, min, max, name) {
 }
 const uploadRef = (v) => (v === null || v === '' ? null : (/^\/uploads\/[A-Za-z0-9_.-]+$/.test(String(v)) ? String(v) : undefined));
 
-function newSession(user, req) {
-  const token = crypto.randomBytes(32).toString('base64url');
-  db.sessions[sha(token)] = { userId: user.id, createdAt: Date.now(), lastUsed: Date.now(), ua: String(req.headers['user-agent'] || '').slice(0, 200), ip: req.ip };
-  save();
-  return token;
-}
+const newSession = (user, req) => createSession(user.id, req.headers['user-agent']);   // no IP address is kept
 
 function getChannel(req, id) {
   const ch = db.channels[id];
@@ -114,7 +111,7 @@ export function buildReady(user) {
   return {
     user: selfUser(user),
     servers: servers.map((s) => serverView(s, user.id)),
-    dms: dms.map(channelView),
+    dms: dms.map((c) => channelView(c)),
     users: usersFor([...userIds]),
     relationships: Object.entries(user.rel || {}).map(([id, type]) => ({ id, type })),
     readStates, voiceStates, botId: db.botId,
@@ -130,6 +127,7 @@ export function createApi() {
     name: 'Orate', gifs: !!ENV.KLIPY_API_KEY, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0, maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
     users: Object.keys(db.users).length, botId: db.botId,
     emailVerification: verificationMode(),   // { enabled, required, smtp }
+    music: musicConfigured(),
   }));
 
   /* --------------------------- auth --------------------------- */
@@ -168,7 +166,7 @@ export function createApi() {
       const out = await beginSignup(fields);
       return res.json({ verify: true, ticket: out.ticket, email: maskEmail(email), mode: out.mode, expiresIn: out.expiresIn, resendIn: out.resendIn });
     }
-    res.json(createAccount(fields, req));
+    res.json(await createAccount(fields, req));
   }));
 
   // step 2 of a verified sign-up: the code from the email creates the account
@@ -177,7 +175,7 @@ export function createApi() {
     const fields = confirmSignup(ticket, code);
     if (byEmail.has(fields.email)) throw bad('That email was registered while you were verifying. Log in instead.', 'email');
     if (byUsername.has(fields.username)) throw bad('That username was taken while you were verifying. Pick another one.', 'username');
-    res.json(createAccount(fields, req));
+    res.json(await createAccount(fields, req));
   }));
   r.post('/auth/register/resend', limit('regresend', 10, 60_000), h(async (req, res) => {
     const out = await resendSignup((req.body || {}).ticket);
@@ -185,7 +183,7 @@ export function createApi() {
   }));
 
   /** Creates the user, joins the community server, sets up the welcome DM and returns { token, user }. */
-  function createAccount({ email, username, displayName, salt, hash, dob }, req) {
+  async function createAccount({ email, username, displayName, salt, hash, dob }, req) {
     ensureBot();
     const id = newId();
     const hues = ['#8b5cf6', '#ec4899', '#f97316', '#10b981', '#06b6d4', '#3b82f6', '#ef4444', '#eab308'];
@@ -212,7 +210,7 @@ export function createApi() {
     db.messages[dmId] = [];
     bot.rel ||= {}; bot.rel[id] = 'friend'; user.rel[bot.id] = 'friend';
     save();
-    const token = newSession(user, req);
+    const token = await newSession(user, req);
     // announce join to community members
     const sys = community.systemChannelId;
     if (sys && community.ownerId !== id) {
@@ -232,7 +230,7 @@ export function createApi() {
     const id = byUsername.get(key) || byEmail.get(key);
     const user = id && db.users[id];
     if (!user || user.bot || !(await checkPassword(user, password))) throw new ApiError(401, 'Invalid login or password', 'invalid_login');
-    res.json({ token: newSession(user, req), user: selfUser(user) });
+    res.json({ token: await newSession(user, req), user: selfUser(user) });
   }));
 
   // The emailed link opens /verify?token=… in the app, which POSTs the token here (a POST, so mail scanners that pre-fetch links can't burn it).
@@ -262,16 +260,18 @@ export function createApi() {
     serve(type);
   }));
 
+  mountMusicPublic(r, { h, limit });   // audio relay: signed links, no bearer token
+
   // Everything below requires a session.
-  r.use((req, res, next) => {
+  r.use(h(async (req, res, next) => {
     const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
-    const token = m?.[1];
-    const s = token && db.sessions[sha(token)];
-    if (!s || !db.users[s.userId] || db.users[s.userId].deleted) return next(new ApiError(401, 'Not signed in', 'unauthorized'));
-    req.user = db.users[s.userId]; req.session = s; req.sessionId = sha(token);
-    if (Date.now() - s.lastUsed > 3600_000) { s.lastUsed = Date.now(); save(); }
+    const found = await findSession(m?.[1]);
+    const user = found && db.users[found.rec.userId];
+    if (!user || user.deleted) throw new ApiError(401, 'Not signed in', 'unauthorized');
+    req.user = user; req.session = found.rec; req.sessionId = found.hash;
+    touchSession(found.hash, found.rec);
     next();
-  });
+  }));
 
   // REQUIRE_EMAIL_VERIFICATION: until the address is verified only these calls work
   const GATE_OK = new Set(['POST /auth/logout', 'POST /auth/resend-verification', 'GET /ready', 'GET /me', 'PATCH /me', 'DELETE /me']);
@@ -288,7 +288,9 @@ export function createApi() {
     res.json({ sent: true, mode: out.mode, email: maskEmail(u.email) });
   }));
 
-  r.post('/auth/logout', h(async (req, res) => { delete db.sessions[req.sessionId]; save(); res.json({ ok: true }); }));
+  mountMusic(r, { h, limit });
+
+  r.post('/auth/logout', h(async (req, res) => { await endSession(req.sessionId); res.json({ ok: true }); }));
   r.get('/ready', (req, res) => res.json(buildReady(req.user)));
 
   /* --------------------------- me --------------------------- */
@@ -348,20 +350,17 @@ export function createApi() {
     if (!(await checkPassword(req.user, current))) throw bad('Current password is incorrect', 'password');
     if (typeof password !== 'string' || password.length < 8 || password.length > 128) throw bad('New password must be 8–128 characters', 'new_password');
     Object.assign(req.user, await hashPassword(password));
-    // revoke every other session
-    for (const [k, s] of Object.entries(db.sessions)) if (s.userId === req.user.id && k !== req.sessionId) delete db.sessions[k];
+    await endUserSessions(req.user.id, req.sessionId);   // every other device has to sign in again with the new password
     save(); res.json({ ok: true });
   }));
 
-  r.get('/me/sessions', (req, res) => {
-    res.json(Object.entries(db.sessions).filter(([, s]) => s.userId === req.user.id).map(([k, s]) => ({
-      id: k.slice(0, 16), ua: s.ua, ip: s.ip, createdAt: s.createdAt, lastUsed: s.lastUsed, current: k === req.sessionId,
-    })).sort((a, b) => b.lastUsed - a.lastUsed));
-  });
-  r.delete('/me/sessions/:id', (req, res) => {
-    for (const [k, s] of Object.entries(db.sessions)) if (s.userId === req.user.id && k.startsWith(req.params.id) && k !== req.sessionId) delete db.sessions[k];
-    save(); res.json({ ok: true });
-  });
+  r.get('/me/sessions', h(async (req, res) => {
+    res.json((await listSessions(req.user.id)).map((s) => ({ id: s.hash.slice(0, 16), ua: s.ua, createdAt: s.createdAt, lastUsed: s.lastUsed, current: s.hash === req.sessionId })).sort((a, b) => b.lastUsed - a.lastUsed));
+  }));
+  r.delete('/me/sessions/:id', h(async (req, res) => {
+    for (const s of await listSessions(req.user.id)) if (s.hash.startsWith(req.params.id) && s.hash !== req.sessionId) await endSession(s.hash);
+    res.json({ ok: true });
+  }));
 
   r.delete('/me', limit('delacct', 4, 60_000), h(async (req, res) => {
     const u = req.user;
@@ -369,7 +368,7 @@ export function createApi() {
     for (const s of Object.values(db.servers)) if (s.ownerId === u.id) deleteServer(s);
     for (const s of Object.values(db.servers)) if (s.members[u.id]) { delete s.members[u.id]; emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: u.id }); }
     for (const id of Object.keys(u.rel || {})) { const o = db.users[id]; if (o?.rel) { delete o.rel[u.id]; emitTo([id], 'relationship_update', { id: u.id, type: null }); } }
-    for (const [k, s] of Object.entries(db.sessions)) if (s.userId === u.id) delete db.sessions[k];
+    await endUserSessions(u.id);
     byUsername.delete(u.username); byEmail.delete(u.email);
     Object.assign(u, { deleted: true, username: 'deleted_' + u.id.slice(-8), displayName: 'Deleted User', email: null, hash: null, salt: null, avatar: null, banner: null, bio: '', customStatus: null, rel: {}, settings: {} });
     emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) });
@@ -443,10 +442,10 @@ export function createApi() {
   }));
 
   r.get('/invites/:code', h(async (req, res) => {
-    const inv = db.invites[req.params.code]; if (!inv || (inv.expiresAt && inv.expiresAt < Date.now())) throw notFound('This invite is invalid or has expired');
+    const inv = db.invites[req.params.code]; if (!inv || (inv.expiresAt && inv.expiresAt < Date.now()) || (inv.maxUses && inv.uses >= inv.maxUses && !db.servers[inv.serverId]?.members[req.user.id])) throw notFound('This invite is invalid or has expired');
     const s = db.servers[inv.serverId]; if (!s) throw notFound('This invite is invalid or has expired');
     const ids = Object.keys(s.members);
-    res.json({ code: inv.code, server: { id: s.id, name: s.name, icon: s.icon, banner: s.banner, description: s.description, memberCount: ids.length, onlineCount: ids.filter((id) => effectiveStatus(db.users[id]) !== 'offline').length }, inviter: publicUser(db.users[inv.inviterId]), joined: !!s.members[req.user.id] });
+    res.json({ code: inv.code, server: { id: s.id, name: s.name, icon: s.icon, banner: s.banner, accent: s.accent || null, createdAt: s.createdAt, description: s.description, memberCount: ids.length, onlineCount: ids.filter((id) => effectiveStatus(db.users[id]) !== 'offline').length }, inviter: publicUser(db.users[inv.inviterId]), joined: !!s.members[req.user.id] });
   }));
   r.post('/invites/:code/join', limit('join', 20, 60_000), h(async (req, res) => {
     const code = String(req.params.code).split('/').pop();
@@ -513,19 +512,60 @@ export function createApi() {
     const parentId = b.parentId && db.channels[b.parentId]?.serverId === s.id && db.channels[b.parentId].type === 'category' ? b.parentId : null;
     const position = Math.max(0, ...siblings.filter((c) => (c.parentId || null) === parentId).map((c) => c.position || 0)) + 1;
     const id = newId();
-    const allowedRoles = Array.isArray(b.allowedRoles) ? b.allowedRoles.filter((rid) => s.roles.some((r) => r.id === rid)) : [];
-    db.channels[id] = { id, serverId: s.id, type, name, parentId: type === 'category' ? null : parentId, position: type === 'category' ? Math.max(0, ...siblings.filter((c) => c.type === 'category').map((c) => c.position)) + 1 : position, topic: String(b.topic || '').slice(0, 1024), private: !!b.private, allowedRoles };
+    const ch = { id, serverId: s.id, type, name, parentId: type === 'category' ? null : parentId, position: type === 'category' ? Math.max(0, ...siblings.filter((c) => c.type === 'category').map((c) => c.position)) + 1 : position, topic: String(b.topic || '').slice(0, 1024) };
+    let ows = sanitizeOverwrites(s, b.overwrites);
+    if (b.private && !ows.length) ows = sanitizeOverwrites(s, [{ type: 'role', id: s.id, deny: ['VIEW_CHANNEL'] }, ...(Array.isArray(b.allowedRoles) ? b.allowedRoles : []).map((rid) => ({ type: 'role', id: rid, allow: ['VIEW_CHANNEL'] }))]);   // the "Private Channel" shortcut
+    if (ows.length) { ch.overwrites = ows; if (ch.parentId) ch.synced = false; }   // a channel with its own rules no longer follows its category
+    db.channels[id] = ch;
+    if (!canView(req.user.id, ch)) ch.overwrites.push({ type: 'member', id: req.user.id, allow: ['VIEW_CHANNEL'], deny: [] });   // never lock yourself out of what you just made
     db.messages[id] = []; save();
-    pushChannelEvent('channel_create', db.channels[id]);
-    res.json(channelView(db.channels[id]));
+    pushChannelEvent('channel_create', ch);
+    res.json(channelView(ch, req.user.id));
   }));
   function pushChannelEvent(op, ch) {
     const s = db.servers[ch.serverId];
     for (const uid of serverAudience(s)) {
-      const sees = canView(uid, ch);
-      if (op === 'channel_delete' || !sees) emitTo([uid], 'channel_delete', { serverId: s.id, channelId: ch.id });
-      else emitTo([uid], op, { channel: channelView(ch) });
+      if (op === 'channel_delete' || !listedFor(uid, ch)) emitTo([uid], 'channel_delete', { serverId: s.id, channelId: ch.id });
+      else emitTo([uid], op, { channel: channelView(ch, uid) });
     }
+  }
+  /** People who are in a voice channel they may no longer see or join are moved out of it. */
+  function revalidateVoice(s) {
+    for (const c of channelsOfServer(s.id)) {
+      const room = voice.get(c.id); if (!room) continue;
+      for (const uid of [...room.keys()]) {
+        if (c.type === 'voice' && canIn(uid, c, 'CONNECT')) continue;
+        for (const cn of conns.get(uid) || []) if (cn.voice === c.id) cn.leaveVoice?.('removed');
+      }
+    }
+  }
+  const normOverwrites = (list) => JSON.stringify([...list].map((o) => ({ type: o.type, id: o.id, allow: [...o.allow].sort(), deny: [...o.deny].sort() })).sort((a, b) => ((a.type + a.id) < (b.type + b.id) ? -1 : 1)));
+  /** You may not hand out permissions you lack, nor change the rules of roles / members at or above your own top role. */
+  function guardOverwrites(s, ch, actor, before, next) {
+    const mine = permsIn(s, actor.id, ch); const myTop = topRolePos(s, actor.id);
+    const key = (o) => `${o.type}:${o.id}`;
+    const prev = new Map(before.map((o) => [key(o), o])); const now = new Map(next.map((o) => [key(o), o]));
+    for (const k of new Set([...prev.keys(), ...now.keys()])) {
+      const a = prev.get(k); const o = now.get(k);
+      if (a && o && normOverwrites([a]) === normOverwrites([o])) continue;
+      const type = k.slice(0, k.indexOf(':')); const id = k.slice(k.indexOf(':') + 1);
+      if (type === 'role') { const role = s.roles.find((x) => x.id === id); if (role && role.id !== s.id && role.position >= myTop) throw forbidden('That role is above yours'); }
+      else if (id !== actor.id && (s.ownerId === id || topRolePos(s, id) >= myTop)) throw forbidden('That member is above you');
+      for (const p of o?.allow || []) if (!(a?.allow || []).includes(p) && !mine.has(p)) throw forbidden('You can only allow permissions you have yourself');
+    }
+  }
+  /** `{ overwrites }` replaces the list (which unsyncs a synced channel unless nothing changed); `{ synced: true }` re-adopts the category's; `{ synced: false }` detaches with a copy. */
+  function applyOverwrites(s, ch, b, actor) {
+    if (b.synced === true) {
+      if (ch.type === 'category' || !ch.parentId) throw bad('Only a channel inside a category can be synced');
+      ch.synced = true; delete ch.overwrites; return;
+    }
+    const before = overwritesOf(ch);
+    const next = b.overwrites !== undefined ? sanitizeOverwrites(s, b.overwrites) : before.map((o) => ({ ...o, allow: [...o.allow], deny: [...o.deny] }));
+    if (s.ownerId !== actor.id && !can(s, actor.id, 'ADMINISTRATOR')) guardOverwrites(s, ch, actor, before, next);
+    if (isSynced(ch) && b.synced !== false && normOverwrites(next) === normOverwrites(before)) return;
+    if (ch.type !== 'category' && ch.parentId) ch.synced = false;
+    ch.overwrites = next;
   }
   r.put('/servers/:id/channel-order', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_CHANNELS');
@@ -540,27 +580,31 @@ export function createApi() {
   r.patch('/channels/:id', h(async (req, res) => {
     const ch = getChannel(req, req.params.id); const b = req.body || {};
     if (ch.serverId) {
-      const s = db.servers[ch.serverId]; need(s, req.user.id, 'MANAGE_CHANNELS');
+      const s = db.servers[ch.serverId]; const mine = permsIn(s, req.user.id, ch);
+      const touchesPerms = b.overwrites !== undefined || b.synced !== undefined;
+      const touchesProps = ['name', 'topic', 'nsfw', 'slowmode', 'parentId'].some((k) => b[k] !== undefined);
+      if ((touchesProps || !touchesPerms) && !mine.has('MANAGE_CHANNELS')) throw forbidden();
+      if (touchesPerms && !mine.has('MANAGE_ROLES')) throw forbidden();
       if (b.name !== undefined) { let n = str(b.name, 1, 100, 'Channel name'); if (ch.type === 'text') n = n.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || ch.name; ch.name = n; }
       if (b.topic !== undefined) ch.topic = String(b.topic).slice(0, 1024);
-      if (b.private !== undefined) ch.private = !!b.private;
-      if (b.allowedRoles !== undefined) ch.allowedRoles = (Array.isArray(b.allowedRoles) ? b.allowedRoles : []).filter((rid) => s.roles.some((r) => r.id === rid));
       if (b.nsfw !== undefined) ch.nsfw = !!b.nsfw;
       if (b.slowmode !== undefined) ch.slowmode = clampInt(b.slowmode, 0, 21600, 0);
       if (b.parentId !== undefined && ch.type !== 'category') ch.parentId = b.parentId && db.channels[b.parentId]?.type === 'category' && db.channels[b.parentId].serverId === s.id ? b.parentId : null;
-      save(); pushChannelEvent('channel_update', ch);
+      if (touchesPerms) applyOverwrites(s, ch, b, req.user);
+      save();
+      if (touchesPerms || b.parentId !== undefined) { pushServerUpdate(s); revalidateVoice(s); } else pushChannelEvent('channel_update', ch);   // who can see what may have changed for everybody
     } else {
       if (ch.type !== 'group') throw bad('Only group chats can be edited');
       if (b.name !== undefined) ch.name = String(b.name).trim().slice(0, 100) || null;
       if (b.icon !== undefined) { const v = uploadRef(b.icon); if (v === undefined) throw bad('Invalid icon'); ch.icon = v || undefined; }
       save(); emitTo(ch.recipients, 'dm_update', { channel: channelView(ch) });
     }
-    res.json(channelView(ch));
+    res.json(channelView(ch, req.user.id));
   }));
   r.delete('/channels/:id', h(async (req, res) => {
     const ch = getChannel(req, req.params.id);
     if (ch.serverId) {
-      const s = db.servers[ch.serverId]; need(s, req.user.id, 'MANAGE_CHANNELS');
+      const s = db.servers[ch.serverId]; needIn(req.user.id, ch, 'MANAGE_CHANNELS');
       if (channelsOfServer(s.id).filter((c) => c.type === 'text').length <= 1 && ch.type === 'text') throw bad('A server needs at least one text channel');
       if (ch.type === 'category') for (const c of channelsOfServer(s.id)) if (c.parentId === ch.id) c.parentId = null;
       delete db.channels[ch.id]; delete db.messages[ch.id]; voice.delete(ch.id);
@@ -688,7 +732,7 @@ export function createApi() {
     if (s.ownerId !== req.user.id && role.position >= topRolePos(s, req.user.id)) throw forbidden('That role is above yours');
     s.roles = s.roles.filter((r) => r.id !== role.id);
     for (const m of Object.values(s.members)) m.roles = m.roles.filter((x) => x !== role.id);
-    for (const c of channelsOfServer(s.id)) c.allowedRoles = (c.allowedRoles || []).filter((x) => x !== role.id);
+    for (const c of channelsOfServer(s.id)) if (c.overwrites) c.overwrites = c.overwrites.filter((o) => !(o.type === 'role' && o.id === role.id));
     save(); pushServerUpdate(s); res.json({ ok: true });
   }));
   const memberRole = (add) => h(async (req, res) => {
@@ -770,19 +814,19 @@ export function createApi() {
     if (ch.type === 'voice' && !ch.serverId) throw bad('Cannot post here');
     if (ch.type === 'category') throw bad('Cannot post to a category');
     const server = ch.serverId ? db.servers[ch.serverId] : null;
-    if (server) need(server, req.user.id, 'SEND_MESSAGES');
+    if (server) needIn(req.user.id, ch, 'SEND_MESSAGES');
     if (!server && ch.type === 'dm') {
       const other = db.users[ch.recipients.find((id) => id !== req.user.id)];
       if (other?.rel?.[req.user.id] === 'blocked' || req.user.rel?.[other?.id] === 'blocked') throw forbidden('You can’t send messages to this user');
     }
     const b = req.body || {};
-    if (server && ch.slowmode && !can(server, req.user.id, 'MANAGE_MESSAGES')) {
+    if (server && ch.slowmode && !canIn(req.user.id, ch, 'MANAGE_MESSAGES')) {
       const last = [...(db.messages[ch.id] || [])].reverse().find((m) => m.authorId === req.user.id);
       if (last && Date.now() - last.createdAt < ch.slowmode * 1000) throw new ApiError(429, `Slowmode is on — wait ${Math.ceil((ch.slowmode * 1000 - (Date.now() - last.createdAt)) / 1000)}s`, 'slowmode');
     }
     await Promise.all((Array.isArray(b.attachments) ? b.attachments.slice(0, 10) : []).map((a) => restoreUpload(path.basename(String(a?.url || '')))));   // after a restart the file may only be in the database
     let attachments = sanitizeAttachments(b.attachments, fs, path, UPLOAD_DIR);
-    if (server && attachments.length && !can(server, req.user.id, 'ATTACH_FILES')) attachments = [];
+    if (server && attachments.length && !canIn(req.user.id, ch, 'ATTACH_FILES')) attachments = [];
     const gif = sanitizeMedia(b.gif, 'gif'); const sticker = sanitizeMedia(b.sticker, 'sticker');
     const content = typeof b.content === 'string' ? b.content : '';
     if (!content.trim() && !attachments.length && !gif && !sticker) throw bad('Cannot send an empty message');
@@ -807,14 +851,14 @@ export function createApi() {
   r.delete('/channels/:id/messages/:mid', h(async (req, res) => {
     const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid);
     const s = ch.serverId && db.servers[ch.serverId];
-    if (m.authorId !== req.user.id && !(s && can(s, req.user.id, 'MANAGE_MESSAGES'))) throw forbidden();
+    if (m.authorId !== req.user.id && !(s && canIn(req.user.id, ch, 'MANAGE_MESSAGES'))) throw forbidden();
     db.messages[ch.id] = db.messages[ch.id].filter((x) => x.id !== m.id); save();
     emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: m.id });
     res.json({ ok: true });
   }));
   r.post('/channels/:id/messages/bulk-delete', h(async (req, res) => {
     const ch = getChannel(req, req.params.id); const s = ch.serverId && db.servers[ch.serverId];
-    if (!s) throw forbidden(); need(s, req.user.id, 'MANAGE_MESSAGES');
+    if (!s) throw forbidden(); needIn(req.user.id, ch, 'MANAGE_MESSAGES');
     const ids = new Set((Array.isArray((req.body || {}).ids) ? req.body.ids : []).slice(0, 100).map(String));
     db.messages[ch.id] = (db.messages[ch.id] || []).filter((x) => !ids.has(x.id)); save();
     for (const id of ids) emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: id });
@@ -823,7 +867,7 @@ export function createApi() {
 
   const reaction = (add) => h(async (req, res) => {
     const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid);
-    const s = ch.serverId && db.servers[ch.serverId]; if (s) need(s, req.user.id, 'ADD_REACTIONS');
+    const s = ch.serverId && db.servers[ch.serverId]; if (s) needIn(req.user.id, ch, 'ADD_REACTIONS');
     const emoji = decodeURIComponent(req.params.emoji); if (!emoji || emoji.length > 40 || /[<>]/.test(emoji)) throw bad('Invalid emoji');
     m.reactions ||= {};
     const arr = m.reactions[emoji] || [];
@@ -842,7 +886,7 @@ export function createApi() {
   r.delete('/channels/:id/messages/:mid/reactions/:emoji/@me', reaction(false));
   r.delete('/channels/:id/messages/:mid/reactions', h(async (req, res) => {
     const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid); const s = ch.serverId && db.servers[ch.serverId];
-    if (!s) throw forbidden(); need(s, req.user.id, 'MANAGE_MESSAGES');
+    if (!s) throw forbidden(); needIn(req.user.id, ch, 'MANAGE_MESSAGES');
     m.reactions = {}; save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) }); res.json({ ok: true });
   }));
 
@@ -853,7 +897,7 @@ export function createApi() {
   }));
   const pin = (on) => h(async (req, res) => {
     const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid); const s = ch.serverId && db.servers[ch.serverId];
-    if (s) need(s, req.user.id, 'MANAGE_MESSAGES');
+    if (s) needIn(req.user.id, ch, 'MANAGE_MESSAGES');
     if (on && (db.messages[ch.id] || []).filter((x) => x.pinned).length >= 50) throw bad('This channel has reached the pin limit (50)');
     if (!!m.pinned === on) return res.json({ ok: true });
     m.pinned = on; save();

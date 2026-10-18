@@ -1,6 +1,6 @@
 // Orate — message composer: attachments, drag & drop, paste, autocomplete (@ # :), slash commands, replies, pickers.
 import { html, useState, useEffect, useRef, useLayoutEffect, useMemo, cx, fileSize, uid, isImageType, throttle } from '/js/lib.js';
-import { state, set, useSel, getChannel, dmName, dmUserId, toast, hasPerm, openContext, closePopover, openPopover, getUser } from '/js/store.js';
+import { state, set, useSel, getChannel, dmName, dmUserId, toast, hasChannelPerm, openContext, closePopover, openPopover, getUser } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, IconBtn, Spinner } from '/js/ui.js';
 import { sendMessage, sendTyping, act, getEntry } from '/js/actions.js';
@@ -49,7 +49,7 @@ export function Composer({ chId }) {
   const replyTo = useSel((s) => (s.replyTo?.channelId === chId ? s.replyTo.id : null));
   const replyMsg = useSel((s) => (s.replyTo?.channelId === chId ? s.msgs[chId]?.list.find((m) => m.id === s.replyTo.id) : null));
   const replyName = useSel((s) => { const m = s.msgs[chId]?.list.find((x) => x.id === s.replyTo?.id); return m ? ((ch?.serverId && s.servers[ch.serverId]?.members.find((x) => x.id === m.authorId)?.nick) || s.users[m.authorId]?.displayName) : ''; });
-  const perms = useSel((s) => (ch?.serverId ? s.servers[ch.serverId]?.perms?.join() : ''));
+  const perms = useSel((s) => (ch?.serverId ? (getChannel(chId)?.cperms || s.servers[ch.serverId]?.perms)?.join() : ''));
   const blockedBy = useSel((s) => { const o = ch?.type === 'dm' ? dmUserId(ch) : null; return o ? s.relationships[o] === 'blocked' : false; });
   const dropdownRef = useRef(null);
   const [text, setText] = useState(() => drafts.get(chId) || '');
@@ -60,8 +60,8 @@ export function Composer({ chId }) {
   const [ping, setPing] = useState(true);
   const ta = useRef(null); const file = useRef(null); const dragDepth = useRef(0);
   const server = ch?.serverId ? state.servers[ch.serverId] : null;
-  const canSend = !server || hasPerm(server.id, 'SEND_MESSAGES');
-  const canAttach = !server || hasPerm(server.id, 'ATTACH_FILES');
+  const canSend = !server || hasChannelPerm(ch, 'SEND_MESSAGES');
+  const canAttach = !server || hasChannelPerm(ch, 'ATTACH_FILES');
 
   // swap drafts when the channel changes
   useEffect(() => { setText(drafts.get(chId) || ''); setAtts([]); setMedia(null); setAc(null); setPing(true); if (matchMedia('(pointer:fine)').matches) setTimeout(() => ta.current?.focus(), 30); }, [chId]);
@@ -145,7 +145,7 @@ export function Composer({ chId }) {
       items = people.slice(0, 7);
       if (server) {
         const roles = server.roles.filter((r) => r.id !== server.id && r.name.toLowerCase().includes(q)).slice(0, 3).map((r) => ({ type: 'role', id: r.id, label: r.name, sub: 'Role', color: r.color, insert: '@' + r.name + ' ' }));
-        const evr = ['everyone', 'here'].filter((x) => x.startsWith(q) && hasPerm(server.id, 'MENTION_EVERYONE')).map((x) => ({ type: 'special', id: x, label: '@' + x, sub: x === 'everyone' ? 'Notify everyone' : 'Notify online members', insert: '@' + x + ' ' }));
+        const evr = ['everyone', 'here'].filter((x) => x.startsWith(q) && hasChannelPerm(ch, 'MENTION_EVERYONE')).map((x) => ({ type: 'special', id: x, label: '@' + x, sub: x === 'everyone' ? 'Notify everyone' : 'Notify online members', insert: '@' + x + ' ' }));
         items = [...items, ...roles, ...evr].slice(0, 9);
       }
     } else if (trig.kind === '#' && server) {

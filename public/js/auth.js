@@ -2,7 +2,8 @@
 import { html, useState, useEffect, useRef, cx, debounce, ls } from '/js/lib.js';
 import { state, set, useSel, toast } from '/js/store.js';
 import { api, gateway } from '/js/api.js';
-import { login, register, confirmRegistration, resendRegistrationCode, logout } from '/js/events.js';
+import { login, register, confirmRegistration, resendRegistrationCode, logout, cancelAddAccount, switchAccount } from '/js/events.js';
+import { Avatar } from '/js/ui.js';
 import { Icon, Logo } from '/js/icons.js';
 import { Btn, Field, TextInput, Spinner } from '/js/ui.js';
 import { t } from '/js/i18n.js';
@@ -140,6 +141,7 @@ export function AuthScreen() {
   const go = (v) => { setDir(v === 'register' ? 1 : -1); setPending(null); history.replaceState({}, '', '/' + v); set({ route: { ...state.route, view: v } }); };
   useEffect(() => { if (state.route.view !== 'login' && state.route.view !== 'register') go('login'); }, []);
   const invite = state.route.param || ls('pendingInvite', null);
+  const accounts = useSel((s) => s.accounts); const adding = useSel((s) => !!s.addingFrom);
   return html`<div class="auth-screen">
     <div class="auth-orb o1"></div><div class="auth-orb o2"></div><div class="auth-orb o3"></div>
     <div class=${cx('auth-col', view)}>
@@ -149,11 +151,13 @@ export function AuthScreen() {
     </div>
     <div class="auth-card panel">
       <div class="auth-card-in" key=${view} data-dir=${dir}>
+        ${adding ? html`<button type="button" class="link-btn auth-back" onClick=${cancelAddAccount}><${Icon} name="arrow-left" size=${15} /> ${t('Back to my account')}</button>` : null}
         <header>
           <h2>${view === 'login' ? t('Welcome back!') : pending ? t('Check your email') : t('Create an account')}</h2>
           <p>${view === 'login' ? t("We're so excited to see you again!") : pending ? html`${t('We sent a 6-digit code to')} <b>${pending.email}</b>` : t('Join the conversation — it takes less than a minute.')}</p>
           ${invite && !pending ? html`<div class="invite-note"><${Icon} name="link" size=${15} /> You’ve been invited to join a server. ${view === 'login' ? 'Log in' : 'Sign up'} to accept.</div>` : null}
         </header>
+        ${view === 'login' && accounts.length && !pending ? html`<div class="saved-accts"><small>${t('Signed in on this device')}</small>${accounts.map((a) => html`<button type="button" class="saved-acct" key=${a.id} onClick=${() => switchAccount(a.id)}><${Avatar} user=${a} size=${30} /><span><b>${a.displayName}</b><small>@${a.username}</small></span><${Icon} name="chevron-right" size=${16} /></button>`)}</div>` : null}
         ${view === 'login' ? html`<${LoginForm} go=${go} />` : html`
           <div style=${pending ? 'display:none' : ''}><${RegisterForm} go=${go} onPending=${setPending} /></div>
           ${pending ? html`<${CodeForm} key=${pending.ticket} pending=${pending} onBack=${() => setPending(null)} />` : null}`}

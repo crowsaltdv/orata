@@ -69,6 +69,8 @@ export class PgStore {
     }
     await this.q('CREATE TABLE IF NOT EXISTS orate_state (id integer PRIMARY KEY, version bigint NOT NULL, data bytea NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())');
     await this.q('CREATE TABLE IF NOT EXISTS orate_files (name text PRIMARY KEY, type text NOT NULL, size integer NOT NULL, data bytea NOT NULL, created_at timestamptz NOT NULL DEFAULT now())');
+    await this.q('CREATE TABLE IF NOT EXISTS orate_sessions (hash text PRIMARY KEY, user_id text NOT NULL, created_at bigint NOT NULL, last_used bigint NOT NULL, ua text NOT NULL DEFAULT \'\')');
+    await this.q('CREATE INDEX IF NOT EXISTS orate_sessions_user ON orate_sessions (user_id)');
     const used = await this.q('SELECT COALESCE(SUM(size), 0) AS n FROM orate_files');
     this.filesUsed = Number(used.rows[0].n);
   }
@@ -121,6 +123,22 @@ export class PgStore {
   async peekVersion() {
     const r = await this.q('SELECT version FROM orate_state WHERE id = 1');
     return r.rows.length ? Number(r.rows[0].version) : 0;
+  }
+
+  /* ---- sign-in sessions (their own table, so they never depend on the state row's version — see sessions.js) ---- */
+  async putSession(hash, s) {
+    await this.q('INSERT INTO orate_sessions (hash, user_id, created_at, last_used, ua) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (hash) DO NOTHING', [hash, s.userId, s.createdAt, s.lastUsed, s.ua || '']);
+  }
+  async getSession(hash) {
+    const r = await this.q('SELECT user_id, created_at, last_used, ua FROM orate_sessions WHERE hash = $1', [hash]);
+    return r.rows.length ? { userId: r.rows[0].user_id, createdAt: Number(r.rows[0].created_at), lastUsed: Number(r.rows[0].last_used), ua: r.rows[0].ua } : null;
+  }
+  async touchSession(hash, ts) { await this.q('UPDATE orate_sessions SET last_used = $2 WHERE hash = $1', [hash, ts]); }
+  async deleteSession(hash) { await this.q('DELETE FROM orate_sessions WHERE hash = $1', [hash]); }
+  async deleteUserSessions(userId, exceptHash) { await this.q('DELETE FROM orate_sessions WHERE user_id = $1 AND ($2::text IS NULL OR hash <> $2)', [userId, exceptHash]); }
+  async listSessions(userId) {
+    const r = await this.q('SELECT hash, created_at, last_used, ua FROM orate_sessions WHERE user_id = $1', [userId]);
+    return r.rows.map((x) => ({ hash: x.hash, userId, createdAt: Number(x.created_at), lastUsed: Number(x.last_used), ua: x.ua }));
   }
 
   /* ---- uploaded files ---- */

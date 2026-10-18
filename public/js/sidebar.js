@@ -1,6 +1,6 @@
 // Orate — left sidebar: DM list (home) and channel list (server).
 import { html, useState, useMemo, cx, memo, useRef } from '/js/lib.js';
-import { state, useSel, go, goDm, goChannel, openModal, openContext, openPopover, updateSettings, unreadInfo, hasPerm, getChannel, dmName, dmUserId, toast, isMuted } from '/js/store.js';
+import { state, useSel, go, goDm, goChannel, openModal, openContext, openPopover, updateSettings, unreadInfo, hasPerm, hasChannelPerm, getChannel, dmName, dmUserId, toast, isMuted } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, Badge, StatusDot, ServerIcon, confirmDialog, POPOVERS } from '/js/ui.js';
 import { ackChannel, markServerRead, openSettings, act, openDm } from '/js/actions.js';
@@ -71,11 +71,12 @@ export function DmSidebar() {
 /* ------------------------------------------------------------------ channel list */
 export function channelMenu(ch) {
   const server = state.servers[ch.serverId]; const muted = !!state.settings.mutedChannels[ch.id];
-  const canManage = hasPerm(ch.serverId, 'MANAGE_CHANNELS');
+  const canManage = hasChannelPerm(ch, 'MANAGE_CHANNELS'); const canPerms = Array.isArray(ch.overwrites);
   if (ch.type === 'category') return [
     { label: state.settings.collapsed[ch.id] ? t('Expand Category') : t('Collapse Category'), icon: 'chevron-down', onClick: () => updateSettings({ collapsed: { [ch.id]: !state.settings.collapsed[ch.id] } }) },
     canManage && { label: t('Create Channel'), icon: 'plus', onClick: () => openModal('create-channel', { serverId: ch.serverId, parentId: ch.id }) },
-    canManage && { label: t('Edit Category'), icon: 'edit', onClick: () => openModal('edit-channel', { channelId: ch.id }) },
+    (canManage || canPerms) && { label: t('Edit Category'), icon: 'edit', onClick: () => openModal('edit-channel', { channelId: ch.id }) },
+    canPerms && { label: t('Edit Permissions'), icon: 'shield', onClick: () => openModal('edit-channel', { channelId: ch.id, tab: 'permissions' }) },
     canManage && { label: t('Delete Category'), icon: 'trash', danger: true, onClick: () => deleteChannel(ch) },
   ];
   return [
@@ -83,9 +84,10 @@ export function channelMenu(ch) {
     ch.type === 'voice' && { label: t('Join Voice'), icon: 'volume', onClick: () => { voice.join(ch.id); goChannel(ch.serverId, ch.id); } },
     { label: muted ? t('Unmute Channel') : t('Mute Channel'), icon: muted ? 'bell' : 'bell-off', onClick: () => updateSettings({ mutedChannels: { [ch.id]: !muted } }) },
     { label: t('Copy Link'), icon: 'link', onClick: async () => { await copyText(`${location.origin}/channels/${ch.serverId}/${ch.id}`); toast('Link copied', 'success', 1500); } },
-    hasPerm(ch.serverId, 'CREATE_INVITE') && { label: t('Invite People'), icon: 'user-plus', onClick: () => openModal('invite', { serverId: ch.serverId }) },
-    canManage && { type: 'sep' },
-    canManage && { label: t('Edit Channel'), icon: 'settings', onClick: () => openModal('edit-channel', { channelId: ch.id }) },
+    hasChannelPerm(ch, 'CREATE_INVITE') && { label: t('Invite People'), icon: 'user-plus', onClick: () => openModal('invite', { serverId: ch.serverId }) },
+    (canManage || canPerms) && { type: 'sep' },
+    (canManage || canPerms) && { label: t('Edit Channel'), icon: 'settings', onClick: () => openModal('edit-channel', { channelId: ch.id }) },
+    canPerms && { label: t('Edit Permissions'), icon: 'shield', onClick: () => openModal('edit-channel', { channelId: ch.id, tab: 'permissions' }) },
     canManage && { label: t('Delete Channel'), icon: 'trash', danger: true, onClick: () => deleteChannel(ch) },
     state.settings.advanced.devMode && { label: t('Copy Channel ID'), icon: 'copy', onClick: () => copyText(ch.id) },
     void server,
@@ -119,8 +121,8 @@ const ChannelItem = memo(function ChannelItem({ ch, active, serverId }) {
       <span class="ch-name">${ch.name}</span>
       ${Number(mentions) ? html`<${Badge} n=${Number(mentions)} />` : null}
       <span class="ch-actions">
-        ${hasPerm(serverId, 'CREATE_INVITE') ? html`<span data-tip="Create Invite" onClick=${(e) => { e.stopPropagation(); openModal('invite', { serverId, channelId: ch.id }); }}><${Icon} name="user-plus" size=${15} /></span>` : null}
-        ${hasPerm(serverId, 'MANAGE_CHANNELS') ? html`<span data-tip="Edit Channel" onClick=${(e) => { e.stopPropagation(); openModal('edit-channel', { channelId: ch.id }); }}><${Icon} name="settings" size=${15} /></span>` : null}
+        ${hasChannelPerm(ch, 'CREATE_INVITE') ? html`<span data-tip="Create Invite" onClick=${(e) => { e.stopPropagation(); openModal('invite', { serverId, channelId: ch.id }); }}><${Icon} name="user-plus" size=${15} /></span>` : null}
+        ${hasChannelPerm(ch, 'MANAGE_CHANNELS') || Array.isArray(ch.overwrites) ? html`<span data-tip="Edit Channel" onClick=${(e) => { e.stopPropagation(); openModal('edit-channel', { channelId: ch.id }); }}><${Icon} name="settings" size=${15} /></span>` : null}
       </span>
     </div>
     ${isVoice ? html`<${VoiceUsers} channelId=${ch.id} serverId=${serverId} />` : null}
@@ -152,7 +154,7 @@ export function ChannelSidebar() {
       ${groups.map(({ cat, items }) => html`<div key=${cat?.id || 'loose'}>
         ${cat ? html`<div class=${cx('cat-head', collapsed[cat.id] && 'collapsed')} role="button" tabindex="0" onClick=${() => updateSettings({ collapsed: { [cat.id]: !collapsed[cat.id] } }, { sync: false })} onContextMenu=${(e) => openContext(e, channelMenu(cat))}>
           <${Icon} name="chevron-down" size=${13} sw=${3} /><span>${cat.name}</span>
-          ${hasPerm(server.id, 'MANAGE_CHANNELS') ? html`<span class="cat-add" data-tip="Create Channel" onClick=${(e) => { e.stopPropagation(); openModal('create-channel', { serverId: server.id, parentId: cat.id }); }}><${Icon} name="plus" size=${16} sw=${2.4} /></span>` : null}</div>` : null}
+          ${hasChannelPerm(cat, 'MANAGE_CHANNELS') ? html`<span class="cat-add" data-tip="Create Channel" onClick=${(e) => { e.stopPropagation(); openModal('create-channel', { serverId: server.id, parentId: cat.id }); }}><${Icon} name="plus" size=${16} sw=${2.4} /></span>` : null}</div>` : null}
         <div class=${cx('ch-list', cat && collapsed[cat.id] && 'collapsed')}><div>${items.map((c) => html`<${ChannelItem} key=${c.id} ch=${c} active=${chId === c.id} serverId=${server.id} />`)}</div></div>
       </div>`)}
       ${!server.channels.length ? html`<div class="empty small"><p>No channels yet.</p></div>` : null}

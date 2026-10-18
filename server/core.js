@@ -84,6 +84,7 @@ if (pg) {
   }, 30_000).unref();
 }
 process.on('exit', () => { if (!pg) flush(); });
+migrateDb();
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {   // flush, then leave (at most ~8 s for a slow database)
   const bye = setTimeout(() => process.exit(0), 8000); bye.unref();
   Promise.resolve(flush()).catch(() => {}).finally(() => process.exit(0));
@@ -148,8 +149,11 @@ export function emitTo(userIds, op, d, exceptConn) {
 }
 
 /* -------------------------------------------------------- permissions */
-export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES'];
-export const DEFAULT_PERMS = ['CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
+export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES', 'VIEW_CHANNEL'];
+export const DEFAULT_PERMS = ['VIEW_CHANNEL', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
+/** The permissions a channel (or category) can override per role / member — MANAGE_ROLES doubles as "Manage Permissions" there. */
+export const CHANNEL_PERMS = ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK'];
+const CHANNEL_PERM_SET = new Set(CHANNEL_PERMS);
 
 export function memberOf(server, userId) { return server?.members?.[userId] || null; }
 export function permsOf(server, userId) {
@@ -170,15 +174,83 @@ export function topRolePos(server, userId) {
   return Math.max(0, ...m.roles.map((rid) => server.roles.find((r) => r.id === rid)?.position || 0));
 }
 
+/* ---- channel permission overwrites (Discord's model) ----
+ * A channel or category holds `overwrites: [{ type: 'role' | 'member', id, allow: [perm], deny: [perm] }]`.
+ * A channel inside a category is *synced* unless `synced === false`: it then uses its category's overwrites as they are, so editing
+ * the category updates every synced channel, and "unsyncing" copies them into the channel so it can diverge. */
+export const isSynced = (ch) => !!ch && ch.type !== 'category' && !!ch.parentId && ch.synced !== false && !!db.channels[ch.parentId];
+export function overwritesOf(ch) {
+  if (!ch) return [];
+  if (isSynced(ch)) return db.channels[ch.parentId].overwrites || [];
+  return ch.overwrites || [];
+}
+/** What a member may do in one channel: server permissions, then @everyone's overwrite, then the member's roles' overwrites, then their own. */
+export function permsIn(server, userId, ch) {
+  const base = permsOf(server, userId);
+  if (!ch || !server.members[userId] || base.has('ADMINISTRATOR')) return base;   // owners and administrators see and may do everything
+  const ows = overwritesOf(ch);
+  const out = new Set(base);
+  if (ows.length) {
+    const apply = (allow, deny) => { for (const p of deny) out.delete(p); for (const p of allow) out.add(p); };
+    const ev = ows.find((o) => o.type === 'role' && o.id === server.id); if (ev) apply(ev.allow, ev.deny);
+    const allow = new Set(); const deny = new Set(); const roles = server.members[userId].roles;
+    for (const o of ows) if (o.type === 'role' && o.id !== server.id && roles.includes(o.id)) { for (const p of o.allow) allow.add(p); for (const p of o.deny) deny.add(p); }
+    apply(allow, deny);
+    const mo = ows.find((o) => o.type === 'member' && o.id === userId); if (mo) apply(mo.allow, mo.deny);
+  }
+  return out.has('VIEW_CHANNEL') ? out : new Set();   // a channel you cannot see grants nothing
+}
+export function canIn(userId, ch, perm) {
+  const server = ch?.serverId && db.servers[ch.serverId];
+  return !!server && permsIn(server, userId, ch).has(perm);
+}
+export function needIn(userId, ch, perm) { if (!canIn(userId, ch, perm)) throw forbidden(); }
 export function canView(userId, ch) {
   if (!ch) return false;
   if (!ch.serverId) return (ch.recipients || []).includes(userId);
   const server = db.servers[ch.serverId];
   if (!server || !server.members[userId]) return false;
-  if (!ch.private) return true;
-  if (can(server, userId, 'ADMINISTRATOR')) return true;
-  const roles = server.members[userId].roles;
-  return (ch.allowedRoles || []).some((r) => roles.includes(r)) || (ch.allowedUsers || []).includes(userId);
+  return permsIn(server, userId, ch).has('VIEW_CHANNEL');
+}
+/** In the channel list a category is shown when you can see it or any channel inside it. */
+export function listedFor(userId, ch) {
+  if (canView(userId, ch)) return true;
+  return ch.type === 'category' && Object.values(db.channels).some((c) => c.parentId === ch.id && canView(userId, c));
+}
+/** Validates overwrites coming from a client: known roles / members, known permissions, no duplicates. */
+export function sanitizeOverwrites(server, list) {
+  const out = []; const seen = new Set();
+  for (const o of Array.isArray(list) ? list : []) {
+    const type = o?.type === 'member' ? 'member' : o?.type === 'role' ? 'role' : null; const id = String(o?.id ?? '');
+    if (!type || seen.has(type + id)) continue;
+    if (type === 'role' ? !server.roles.some((r) => r.id === id) : !server.members[id]) continue;
+    const pick = (a) => [...new Set((Array.isArray(a) ? a : []).filter((p) => CHANNEL_PERM_SET.has(p)))];
+    const allow = pick(o.allow); const deny = pick(o.deny).filter((p) => !allow.includes(p));
+    seen.add(type + id); out.push({ type, id, allow, deny });
+    if (out.length >= 100) break;
+  }
+  return out;
+}
+/** Brings an old database up to date: VIEW_CHANNEL on @everyone, and the old "private channel" lists turned into overwrites. */
+function migrateDb() {
+  let changed = false;
+  for (const s of Object.values(db.servers)) {
+    if (s.permsV === 2) continue;
+    const ev = s.roles.find((r) => r.id === s.id);
+    if (ev && !ev.permissions.includes('VIEW_CHANNEL')) ev.permissions.push('VIEW_CHANNEL');
+    s.permsV = 2; changed = true;
+  }
+  for (const c of Object.values(db.channels)) {
+    if (!c.serverId || !('private' in c || 'allowedRoles' in c || 'allowedUsers' in c)) continue;
+    if (c.private) {
+      c.overwrites = [{ type: 'role', id: c.serverId, allow: [], deny: ['VIEW_CHANNEL'] },
+        ...(c.allowedRoles || []).map((id) => ({ type: 'role', id, allow: ['VIEW_CHANNEL'], deny: [] })),
+        ...(c.allowedUsers || []).map((id) => ({ type: 'member', id, allow: ['VIEW_CHANNEL'], deny: [] }))];
+      if (c.parentId) c.synced = false;
+    }
+    delete c.private; delete c.allowedRoles; delete c.allowedUsers; changed = true;
+  }
+  if (changed) save();
 }
 export function audienceOf(ch) {
   if (!ch.serverId) return ch.recipients || [];
@@ -208,17 +280,23 @@ export function relatedUserIds(userId) {
 }
 export function broadcastPresence(userId) {
   const u = db.users[userId]; if (!u) return;
-  emitTo(relatedUserIds(userId), 'presence_update', { userId, status: effectiveStatus(u), customStatus: u.customStatus || null });
+  emitTo(relatedUserIds(userId), 'presence_update', { userId, status: effectiveStatus(u), customStatus: u.customStatus || null, listening: visibleListening(u) });
 }
 
 /* --------------------------------------------------------- serializers */
+/** What other people may see of the track someone is playing: nothing if they turned off Activity Status, are invisible, or it must have ended. */
+export function visibleListening(u) {
+  const l = u?.listening;
+  if (!l || l.endsAt < Date.now() || u.status === 'invisible' || u.settings?.privacy?.showActivity === false) return null;
+  return l;
+}
 export function publicUser(u) {
   if (!u) return null;
   return {
     id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar || null,
     banner: u.banner || null, bannerColor: u.bannerColor || null, accentColor: u.accentColor || null,
     bio: u.bio || '', pronouns: u.pronouns || '', createdAt: u.createdAt,
-    bot: !!u.bot, status: effectiveStatus(u), customStatus: u.customStatus || null,
+    bot: !!u.bot, status: effectiveStatus(u), customStatus: u.customStatus || null, listening: visibleListening(u),
   };
 }
 export function selfUser(u) {
@@ -226,7 +304,7 @@ export function selfUser(u) {
 }
 
 export function serverView(server, userId) {
-  const chans = channelsOfServer(server.id).filter((c) => canView(userId, c)).map(channelView).sort((a, b) => a.position - b.position);
+  const chans = channelsOfServer(server.id).filter((c) => listedFor(userId, c)).map((c) => channelView(c, userId)).sort((a, b) => a.position - b.position);
   return {
     id: server.id, name: server.name, icon: server.icon || null, banner: server.banner || null,
     description: server.description || '', ownerId: server.ownerId, createdAt: server.createdAt,
@@ -235,13 +313,26 @@ export function serverView(server, userId) {
     perms: [...permsOf(server, userId)], systemChannelId: server.systemChannelId || null,
   };
 }
-export function channelView(c) {
-  return {
+/** `userId` adds what that member may do here (`cperms`, only when overwrites make it differ from their server-wide permissions) and, for people who can manage permissions, the overwrites themselves. */
+export function channelView(c, userId) {
+  const v = {
     id: c.id, serverId: c.serverId || null, type: c.type, name: c.name || null, topic: c.topic || '',
-    parentId: c.parentId || null, position: c.position || 0, private: !!c.private,
-    allowedRoles: c.allowedRoles || [], recipients: c.recipients || undefined, ownerId: c.ownerId || undefined,
+    parentId: c.parentId || null, position: c.position || 0,
+    recipients: c.recipients || undefined, ownerId: c.ownerId || undefined,
     icon: c.icon || undefined, lastMessageId: lastMessageId(c.id), nsfw: !!c.nsfw, slowmode: c.slowmode || 0,
   };
+  if (c.serverId) {
+    const ows = overwritesOf(c);
+    v.private = ows.some((o) => o.type === 'role' && o.id === c.serverId && o.deny.includes('VIEW_CHANNEL'));
+    if (c.type !== 'category' && c.parentId) v.synced = isSynced(c);
+    const server = db.servers[c.serverId];
+    if (userId && server) {
+      const p = permsIn(server, userId, c);
+      if (ows.length) v.cperms = [...p];
+      if (p.has('MANAGE_ROLES')) v.overwrites = ows;
+    }
+  }
+  return v;
 }
 export function lastMessageId(channelId) { const a = db.messages[channelId]; return a?.length ? a[a.length - 1].id : null; }
 

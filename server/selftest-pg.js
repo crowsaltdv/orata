@@ -7,6 +7,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,7 +31,7 @@ const sock = new PGLiteSocketServer({ db: pgdb, port: PGPORT, host: '127.0.0.1',
 await sock.start();
 const DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${PGPORT}/postgres`;
 const sql = async (text, params) => { const c = new Client({ connectionString: DATABASE_URL }); await c.connect(); try { return await c.query(text, params); } finally { await c.end(); } };
-const resetDb = async () => { await sql('DROP TABLE IF EXISTS orate_state'); await sql('DROP TABLE IF EXISTS orate_files'); };
+const resetDb = async () => { await sql('DROP TABLE IF EXISTS orate_state'); await sql('DROP TABLE IF EXISTS orate_files'); await sql('DROP TABLE IF EXISTS orate_sessions'); };
 const readState = async () => { const r = await sql('SELECT version, data FROM orate_state WHERE id = 1'); return r.rows[0] ? { version: Number(r.rows[0].version), db: JSON.parse(zlib.gunzipSync(r.rows[0].data).toString()) } : null; };
 
 /* ---------------------------------------------------------------- scratch Orate servers */
@@ -108,6 +109,24 @@ async function main() {
     r = await s3.api('POST', `/channels/${ch.id}/messages`, alice3, { content: 'with a file', attachments: [{ url: second, name: 'second.png', type: 'image/png' }] });
     ok(r.status === 200 && r.body.attachments?.length === 1 && r.body.attachments[0].size === PNG.length, 'attaching a file that is only in the database works (restored first)');
     s3.stop(); await until(() => s3.exited !== null);
+
+    /* ---------- sessions ---------- */
+    console.log('\nSessions are saved on their own, before the login answers');
+    const s3b = await boot({ DATABASE_SAVE_DELAY_MS: '60000' });   // the big state row would not be written for a minute…
+    r = await s3b.api('POST', '/auth/login', null, { login: 'alice', password: 'hunter2hunter2' }); const aliceB = r.body.token;
+    ok(r.status === 200 && !!aliceB, 'login works');
+    const sessRows = (await sql('SELECT hash, user_id, ua FROM orate_sessions')).rows;
+    ok(sessRows.length >= 1 && !('ip' in sessRows[0]), 'the session is already in its own table (no IP column)');
+    s3b.child.kill(); await until(() => s3b.exited !== null);   // …and the process dies without flushing anything
+    const s3c = await boot();
+    r = await s3c.api('GET', '/me', aliceB);
+    ok(r.status === 200 && r.body.username === 'alice', 'the login still works after a crash, an update or a lost write race');
+    r = await s3c.api('GET', '/me/sessions', aliceB);
+    ok(r.status === 200 && r.body.some((x) => x.current) && r.body.every((x) => !('ip' in x)), 'the session list reads from the table');
+    r = await s3c.api('POST', '/auth/logout', aliceB); r = await s3c.api('GET', '/me', aliceB);
+    ok(r.status === 401, 'logging out ends it');
+    ok((await sql('SELECT count(*)::int AS n FROM orate_sessions WHERE hash = $1', [crypto.createHash('sha256').update(aliceB).digest('hex')])).rows[0].n === 0, '…from the table too');
+    s3c.stop(); await until(() => s3c.exited !== null);
 
     /* ---------- storage limit ---------- */
     console.log('\nStorage limit');

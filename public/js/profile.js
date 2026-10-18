@@ -7,6 +7,7 @@ import { api } from '/js/api.js';
 import { act, openDm } from '/js/actions.js';
 import { renderMarkdown } from '/js/markdown.js';
 import { t } from '/js/i18n.js';
+import { ListeningCard, myListening } from '/js/music.js';
 
 const cache = new Map();
 function useProfile(userId) {
@@ -65,6 +66,8 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
   const self = userId === me.id; const nick = member?.nick;
   const roles = member && server ? server.roles.filter((r) => member.roles.includes(r.id)).sort((a, b) => b.position - a.position) : [];
   const cs = user.customStatus;
+  const playingNow = useSel((s) => (userId === s.me?.id && s.music.playing ? s.music.track : null));   // your own card follows your player, whatever Activity Status says
+  const listening = userId === me.id ? (playingNow ? myListening() : null) : user.listening;
   const bio = user.bio ? renderMarkdown(user.bio, { serverId }) : '';
   const act2 = (fn) => async () => { await fn(); };
   return html`<div class=${cx('profile-card', mode)}>
@@ -81,6 +84,7 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
       <div class="pc-name"><span>${nick || user.displayName}</span>${user.bot ? html`<span class="bot-tag">APP</span>` : null}</div>
       <div class="pc-user">${user.username}${user.pronouns ? html`<i> • ${user.pronouns}</i>` : null}</div>
       ${cs ? html`<div class="pc-status"><span>${cs.emoji}</span>${cs.text}</div>` : null}
+      ${listening ? html`<${ListeningCard} listening=${listening} />` : null}
       ${mode === 'panel' && d ? html`<div class="pc-mutual-row">${d.mutualServers.length ? html`<span class="mut-avs">${d.mutualServers.slice(0, 3).map((s) => html`<span class="mut-av" title=${s.name}>${s.icon ? html`<img src=${s.icon} alt="" />` : s.name[0]}</span>`)}</span><span>${d.mutualServers.length} ${t('Mutual Servers')}</span>` : null}</div>` : null}
       ${bio ? html`<div class="pc-section"><h5>${t('About Me')}</h5><div class="pc-bio msg-content" dangerouslySetInnerHTML=${{ __html: bio }}></div></div>` : null}
       ${roles.length ? html`<div class="pc-section"><h5>${roles.length > 1 ? t('Roles') : t('Role')}</h5><div class="pc-roles">${roles.map((r) => html`<span class="role-chip"><i style=${{ background: r.color || 'var(--text-3)' }}></i>${r.name}</span>`)}</div></div>` : null}

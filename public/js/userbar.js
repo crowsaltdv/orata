@@ -1,20 +1,25 @@
 // Orate — user bar (avatar, mute/deafen, settings) + voice connection panel.
 import { html, cx, useState } from '/js/lib.js';
-import { state, useSel, go, goChannel, updateSettings, openContext, openPopover, toast, getChannel, dmName, set, closePopover } from '/js/store.js';
+import { state, useSel, go, goChannel, updateSettings, openContext, openPopover, openModal, closeModal, toast, getChannel, dmName, set, closePopover } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, IconBtn, POPOVERS, Btn, TextInput, Modal } from '/js/ui.js';
 import { openSettings, act } from '/js/actions.js';
 import { api } from '/js/api.js';
 import { voice } from '/js/voice.js';
-import { logout } from '/js/events.js';
+import { logout, switchAccount, beginAddAccount, removeAccount } from '/js/events.js';
 import { STATUS_META } from '/js/defaults.js';
 import { copyText } from '/js/lib.js';
 import { t } from '/js/i18n.js';
+import { MiniPlayer } from '/js/music.js';
 
 export async function setStatus(status) { await act(api.patch('/me', { status })); }
 
+function AccountRow({ a, current, onClick }) {
+  return html`<button type="button" class=${cx('um-item acct', current && 'sel')} onClick=${onClick}><${Avatar} user=${a} size=${30} /><span class="acct-nm"><b>${a.displayName}</b><small>@${a.username}</small></span>${current ? html`<span class="acct-check"><${Icon} name="check" size=${16} sw=${3} /></span>` : null}</button>`;
+}
 POPOVERS['user-menu'] = function UserMenu({ close }) {
-  const me = useSel((s) => s.me);
+  const me = useSel((s) => s.me); const accounts = useSel((s) => s.accounts);
+  const [sub, setSub] = useState(false);
   const cs = me.customStatus;
   const item = (icon, label, onClick, cls) => html`<button type="button" class=${cx('um-item', cls)} onClick=${() => { close(); onClick(); }}><${Icon} name=${icon} size=${17} /><span>${label}</span></button>`;
   return html`<div class="pop-card user-menu">
@@ -27,8 +32,28 @@ POPOVERS['user-menu'] = function UserMenu({ close }) {
     <div class="ctx-sep"></div>
     ${item('user', t('Edit Profile'), () => openSettings('profile'))}
     ${item('copy', t('Copy My ID'), async () => { await copyText(me.id); toast('ID copied', 'success', 1500); })}
+    <div class="ctx-sep"></div>
+    <div class=${cx('um-switch', sub && 'open')}>
+      <button type="button" class="um-item" onClick=${() => setSub(true)} onMouseEnter=${() => setSub(true)}><${Icon} name="users" size=${17} /><span>${t('Switch Accounts')}</span><${Icon} name="chevron-right" size=${16} class="um-caret" /></button>
+      ${sub ? html`<div class="um-sub slide-left">
+        ${accounts.map((a) => html`<${AccountRow} key=${a.id} a=${a.id === me.id ? { ...a, ...me } : a} current=${a.id === me.id} onClick=${() => { close(); switchAccount(a.id); }} />`)}
+        <div class="ctx-sep"></div>
+        <button type="button" class="um-item" onClick=${() => { close(); beginAddAccount(); }}><${Icon} name="user-plus" size=${17} /><span>${t('Add Account')}</span></button>
+        <button type="button" class="um-item" onClick=${() => { close(); openModal('manage-accounts'); }}><${Icon} name="settings" size=${17} /><span>${t('Manage Accounts')}</span></button>
+      </div>` : null}
+    </div>
     ${item('log-out', t('Log Out'), () => logout(), 'danger')}
   </div>`;
+};
+
+MODALS['manage-accounts'] = function ManageAccounts({ id }) {
+  const accounts = useSel((s) => s.accounts); const me = useSel((s) => s.me);
+  const close = () => closeModal(id);
+  return html`<${Modal} title=${t('Manage Accounts')} subtitle=${t('Everyone who is signed in on this device. Log out of any of them without switching.')} width=${440} onClose=${close}
+    footer=${html`<${Btn} variant="ghost" onClick=${close}>${t('Done')}<//><${Btn} variant="primary" icon="user-plus" onClick=${() => { close(); beginAddAccount(); }}>${t('Add Account')}<//>`}>
+    <div class="acct-list">${accounts.map((a) => html`<div class="acct-manage" key=${a.id}><${Avatar} user=${a.id === me?.id ? { ...a, ...me } : a} size=${40} /><span class="acct-nm"><b>${a.displayName}${a.id === me?.id ? html`<em class="here">${t('This account')}</em>` : null}</b><small>@${a.username}</small></span>
+      ${a.id !== me?.id ? html`<${Btn} size="sm" variant="ghost" onClick=${() => switchAccount(a.id) || close()}>${t('Switch')}<//>` : null}<${Btn} size="sm" variant="danger" onClick=${() => removeAccount(a.id)}>${t('Log out')}<//></div>`)}</div>
+  <//>`;
 };
 
 import { MODALS } from '/js/ui.js';
@@ -65,6 +90,7 @@ export function UserBar() {
         <${IconBtn} icon=${conn.video ? 'video' : 'video-off'} label=${conn.video ? t('Turn Off Camera') : t('Turn On Camera')} active=${conn.video} onClick=${() => voice.toggleCamera()} glass="buttons" />
         <${IconBtn} icon="monitor" label=${conn.screen ? t('Stop Sharing') : t('Share Your Screen')} active=${conn.screen} onClick=${() => voice.toggleScreen()} glass="buttons" />
       </div></div>` : null}
+    <${MiniPlayer} />
     <div class="ub-row">
       <button type="button" class="ub-user" onClick=${(e) => openPopover(e.currentTarget, 'user-menu', {}, { placement: 'top-start' })} data-popover-anchor>
         <${Avatar} user=${me} size=${38} status=${status} />

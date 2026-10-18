@@ -36,9 +36,13 @@
 .rail-item.unread .rail-pill { opacity: 1; transform: translateY(-50%) scaleY(1); height: 8px; }
 .rail-item:hover .rail-pill { opacity: 1; transform: translateY(-50%) scaleY(1); height: 22px; }
 .rail-item.active .rail-pill { opacity: 1; transform: translateY(-50%) scaleY(1); height: 38px; background: var(--accent-grad); }
-.rail-badge { position: absolute; right: -4px; bottom: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 99px; background: #e5314f; color: #fff; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 3px rgb(var(--panel-rgb) / .96); animation: bounce-in .4s var(--ease-spring); z-index: 3; }
+.rail-badge { position: absolute; right: -3px; bottom: -3px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 99px; background: #e5314f; color: #fff; font-size: 11px; font-weight: 800; line-height: 1; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 3px rgb(var(--panel-rgb) / .96); animation: bounce-in .4s var(--ease-spring); z-index: 3; pointer-events: none; }   /* a child of the 48px icon button, so it hugs the icon's corner inside the rail */
 .rail-sep { width: 32px; height: 2px; border-radius: 2px; background: var(--border); flex: none; margin: 2px 0; }
-.rail-item.dragging { opacity: .35; } .rail-item.drag-over::before { content: ""; position: absolute; top: -5px; left: 18px; right: 18px; height: 3px; border-radius: 3px; background: var(--accent-grad); }
+.rail-item.dragging, .rail-folder.dragging { opacity: .35; }
+.rail-item.drop-before::before, .rail-item.drop-after::after, .rail-folder.drop-before::before, .rail-folder.drop-after::after { content: ""; position: absolute; left: 18px; right: 18px; height: 3px; border-radius: 3px; background: var(--accent-grad); z-index: 4; pointer-events: none; }
+.rail-item.drop-before::before, .rail-folder.drop-before::before { top: -5px; } .rail-item.drop-after::after, .rail-folder.drop-after::after { bottom: -5px; }
+.rail-item.drop-merge .rail-btn, .rail-folder.drop-merge > .rail-item .rail-btn { border-radius: 32%; box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / .95), 0 0 0 7px rgb(var(--accent-rgb) / .28); transform: scale(1.08); }
+.rail-folder { position: relative; width: 100%; display: flex; flex-direction: column; align-items: center; flex: none; }
 .rail-item.entering { animation: rail-in var(--t-med) var(--ease-spring) both; }
 @keyframes rail-in { from { opacity: 0; transform: scale(.3) translateY(-20px); } to { opacity: 1; transform: none; } }
 

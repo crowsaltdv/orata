@@ -2,8 +2,11 @@
 import { useReducer, useRef, useEffect, ls, uid, debounce, cmpId } from '/js/lib.js';
 import { DEFAULT_SETTINGS, DEFAULT_LOCAL, deepMerge, migrateSettings } from '/js/defaults.js';
 
+/** Accounts remembered on this device for the account switcher (their tokens stay in localStorage, never in the store). */
+const savedAccounts = () => { const l = ls('accounts', []); return Array.isArray(l) ? l.filter((a) => a && a.id && a.token).map(({ token, ...a }) => a) : []; };
+
 export const state = {
-  token: ls('token', null),
+  token: ls('token', null), accounts: savedAccounts(), addingFrom: null,
   phase: 'boot', // boot | auth | loading | ready
   connection: 'connecting', // connecting | online | offline
   me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {},
@@ -15,6 +18,7 @@ export const state = {
   settings: deepMerge(DEFAULT_SETTINGS, migrateSettings(ls('settings', {}))),
   local: deepMerge(DEFAULT_LOCAL, ls('local', {})),
   focused: document.hasFocus(), idle: false, width: window.innerWidth, mobileNav: false,
+  music: { open: false, query: '', results: null, searching: false, error: null, queue: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7, preview: false }, musicOk: null,
   gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, replyTo: null, editing: null, searchQuery: '', speaking: {},
 };
 state.panel = state.local.panel;
@@ -100,6 +104,14 @@ export const roleColor = (serverId, userId) => topRole(serverId, userId)?.color 
 export function hasPerm(serverId, perm) {
   const s = state.servers[serverId]; if (!s) return false;
   return s.ownerId === state.me?.id || s.perms.includes('ADMINISTRATOR') || s.perms.includes(perm);
+}
+/** What the signed-in user may do in one channel: the channel's own overwrites (when it has any) or else their server-wide permissions. */
+export function hasChannelPerm(ch, perm) {
+  if (!ch?.serverId) return true;
+  const s = state.servers[ch.serverId]; if (!s) return false;
+  if (s.ownerId === state.me?.id) return true;
+  const list = ch.cperms || s.perms;
+  return list.includes('ADMINISTRATOR') || list.includes(perm);
 }
 export function dmName(ch, max = 3) {
   if (!ch) return '';

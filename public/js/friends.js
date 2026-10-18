@@ -89,9 +89,9 @@ export function ActiveNow() {
   const rel = useSel((s) => s.relationships); const users = useSel((s) => s.users); const vs = useSel((s) => s.voice.states);
   const rows = Object.keys(rel).filter((id) => rel[id] === 'friend' && users[id] && users[id].status !== 'offline').map((id) => {
     const room = Object.entries(vs).find(([, r]) => r[id]); return { u: users[id], room: room ? state.channelIndex[room[0]] : null };
-  }).filter((x) => x.room || x.u.customStatus).slice(0, 12);
+  }).filter((x) => x.room || x.u.customStatus || x.u.listening).slice(0, 12);
   return html`<aside class="right panel wide right-enter"><div class="panel-pane"><div class="pane-head"><b>${t('Active Now')}</b></div>
-    <div class="pane-scroll">${rows.length ? rows.map(({ u, room }) => html`<div class="active-card" key=${u.id} onClick=${(e) => openProfile(u.id, e.currentTarget)}><${Avatar} user=${u} size=${40} status=${u.status} /><div><b>${u.displayName}</b><span>${room ? html`<${Icon} name="volume" size=${13} /> ${room.name}` : `${u.customStatus.emoji || ''} ${u.customStatus.text}`}</span></div></div>`)
+    <div class="pane-scroll">${rows.length ? rows.map(({ u, room }) => html`<div class="active-card" key=${u.id} onClick=${(e) => openProfile(u.id, e.currentTarget)}><${Avatar} user=${u} size=${40} status=${u.status} /><div><b>${u.displayName}</b><span>${room ? html`<${Icon} name="volume" size=${13} /> ${room.name}` : u.listening ? html`<${Icon} name="music" size=${13} /> ${u.listening.title} — ${u.listening.artist}` : `${u.customStatus.emoji || ''} ${u.customStatus.text}`}</span></div></div>`)
       : html`<div class="active-empty"><b>${t("It's quiet for now…")}</b><p>${t("When a friend starts an activity — like hopping in a voice channel — we'll show it here!")}</p></div>`}</div></div></aside>`;
 }
 void IconBtn; void openModal;

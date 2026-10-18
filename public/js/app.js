@@ -18,6 +18,7 @@ import '/js/pickers.js';
 import '/js/voice.js';
 import { markAllRead, ackChannel } from '/js/actions.js';
 import { VerifyScreen, VerifyGate, VerifyBanner } from '/js/verify.js';
+import { MusicPanel } from '/js/music.js';
 
 function MainView() {
   const view = useSel((s) => s.route.view);
@@ -71,6 +72,7 @@ function Shell() {
     </div>
     <${MainView} />
     ${view === 'friends' ? html`<${ActiveNow} />` : html`<${RightPanel} />`}
+    <${MusicPanel} />
   </div>`;
 }
 function cycle(dir, unreadOnly) {

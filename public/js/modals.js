@@ -1,6 +1,6 @@
 // Orate — create/join server, invites, channels, DMs.
 import { html, useState, useEffect, useMemo, cx, copyText } from '/js/lib.js';
-import { state, set, useSel, openModal, closeModal, go, goChannel, goDm, toast, getChannel, dmName, hasPerm, addUsers } from '/js/store.js';
+import { state, set, useSel, openModal, closeModal, go, goChannel, goDm, toast, getChannel, dmName, hasPerm, hasChannelPerm, addUsers } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
 import { Modal, Btn, Field, TextInput, Toggle, Segmented, Avatar, ServerIcon, Spinner, MODALS, SettingRow, confirmDialog, Dropdown } from '/js/ui.js';
 import { api } from '/js/api.js';
@@ -9,6 +9,7 @@ import { chooseAndUploadImage } from '/js/imageutil.js';
 import { ls, lsRemove } from '/js/lib.js';
 import { deleteChannel } from '/js/sidebar.js';
 import { t } from '/js/i18n.js';
+import { PermissionsEditor, cloneOverwrites, overwritesEqual } from '/js/channel-perms.js';
 
 const TEMPLATES = [
   { id: 'default', icon: '✨', name: 'Create My Own', sub: 'Start from scratch' },
@@ -110,19 +111,47 @@ MODALS['create-channel'] = function CreateChannel({ id, serverId, parentId, type
   <//>`;
 };
 
-MODALS['edit-channel'] = function EditChannel({ id, channelId }) {
+MODALS['edit-channel'] = function EditChannel({ id, channelId, tab: startTab }) {
   const ch = getChannel(channelId); const server = state.servers[ch?.serverId];
-  const [f, setF] = useState({ name: ch?.name || '', topic: ch?.topic || '', private: !!ch?.private, nsfw: !!ch?.nsfw, slowmode: ch?.slowmode || 0, allowedRoles: ch?.allowedRoles || [] }); const [busy, setBusy] = useState(false);
+  const canProps = !!ch && hasChannelPerm(ch, 'MANAGE_CHANNELS'); const canPerms = !!ch && Array.isArray(ch.overwrites);   // the server only sends overwrites to people who may change them
+  const orig = { name: ch?.name || '', topic: ch?.topic || '', nsfw: !!ch?.nsfw, slowmode: ch?.slowmode || 0 };
+  const [f, setF] = useState(orig); const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState(startTab === 'permissions' && canPerms ? 'permissions' : canProps ? 'overview' : 'permissions');
+  const [ows, setOws] = useState(() => cloneOverwrites(ch?.overwrites)); const [synced, setSynced] = useState(!!ch?.synced);
   if (!ch || !server) return null;
-  const save = async () => { setBusy(true); await act(api.patch(`/channels/${ch.id}`, f)); closeModal(id); };
+  const isCat = ch.type === 'category'; const parent = !isCat && ch.parentId ? server.channels.find((c) => c.id === ch.parentId) : null;
+  const kids = isCat ? server.channels.filter((c) => c.parentId === ch.id && c.synced).length : 0;
+  const permsDirty = canPerms && (synced !== !!ch.synced || !overwritesEqual(ows, ch.overwrites));
+  const propsDirty = canProps && JSON.stringify(f) !== JSON.stringify(orig);
+  const editOws = (next) => { setOws(next); if (synced) setSynced(false); };   // changing a synced channel's permissions detaches it from its category
+  const sync = (on) => { if (on) { setOws(cloneOverwrites(parent?.overwrites ?? ows)); setSynced(true); } else setSynced(false); };
+  const everyone = ows.find((o) => o.type === 'role' && o.id === server.id);
+  const isPrivate = !!everyone?.deny.includes('VIEW_CHANNEL');
+  const setPrivate = (on) => {
+    const next = cloneOverwrites(ows); let o = next.find((x) => x.type === 'role' && x.id === server.id);
+    if (!o) { o = { type: 'role', id: server.id, allow: [], deny: [] }; next.push(o); }
+    o.deny = o.deny.filter((p) => p !== 'VIEW_CHANNEL'); o.allow = o.allow.filter((p) => p !== 'VIEW_CHANNEL'); if (on) o.deny.push('VIEW_CHANNEL');
+    editOws(next);
+  };
+  const save = async () => {
+    const body = {};
+    if (propsDirty) for (const k of Object.keys(orig)) if (f[k] !== orig[k]) body[k] = f[k];
+    if (permsDirty) { if (synced) body.synced = true; else { body.overwrites = ows.filter((o) => o.allow.length || o.deny.length); if (parent) body.synced = false; } }
+    if (!Object.keys(body).length) { closeModal(id); return; }
+    setBusy(true); const r = await act(api.patch(`/channels/${ch.id}`, body)); setBusy(false); if (r) closeModal(id);
+  };
   const SLOW = [{ value: 0, label: 'Off' }, { value: 5, label: '5s' }, { value: 10, label: '10s' }, { value: 30, label: '30s' }, { value: 60, label: '1m' }, { value: 300, label: '5m' }, { value: 3600, label: '1h' }];
-  return html`<${Modal} title=${ch.type === 'category' ? t('Edit Category') : t('Edit Channel')} subtitle=${ch.type === 'category' ? '' : (ch.type === 'voice' ? '' : '#') + ch.name} width=${480} onClose=${() => closeModal(id)}
-    footer=${html`<${Btn} variant="danger" class="mr-auto" icon="trash" onClick=${async () => { closeModal(id); await deleteChannel(ch); }}>${t('Delete')}<//><${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="primary" loading=${busy} onClick=${save}>${t('Save Changes')}<//>`}>
-    <${Field} label=${t('Channel name')}><${TextInput} value=${f.name} onInput=${(v) => setF({ ...f, name: ch.type === 'text' ? v.toLowerCase().replace(/\s+/g, '-') : v })} maxlength="100" /><//>
-    ${ch.type === 'text' ? html`<${Field} label=${t('Channel topic')}><textarea class="textarea" value=${f.topic} maxlength="1024" onInput=${(e) => setF({ ...f, topic: e.target.value })} placeholder=${t('Let everyone know how to use this channel!')}></textarea><//>
-      <${SettingRow} title=${t('Slowmode')} desc=${t('Members must wait between messages unless they can manage messages.')}><${Dropdown} width=${110} value=${f.slowmode} options=${SLOW} onChange=${(v) => setF({ ...f, slowmode: v })} /><//>` : null}
-    ${ch.type !== 'category' ? html`<${SettingRow} title=${t('Private Channel')} desc=${t('Only selected roles and admins can view this channel.')}><${Toggle} checked=${f.private} onChange=${(v) => setF({ ...f, private: v })} /><//>` : null}
-    ${f.private && ch.type !== 'category' ? html`<div class="role-pick">${server.roles.filter((r) => r.id !== server.id).map((r) => html`<label class="role-opt"><input type="checkbox" checked=${f.allowedRoles.includes(r.id)} onChange=${(e) => setF({ ...f, allowedRoles: e.target.checked ? [...f.allowedRoles, r.id] : f.allowedRoles.filter((x) => x !== r.id) })} /><i style=${{ background: r.color || 'var(--text-3)' }}></i>${r.name}</label>`)}</div>` : null}
+  const tabBtn = (k, label) => html`<button type="button" class=${cx('chan-tab', tab === k && 'on')} onClick=${() => setTab(k)}>${label}</button>`;
+  return html`<${Modal} title=${isCat ? t('Edit Category') : t('Edit Channel')} subtitle=${isCat ? ch.name : (ch.type === 'voice' ? '' : '#') + ch.name} width=${tab === 'permissions' ? 720 : 480} onClose=${() => closeModal(id)}
+    footer=${html`${canProps ? html`<${Btn} variant="danger" class="mr-auto" icon="trash" onClick=${async () => { closeModal(id); await deleteChannel(ch); }}>${t('Delete')}<//>` : null}<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="primary" loading=${busy} disabled=${!propsDirty && !permsDirty} onClick=${save}>${t('Save Changes')}<//>`}>
+    ${canProps && canPerms ? html`<div class="chan-tabs">${tabBtn('overview', t('Overview'))}${tabBtn('permissions', t('Permissions'))}</div>` : null}
+    ${tab === 'permissions' && canPerms ? html`<${PermissionsEditor} ch=${ch} server=${server} ows=${ows} onChange=${editOws} synced=${synced} onSync=${sync} parent=${parent} kids=${kids} />` : html`<div>
+      <${Field} label=${isCat ? t('Category name') : t('Channel name')}><${TextInput} value=${f.name} onInput=${(v) => setF({ ...f, name: ch.type === 'text' ? v.toLowerCase().replace(/\s+/g, '-') : v })} maxlength="100" disabled=${!canProps} /><//>
+      ${ch.type === 'text' ? html`<${Field} label=${t('Channel topic')}><textarea class="textarea" value=${f.topic} maxlength="1024" onInput=${(e) => setF({ ...f, topic: e.target.value })} placeholder=${t('Let everyone know how to use this channel!')}></textarea><//>
+        <${SettingRow} title=${t('Slowmode')} desc=${t('Members must wait between messages unless they can manage messages.')}><${Dropdown} width=${110} value=${f.slowmode} options=${SLOW} onChange=${(v) => setF({ ...f, slowmode: v })} /><//>` : null}
+      ${canPerms ? html`<${SettingRow} title=${isCat ? t('Private Category') : t('Private Channel')} desc=${t('Only the roles and members you allow in Permissions can view it. Admins always can.')}><${Toggle} checked=${isPrivate} onChange=${setPrivate} /><//>
+        <button type="button" class="link-btn" onClick=${() => setTab('permissions')}>${t('Fine-tune who can do what in Permissions →')}</button>` : null}
+    </div>`}
   <//>`;
 };
 
@@ -146,7 +175,7 @@ MODALS['create-dm'] = function CreateDm({ id, fromChannel }) {
   return html`<${Modal} title=${base ? t('Add friends to this DM') : t('Select Friends')} subtitle=${`${t('You can add')} ${max - sel.length} ${t('more friends.')}`} width=${440} onClose=${() => closeModal(id)} footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="primary" loading=${busy} disabled=${!sel.length} onClick=${go3}>${base ? t('Add') : sel.length > 1 ? t('Create Group DM') : t('Create DM')}<//>`}>
     <${TextInput} value=${q} onInput=${setQ} placeholder=${t('Type the username of a friend')} icon="search" autofocus />
     ${sel.length > 1 && !base ? html`<${Field} label=${t('Group name (optional)')}><${TextInput} value=${name} onInput=${setName} maxlength="100" placeholder=${sel.map((i) => users[i].displayName).join(', ')} /><//>` : null}
-    <div class="pick-list">${list.length ? list.map((i) => html`<label class=${cx('pick-row', sel.includes(i) && 'sel')} key=${i}><${Avatar} user=${users[i]} size=${34} status=${users[i].status} /><span><b>${users[i].displayName}</b><small>${users[i].username}</small></span><input type="checkbox" checked=${sel.includes(i)} onChange=${() => toggle(i)} /><span class="box"><${Icon} name="check" size=${13} sw=${3.5} /></span></label>`) : html`<div class="muted-note">${t('No friends found. Add friends from the Friends page.')}</div>`}</div>
+    <div class="pick-list">${list.length ? list.map((i) => html`<label class=${cx('pick-row', sel.includes(i) && 'sel')} key=${i}><${Avatar} user=${users[i]} size=${34} status=${users[i].status} /><span class="pick-name">${users[i].displayName}</span><input type="checkbox" checked=${sel.includes(i)} onChange=${() => toggle(i)} /><span class="box"><${Icon} name="check" size=${13} sw=${3.5} /></span></label>`) : html`<div class="muted-note">${t('No friends found. Add friends from the Friends page.')}</div>`}</div>
   <//>`;
 };
 void set; void go; void lsRemove; void ls; void hasPerm; void addUsers; void dmName; void Logo; void Segmented; void useMemo;

@@ -5,6 +5,7 @@ import { ls, lsRemove, cmpId } from '/js/lib.js';
 import { DEFAULT_SETTINGS, deepMerge, migrateSettings } from '/js/defaults.js';
 import { mapMessage, patchEntry, applyReaction, loadMessages, ackChannel } from '/js/actions.js';
 import { playSound, startRing, stopRing } from '/js/sound.js';
+import { stopMusic } from '/js/music.js';
 
 /* ------------------------------------------------------------ session */
 export async function login(loginName, password) {
@@ -28,17 +29,65 @@ export async function startSession(token) {
   set({ token, phase: 'loading' });
   gateway.connect();
 }
-export async function logout({ silent } = {}) {
-  try { if (!silent && state.token) await api.post('/auth/logout'); } catch { /* ignore */ }
+/** Forgets everything about the signed-in account in memory (not on the device's account list). */
+function clearSession() {
+  stopMusic({ silent: true });
   gateway.disconnect(); lsRemove('token');
   set({
     token: null, phase: 'auth', gated: false, verifyDismissed: false, me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {}, msgs: {}, reads: {}, lastMsg: {}, typing: {},
-    voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel,
+    voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel, musicOk: null,
   });
-  history.replaceState({}, '', '/login');
-  set({ route: { view: 'login', serverId: '@me', channelId: null } });
 }
-hooks.unauthorized = () => { if (state.token) { toast('Your session has expired — please sign in again.', 'error'); logout({ silent: true }); } };
+export async function logout({ silent } = {}) {
+  const leaving = state.token; const meId = state.me?.id;
+  try { if (!silent && leaving) await api.post('/auth/logout'); } catch { /* ignore */ }
+  const rest = readAccounts().filter((a) => a.token !== leaving && a.id !== meId);
+  writeAccounts(rest);
+  clearSession();
+  if (rest.length) { enter(rest[0]); return; }   // still signed in somewhere else on this device: carry on there
+  history.replaceState({}, '', '/login');
+  set({ route: { view: 'login', serverId: '@me', channelId: null }, addingFrom: null });
+}
+// A 401 means the server really does not know this login any more (it was signed out from another device, the password changed, or the
+// account was deleted) — sessions never time out by themselves.
+hooks.unauthorized = () => { if (state.token) { logout({ silent: true }); } };
+
+/* ------------------------------------------------------------ account switcher (several logins on one device, like Discord) */
+const readAccounts = () => { const l = ls('accounts', []); return Array.isArray(l) ? l.filter((a) => a && a.id && a.token) : []; };
+function writeAccounts(list) { ls('accounts', null, list); set({ accounts: list.map(({ token, ...a }) => a) }); }
+function rememberAccount(user) {
+  if (!state.token || !user?.id) return;
+  const mine = { id: user.id, token: state.token, username: user.username, displayName: user.displayName, avatar: user.avatar || null };
+  const list = readAccounts().filter((a) => a.id === user.id || a.token !== state.token);
+  writeAccounts(list.some((a) => a.id === user.id) ? list.map((a) => (a.id === user.id ? mine : a)) : [...list, mine]);
+}
+function enter(acc) {
+  history.replaceState({}, '', '/channels/@me');
+  set({ route: { view: 'boot', serverId: '@me', channelId: null }, addingFrom: null });
+  return startSession(acc.token);
+}
+export function switchAccount(id) {
+  const acc = readAccounts().find((a) => a.id === id);
+  if (!acc || acc.token === state.token) return;
+  clearSession(); enter(acc);
+}
+/** Shows the login screen without signing the current account out; "Back" returns to it. */
+export function beginAddAccount() {
+  const from = state.me?.id || null;
+  clearSession();
+  history.replaceState({}, '', '/login');
+  set({ addingFrom: from, route: { view: 'login', serverId: '@me', channelId: null } });
+}
+export function cancelAddAccount() {
+  const list = readAccounts(); const acc = list.find((a) => a.id === state.addingFrom) || list[0];
+  if (acc) enter(acc); else set({ addingFrom: null });
+}
+export async function removeAccount(id) {
+  const acc = readAccounts().find((a) => a.id === id); if (!acc) return;
+  if (acc.token === state.token) return logout();
+  try { await fetch('/api/auth/logout', { method: 'POST', headers: { authorization: 'Bearer ' + acc.token } }); } catch { /* offline: it is only forgotten here */ }
+  writeAccounts(readAccounts().filter((a) => a.id !== id));
+}
 
 /* ------------------------------------------------------------ bootstrap */
 function bootstrap(d) {
@@ -59,6 +108,7 @@ function bootstrap(d) {
   // an account that has never saved a look (a brand-new sign-up) starts from the default theme, not from whatever this browser had left over
   if (Object.keys(remote).length) settings = deepMerge(DEFAULT_SETTINGS, migrateSettings(remote));
   else if (!reconnect) settings = deepMerge(DEFAULT_SETTINGS, {});
+  rememberAccount(d.user);
   set({
     me: d.user, users, servers, dms, relationships: rel, reads: d.readStates, lastMsg, voice: { ...state.voice, states: voiceStates }, botId: d.botId, settings,
     sessionId: d.connId, phase: 'ready', typing: {}, gated: !!d.gated,
@@ -73,7 +123,7 @@ function bootstrap(d) {
   }
   if (state.settings.notif.desktop && 'Notification' in window && Notification.permission === 'default') { /* asked from settings, never on load */ }
 }
-gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, maxUpload: c.maxUpload, turn: !!c.turn, emailVerif: { enabled: !!c.emailVerification?.enabled, required: !!c.emailVerification?.required, smtp: !!c.emailVerification?.smtp } })).catch(() => {}); });
+gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, musicOk: !!c.music, maxUpload: c.maxUpload, turn: !!c.turn, emailVerif: { enabled: !!c.emailVerification?.enabled, required: !!c.emailVerification?.required, smtp: !!c.emailVerification?.smtp } })).catch(() => {}); });
 
 /* ------------------------------------------------------------ helpers */
 function isMentioned(m, ch) {
@@ -155,18 +205,23 @@ setInterval(() => {
 }, 1500);
 
 /* ------------------------------------------------------------ users & presence */
-gateway.on('presence_update', ({ userId, status, customStatus }) => {
+gateway.on('presence_update', ({ userId, status, customStatus, listening }) => {
   const u = state.users[userId]; if (!u) return;
-  set({ users: { ...state.users, [userId]: { ...u, status, customStatus } } });
+  set({ users: { ...state.users, [userId]: { ...u, status, customStatus, ...(listening !== undefined ? { listening } : null) } } });
 });
 gateway.on('user_update', ({ user }) => addUsersNotify([user]));
-gateway.on('self_update', ({ user }) => { set({ me: { ...state.me, ...user } }); addUsersNotify([user]); });
+gateway.on('self_update', ({ user }) => { set({ me: { ...state.me, ...user } }); rememberAccount(state.me); addUsersNotify([user]); });
 gateway.on('settings_update', ({ settings }) => { const next = deepMerge(DEFAULT_SETTINGS, migrateSettings(settings)); set({ settings: next }); ls('settings', null, next); });
 function addUsersNotify(list) { addUsers(list); notify(); }
 
 /* ------------------------------------------------------------ servers / channels / members */
 gateway.on('server_create', ({ server, users }) => { addUsers(users); set({ servers: { ...state.servers, [server.id]: server } }); rebuildIndex(); });
-gateway.on('server_update', ({ server }) => { if (!state.servers[server.id]) return; set({ servers: { ...state.servers, [server.id]: server } }); rebuildIndex(); });
+gateway.on('server_update', ({ server }) => {
+  if (!state.servers[server.id]) return;
+  const lastMsg = { ...state.lastMsg }; for (const c of server.channels) if (c.lastMessageId && !lastMsg[c.id]) lastMsg[c.id] = c.lastMessageId;   // channels that just became visible
+  set({ servers: { ...state.servers, [server.id]: server }, lastMsg }); rebuildIndex();
+  if (state.route.serverId === server.id && state.route.channelId && !server.channels.some((c) => c.id === state.route.channelId)) go({ view: 'channel', serverId: server.id, channelId: null });   // its permissions changed: you can no longer see it
+});
 gateway.on('server_delete', ({ serverId }) => {
   const servers = { ...state.servers }; delete servers[serverId];
   set({ servers }); rebuildIndex();

@@ -1,5 +1,5 @@
 // Orate — message creation shared by the REST API and the built-in bot.
-import { db, newId, save, emitTo, audienceOf, messageView, publicUser, can, channelView } from './core.js';
+import { db, newId, save, emitTo, audienceOf, messageView, publicUser, canIn, channelView } from './core.js';
 
 export const hooks = { onMessage: [] };
 
@@ -45,7 +45,7 @@ export function postMessage(ch, authorId, { content = '', attachments = [], gif 
   }
   const mentionRoles = server ? [...new Set([...content.matchAll(/<@&(\d{10,20})>/g)].map((m) => m[1]))].filter((id) => server.roles.some((r) => r.id === id && r.id !== server.id)) : [];
   let mentionEveryone = false;
-  if (/(^|\s)@(everyone|here)\b/.test(content) && server && can(server, authorId, 'MENTION_EVERYONE')) mentionEveryone = true;
+  if (/(^|\s)@(everyone|here)\b/.test(content) && server && canIn(authorId, ch, 'MENTION_EVERYONE')) mentionEveryone = true;
 
   let replyId = null;
   if (replyTo) {

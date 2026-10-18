@@ -1,6 +1,6 @@
 // Orate — a single chat message (header, markdown body, attachments, GIFs, embeds, reactions, toolbar).
 import { html, useState, useEffect, useRef, memo, cx, formatStamp, formatClock, formatFull, fileSize, copyText, isImageType, shallowEq } from '/js/lib.js';
-import { state, set, useSel, nameOf, roleColor, openContext, openPopover, openModal, toast, getChannel, hasPerm, dmName, goChannel, goDm, go } from '/js/store.js';
+import { state, set, useSel, nameOf, roleColor, openContext, openPopover, openModal, toast, getChannel, hasPerm, hasChannelPerm, dmName, goChannel, goDm, go } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, IconBtn } from '/js/ui.js';
 import { renderMarkdown, emojiOnlyCount, plainPreview, decodeMentions } from '/js/markdown.js';
@@ -9,6 +9,7 @@ import { openProfile } from '/js/sidebar.js';
 import { frequentEmoji } from '/js/emoji.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
+import { InviteCard, inviteCodeOf } from '/js/invite-card.js';
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -102,7 +103,7 @@ function InlineEditor({ m, ch, onDone }) {
 /* ------------------------------------------------------------------ context menu */
 export function messageMenu(m, ch) {
   const mine = m.authorId === state.me.id; const serverId = ch.serverId;
-  const canManage = serverId ? hasPerm(serverId, 'MANAGE_MESSAGES') : false;
+  const canManage = serverId ? hasChannelPerm(ch, 'MANAGE_MESSAGES') : false;
   const plain = m.content;
   return [
     { label: t('Add Reaction'), icon: 'smile-plus', submenu: [{ type: 'custom', render: () => html`<div class="quick-react">${['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '👀'].map((e) => html`<button type="button" onClick=${() => { set({ ctx: null }); toggleReaction(ch, m, e); }}>${e}</button>`)}</div>` }] },
@@ -162,7 +163,9 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
   const mentioned = m.mentions?.includes(me) || m.mentionEveryone || (m.reply?.authorId === me && m.authorId !== me && m.mentions?.includes(me));
   const jumbo = state.settings.chat.jumbo && !m.attachments?.length && emojiOnlyCount(m.content);
   const htmlContent = m.content ? renderMarkdown(m.content, { serverId: ch.serverId }) : '';
-  const urls = showEmbeds && m.content && !m.pending ? [...new Set((m.content.replace(/```[\s\S]*?```|`[^`]*`/g, '').match(URL_RE) || []).map((u) => u.replace(/[.,;:!?)]+$/, '')))].slice(0, 2) : [];
+  const links = m.content && !m.pending ? [...new Set((m.content.replace(/```[\s\S]*?```|`[^`]*`/g, '').match(URL_RE) || []).map((u) => u.replace(/[.,;:!?)]+$/, '')))] : [];
+  const invites = [...new Set(links.map(inviteCodeOf).filter(Boolean))].slice(0, 2);   // invite links become join cards, whatever the link-preview setting says
+  const urls = showEmbeds ? links.filter((u) => !inviteCodeOf(u)).slice(0, 2) : [];
   const onImage = (a) => { const imgs = (m.attachments || []).filter((x) => isImageType(x.type)).map((x) => ({ url: x.url, name: x.name })); const i = imgs.findIndex((x) => x.url === a.url); set({ lightbox: { items: i >= 0 ? imgs : [a], index: Math.max(0, i) } }); };
   const name = nick || author?.displayName || 'Unknown User';
   const open = (e) => openProfile(m.authorId, e.currentTarget);
@@ -191,6 +194,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
         ${m.gif ? html`<${GifMedia} g=${m.gif} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />` : null}
         ${m.sticker ? html`<img class="msg-sticker" src=${m.sticker.url} alt=${m.sticker.title || 'sticker'} title=${m.sticker.title} loading="lazy" />` : null}
         ${m.attachments?.length ? html`<div class="attachments">${m.attachments.map((a) => html`<${Attachment} key=${a.id || a.url} a=${a} onImage=${onImage} />`)}</div>` : null}
+        ${invites.map((c) => html`<${InviteCard} key=${c} code=${c} mine=${m.authorId === me} />`)}
         ${urls.map((u) => html`<${LinkEmbed} key=${u} url=${u} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />`)}
         <${Reactions} m=${m} ch=${ch} />
         ${m.failed ? html`<div class="msg-fail"><${Icon} name="alert-circle" size=${14} /> ${m.error || 'Message failed to send.'} <a role="button" onClick=${() => retryMessage(ch, m)}>Retry</a> · <a role="button" onClick=${() => discardMessage(ch, m)}>Delete</a></div>` : null}

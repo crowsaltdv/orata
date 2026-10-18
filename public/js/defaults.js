@@ -53,7 +53,7 @@ export const DEFAULT_SETTINGS = {
   lang: 'en',
   privacy: { dmFromServers: true, friendRequests: true, showActivity: true },
   access: { highContrast: false, underlineLinks: false, saturation: 1, tooltips: true },
-  mutedServers: {}, mutedChannels: {}, serverOrder: [], collapsed: {}, lastChannel: {}, skinTone: 0,
+  mutedServers: {}, mutedChannels: {}, serverOrder: [], serverFolders: [], collapsed: {}, lastChannel: {}, skinTone: 0,
   advanced: { devMode: false },
 };
 

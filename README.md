@@ -41,6 +41,7 @@ npm run reset-password <user>    # forgot a password? prints a new one
 | `TURN_USERNAME` / `TURN_CREDENTIAL` | – | Fixed TURN credentials (use instead of `TURN_SECRET`) |
 | `TURN_TTL` | `86400` | Lifetime of generated TURN credentials, in seconds |
 | `ICE_TRANSPORT_POLICY` | `all` | Set to `relay` to force every call through TURN (testing / hiding IP addresses) |
+| `SOUNDCLOUD_CLIENT_ID` / `SOUNDCLOUD_CLIENT_SECRET` | – | Turns on the Music player — see [Music](#music-soundcloud) |
 
 > **Microphone, camera, screen sharing and desktop notifications only work on `localhost` or over HTTPS.** To use voice with other devices on your network, set `HTTPS_KEY`/`HTTPS_CERT`, or put Orate behind a TLS reverse proxy (Caddy, nginx, Cloudflare Tunnel …). Make sure it forwards WebSocket upgrades on `/gateway`.
 
@@ -124,6 +125,24 @@ Orate asks its own server for the ICE configuration every time you join a call (
 
 Hosted TURN services (Cloudflare, Twilio, Metered …) work too: use the URLs and static username/credential they give you.
 
+## Music (SoundCloud)
+
+The note icon above Home opens a music panel: search SoundCloud, press play, and what you're listening to shows on your profile (and in friends' *Active Now*) for as long as the song lasts. It needs SoundCloud API keys, because SoundCloud only lets registered apps search and stream:
+
+1. Get a **Client ID** and **Client Secret** — create an app in SoundCloud's *Your apps* page, or run the CLI from [SoundCloud's "Building with AI" page](https://developers.soundcloud.com/docs/building-with-ai#get-api-credentials) (it prints both after you approve it in the browser).
+2. Put them in `.env` (on Render: *Environment*), then restart:
+
+   ```
+   SOUNDCLOUD_CLIENT_ID=your-client-id
+   SOUNDCLOUD_CLIENT_SECRET=your-client-secret
+   ```
+
+Until both are set the music panel just explains that music isn't set up (everything else works as before).
+
+How it works: Orate signs in to SoundCloud itself with the *client credentials* flow (HTTP Basic auth, the token is cached until shortly before it expires), so listeners don't need a SoundCloud account and the secret never reaches a browser. Audio goes through a small relay (`/api/music/proxy`) — SoundCloud's stream links only work together with the server's login, which an `<audio>` tag can't send. The relay only fetches SoundCloud hosts and only for links this server signed. Streams that SoundCloud serves as HLS are played with the bundled [hls.js](https://github.com/video-dev/hls.js) (`public/vendor/`). Tracks SoundCloud marks as *preview* play their 30-second preview; blocked tracks are hidden. The player links back to the track on SoundCloud.
+
+**What others see:** the track, artist, artwork and a progress bar, only while it plays. It disappears when you pause, stop, close the last tab or the song ends, and it is never shown when **Settings → Privacy → Show my status to everyone** is off or you are *Invisible* (the switch is also in the music panel). SoundCloud rate-limits sign-ins (50 tokens per 12 hours per app); Orate caches its token, so normal use stays far below that.
+
 ## Free hosting with a free database
 
 Hosts like Render's free plan wipe the app's folder on every restart, so Orate's usual `data/` folder would lose everything. Set **`DATABASE_URL`** and Orate keeps *all* its data — accounts, servers, messages, sessions and uploaded files — in a PostgreSQL database instead (a free one is enough). Without `DATABASE_URL` nothing changes: it uses local files.
@@ -161,6 +180,7 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 **What to expect**
 - **Render's free service sleeps** after about 15 minutes without visitors; the next visit wakes it (up to a minute) and everybody's live connection reconnects by itself. The data is untouched.
 - **Stuck on "Connecting…"?** The server log looking fine (`Orate is running … :10000`) only proves the server started. Usually the browser is holding a login the server no longer knows (a free instance that lost its data, or a different database) and Render's proxy hides the "your login is invalid" reply, so the page retried forever. Current Orate recovers by itself (it signs you out after a few failed tries and the loading screen offers *Try again* / *Sign out*). On an older version, open the site in a private window or clear the site's data once (browser dev tools → Console → \`localStorage.clear(); location.reload()\`). Also open \`https://<your-service>.onrender.com/api/config\`: if that shows JSON, the server is up.
+- **Logins don't expire.** You stay signed in until you log out (or change your password, which signs out your other devices). With Postgres each login is saved in its own table the moment you sign in, so a restart, a deploy or an update can't sign anyone out.
 - **Run one Orate per database.** Orate keeps live state (who is online, voice calls) in memory, so two servers can't share a database. If a second one writes, the stale one *refuses to overwrite* and exits so it restarts with the newest data — don't leave your PC's copy running against the same database as Render.
 - **Storage:** the database holds the whole chat history as one compressed record plus your uploads; the free tier's ~0.5 GB goes a long way for a friend group. `npm run db:info` shows what's used.
 - **Backups / leaving:** `npm run db:export` writes `data/db.json` and `data/uploads/` from the database (an existing `db.json` is backed up first), and that folder runs as a normal local Orate.
@@ -168,7 +188,9 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 
 ## What's inside
 
-**Chat** — servers with categories, text & voice channels, private channels, roles & permissions, invites (expiry / max uses), kicks & bans, nicknames; DMs and group DMs; friends, requests, blocking; replies, edits, deletes, pins, reactions; unread markers and mention badges; typing indicators; message search with filters; markdown (bold, italic, underline, strike, spoilers, quotes, headings, lists, code blocks with syntax highlighting, timestamps); `@user`, `@role`, `#channel` and `:emoji:` autocomplete; slash commands (`/shrug`, `/me`, `/spoiler`, `/gif`, `/nick` …); link previews with inline YouTube; images, video and audio inline with a lightbox; drag-and-drop & paste uploads with progress; GIFs and stickers from KLIPY (picking one stages it in the message box like an upload — you press send); a full emoji picker with skin tones and "frequently used".
+**Chat** — servers with categories, text & voice channels, roles & permissions with **per-channel and per-category permission overwrites** (see below), invites (expiry / max uses) that show up in chat as a server card with live Online / Member counts and a **Join** button, kicks & bans, nicknames; **server folders** — drag one server onto another (or use the server menu → *Server Folder*) to group them, rename / recolour the folder, drag servers in and out; **several accounts** on one device with a Discord-style *Switch Accounts* menu (Add / Manage Accounts); DMs and group DMs; friends, requests, blocking; replies, edits, deletes, pins, reactions; unread markers and mention badges; typing indicators; message search with filters; markdown (bold, italic, underline, strike, spoilers, quotes, headings, lists, code blocks with syntax highlighting, timestamps); `@user`, `@role`, `#channel` and `:emoji:` autocomplete; slash commands (`/shrug`, `/me`, `/spoiler`, `/gif`, `/nick` …); link previews with inline YouTube; images, video and audio inline with a lightbox; drag-and-drop & paste uploads with progress; GIFs and stickers from KLIPY (picking one stages it in the message box like an upload — you press send); a full emoji picker with skin tones and "frequently used".
+
+**Channel & category permissions** — right-click a channel or category → *Edit Permissions*. Pick a role or a member and set each permission to **Allow**, **Deny** or **Inherit**, exactly like Discord: the order is server permissions → @everyone → the member's roles → the member themselves, an Allow from a role beats a Deny from another role, and a channel you can't *View* grants nothing (that is also how private channels work; the *Private Channel* switch is a shortcut for it). Channels inside a category are **synced** with it — change the category and every synced channel follows. Changing a synced channel's permissions **unsyncs** it (the banner shows *Not synced*); *Sync Now* re-adopts the category's, *Unsync* detaches a copy. Only people with *Manage Permissions* can edit, they can't grant what they don't have, and they can't touch roles at or above their own. Everything is enforced on the server (messages, reactions, attachments, @everyone, voice) and the member list of a channel updates live.
 
 **Voice & video** — WebRTC mesh calls in voice channels and DMs, speaking indicators, mute / deafen, camera, screen share (with audio), per-user volume, push-to-talk, noise suppression, echo cancellation, device pickers and a mic level test. Incoming-call ring for DMs. Connects peer-to-peer using STUN; add a [TURN relay](#turn-relay-for-voice--video) for people behind strict NATs or firewalls.
 
@@ -205,9 +227,11 @@ server/
   storage.js    optional PostgreSQL storage (DATABASE_URL): state + uploaded files
   env.js        .env parsing   db-tool.js  db:import / db:export / db:info
   verify.js     email verification tokens, modes and gating
+  sessions.js   sign-in sessions (never expire; in their own Postgres table when DATABASE_URL is set)
+  music.js      SoundCloud search + audio relay + "listening to" status
 public/
   js/           Preact + htm (vendored, no build step), ES modules (rain.js, glass.js, fx.js: rain, liquid glass, button particles)
-  css/          base · layout · chat · ui · features · settings · auth
+  css/          base · layout · chat · ui · features · settings · auth · extras
   img/rain/     drop textures for the rain effect
   data/         emoji dataset (generated from Emojibase)
 ```
@@ -219,11 +243,12 @@ public/
 
 ## Security notes
 
-Passwords are hashed with scrypt; sessions are random 256-bit tokens (stored hashed). Message content is escaped by Orate's own markdown renderer before it reaches the DOM, uploads are served with a sandboxing CSP and non-media files download instead of rendering, link previews and the image proxy refuse private addresses, and a strict Content-Security-Policy is sent with every page. Auth and message endpoints are rate limited. Orate is designed for small/medium communities and self-hosting; put it behind HTTPS before exposing it to the internet.
+Passwords are hashed with scrypt; sessions are random 256-bit tokens (stored hashed, no IP addresses kept). Message content is escaped by Orate's own markdown renderer before it reaches the DOM, uploads are served with a sandboxing CSP and non-media files download instead of rendering, link previews and the image proxy refuse private addresses, and a strict Content-Security-Policy is sent with every page. Auth and message endpoints are rate limited. Orate is designed for small/medium communities and self-hosting; put it behind HTTPS before exposing it to the internet.
 
 ## Credits
 
 * **Rain on glass** is a port of Lucas Bebber's [Rain & Water Effect Experiments](https://tympanus.net/codrops/2015/11/04/rain-water-effect-experiments/) (Codrops, 2015): the drop simulation, the drop textures (`public/img/rain/`) and the water shader come from the [original project](https://github.com/codrops/RainEffect), adapted into a single ES module with Orate's sliders, presets and lightning. Its licence lets you integrate or build upon it in personal or commercial projects, but not republish or redistribute it as-is — so keep it as part of Orate rather than extracting it on its own.
+* **Music playback** in the browser uses [hls.js](https://github.com/video-dev/hls.js) (Apache-2.0, `public/vendor/hls.light.min.js`) for SoundCloud's HLS streams; tracks and artwork belong to their uploaders and SoundCloud.
 * **Liquid glass** uses the signed-distance-field lens, rim-light and dispersion approach from the [Apple-style glass CodePen](https://codepen.io/jhnsnc/pen/ByoEmoq) by jhnsnc, re-implemented as per-button WebGL lenses over your wallpaper.
 
 ## License

@@ -1,7 +1,9 @@
 // Orate — realtime gateway: presence, voice rooms and WebRTC signalling over WebSocket.
 import { WebSocketServer } from 'ws';
-import { db, sha, conns, gatedConns, send, emitTo, canView, audienceOf, publicUser, broadcastPresence, newId, can, voice, effectiveStatus } from './core.js';
+import { db, sha, conns, gatedConns, send, emitTo, canView, audienceOf, publicUser, broadcastPresence, newId, canIn, voice, effectiveStatus, save } from './core.js';
 import { buildReady } from './api.js';
+import { findSession } from './sessions.js';
+import { expireListening } from './music.js';
 import { isGated } from './verify.js';
 
 const offlineTimers = new Map();
@@ -45,7 +47,7 @@ export function attachGateway(server) {
       if (!ch || !canView(conn.userId, ch)) return send(conn, 'error', { message: 'Unknown channel' });
       if (ch.serverId) {
         if (ch.type !== 'voice') return send(conn, 'error', { message: 'Not a voice channel' });
-        if (!can(db.servers[ch.serverId], conn.userId, 'CONNECT')) return send(conn, 'error', { message: 'You can’t join this channel' });
+        if (!canIn(conn.userId, ch, 'CONNECT')) return send(conn, 'error', { message: 'You can’t join this channel' });
       } else if (!['dm', 'group'].includes(ch.type)) return;
       // one voice connection per user across all tabs
       for (const c of conns.get(conn.userId) || []) if (c.voice && c !== conn) c.leaveVoice?.('moved');
@@ -61,14 +63,16 @@ export function attachGateway(server) {
       if (!ch.serverId && wasEmpty) emitTo(ch.recipients.filter((id) => id !== conn.userId), 'call_ring', { channelId: ch.id, from: conn.userId, users: [publicUser(db.users[conn.userId])] });
     }
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
       let msg; try { msg = JSON.parse(raw.toString()); } catch { return; }
       const { op, d = {} } = msg || {};
       if (!conn.userId) {
-        if (op !== 'identify') return;
-        const s = db.sessions[sha(String(d.token || ''))];
-        const user = s && db.users[s.userId];
+        if (op !== 'identify' || conn.identifying) return;
+        conn.identifying = true;
+        const found = await findSession(String(d.token || '')).catch(() => null);
+        const user = found && db.users[found.rec.userId];
         if (!user || user.deleted) { send(conn, 'invalid_session', {}); return ws.close(4004, 'invalid token'); }   // the message too: some proxies swallow custom close codes
+        if (ws.readyState !== 1) return;   // the tab went away while we looked the session up
         clearTimeout(authTimer);
         conn.userId = user.id;
         if (isGated(user)) {   // REQUIRE_EMAIL_VERIFICATION: an empty world, no events, no voice
@@ -123,7 +127,12 @@ export function attachGateway(server) {
         conns.delete(conn.userId);
         // short grace period so a page reload doesn't flash the user offline
         const uid = conn.userId;
-        offlineTimers.set(uid, setTimeout(() => { offlineTimers.delete(uid); if (!conns.has(uid)) broadcastPresence(uid); }, 2500));
+        offlineTimers.set(uid, setTimeout(() => {
+          offlineTimers.delete(uid);
+          if (conns.has(uid)) return;
+          const u = db.users[uid]; if (u?.listening) { u.listening = null; save(); }   // closing the last tab stops the music, so the status goes too
+          broadcastPresence(uid);
+        }, 2500));
       } else if (set) broadcastPresence(conn.userId);
     });
     ws.on('error', () => {});
@@ -141,9 +150,10 @@ export function attachGateway(server) {
   return wss;
 }
 
-// expire timed custom statuses
+// expire timed custom statuses (and "listening to" statuses of tracks that must have ended)
 setInterval(() => {
   const now = Date.now();
+  expireListening();
   for (const u of Object.values(db.users)) {
     if (u.customStatus?.expiresAt && u.customStatus.expiresAt < now) { u.customStatus = null; broadcastPresence(u.id); emitTo([u.id], 'self_update', { user: { ...publicUser(u), customStatus: null } }); }
   }
