@@ -1,5 +1,5 @@
 // Orate — emoji / GIF / sticker picker popover.
-import { html, useState, useEffect, useRef, useMemo, useCallback, cx, debounce, uid } from '/js/lib.js';
+import { html, useState, useEffect, useRef, useMemo, useCallback, memo, cx, debounce, uid } from '/js/lib.js';
 import { state, set, useSel, updateSettings } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { POPOVERS, Spinner, Empty } from '/js/ui.js';
@@ -10,18 +10,32 @@ import { t } from '/js/i18n.js';
 export function openPicker(anchor, handlers, opts = {}) {
   const h = typeof handlers === 'function' ? { onEmoji: handlers } : handlers;
   const r = anchor.getBoundingClientRect();
-  set({ popover: { id: uid(), kind: 'picker', props: { handlers: h, tab: opts.emojiOnly ? 'emoji' : opts.tab || 'emoji', query: opts.query || '', emojiOnly: !!opts.emojiOnly }, rect: { x: r.x, y: r.y, w: r.width, h: r.height }, placement: opts.placement || 'top-end', class: 'picker-pop' }, ctx: null });
+  set({ popover: { id: uid(), kind: 'picker', props: { handlers: h, tab: opts.emojiOnly ? 'emoji' : opts.gifOnly ? 'gif' : opts.tab || 'emoji', query: opts.query || '', emojiOnly: !!opts.emojiOnly, gifOnly: !!opts.gifOnly }, rect: { x: r.x, y: r.y, w: r.width, h: r.height }, placement: opts.placement || 'top-end', class: 'picker-pop' }, ctx: null });
 }
 
 const TONES = ['', '🏻', '🏼', '🏽', '🏾', '🏿'];
 
 /* ------------------------------------------------------------------ emoji tab */
+// A cell is a stable, memoised component: if it were created inside EmojiTab every hover would re-render the tab, Preact would
+// see a brand-new component type and rebuild all ~1,800 buttons — which made the picker lag and could swallow clicks.
+const EmojiCell = memo(function EmojiCell({ char, label, code, onEmoji, onHover }) {
+  return html`<button type="button" class="emoji-cell" onMouseEnter=${() => onHover({ char, label, code })} onFocus=${() => onHover({ char, label, code })} onClick=${(e) => onEmoji(char, e)} aria-label=${label} title=${code ? ':' + code + ':' : label}>${char}</button>`;
+});
+function EmojiPreview({ api }) {
+  const [hover, setHover] = useState(null);
+  api.current = setHover;
+  return html`<div class="emoji-preview">${hover ? html`<span class="big">${hover.char}</span><span class="nm">${hover.code ? ':' + hover.code + ':' : hover.label}</span>` : html`<span class="hint">${t('Pick an emoji…')}</span>`}</div>`;
+}
 function EmojiTab({ onEmoji }) {
   const [data, setData] = useState(emojiData());
-  const [q, setQ] = useState(''); const [hover, setHover] = useState(null); const [toneOpen, setToneOpen] = useState(false); const [active, setActive] = useState('freq');
+  const [q, setQ] = useState(''); const [toneOpen, setToneOpen] = useState(false); const [active, setActive] = useState('freq');
   const tone = useSel((s) => s.settings.skinTone); const scroller = useRef(null);
-  const freq = frequentEmoji();
+  const previewApi = useRef(null); const freq = useMemo(() => frequentEmoji(), []);
+  const onHover = useCallback((h) => previewApi.current?.(h), []);
+  const pick = useRef(onEmoji); pick.current = onEmoji;
+  const choose = useCallback((c, e) => pick.current(c, e), []);
   useEffect(() => { loadEmoji().then(setData); }, []);
+  useEffect(() => { const el = scroller.current?.closest('.emoji-tab')?.querySelector('.pk-input'); el?.focus(); }, []);
   const results = useMemo(() => (q.trim() ? searchEmoji(q, 120) : null), [q, data]);
   const groups = data?.groups || [];
   const cats = [...(freq.length ? [{ key: 'freq', icon: '🕘', name: 'Frequently Used' }] : []), ...groups];
@@ -31,21 +45,21 @@ function EmojiTab({ onEmoji }) {
     for (const s of el.querySelectorAll('[data-sec]')) if (s.offsetTop - 12 <= el.scrollTop) cur = s.dataset.sec;
     if (cur !== active) setActive(cur);
   };
-  const Btn = ({ char, label, code }) => html`<button type="button" class="emoji-cell" onMouseEnter=${() => setHover({ char, label, code })} onFocus=${() => setHover({ char, label, code })} onClick=${(e) => onEmoji(char, e)} aria-label=${label}>${char}</button>`;
+  const cell = (char, label, code) => html`<${EmojiCell} key=${code || char} char=${char} label=${label} code=${code} onEmoji=${choose} onHover=${onHover} />`;
   return html`<div class="emoji-tab">
-    <div class="picker-search"><${Icon} name="search" size=${16} /><input class="pk-input" placeholder=${t('Find the perfect emoji')} value=${q} onInput=${(e) => setQ(e.target.value)} autofocus />
+    <div class="picker-search"><${Icon} name="search" size=${16} /><input class="pk-input" placeholder=${t('Find the perfect emoji')} value=${q} onInput=${(e) => setQ(e.target.value)} />
       ${q ? html`<button type="button" class="pk-clear" onClick=${() => setQ('')}><${Icon} name="x" size=${14} /></button>` : null}
       <div class="tone-wrap"><button type="button" class="tone-btn" data-tip="Skin tone" onClick=${() => setToneOpen(!toneOpen)}>${'👋' + TONES[tone]}</button>
         ${toneOpen ? html`<div class="tone-pop pop-in">${TONES.map((tn, i) => html`<button type="button" class=${cx(i === tone && 'sel')} onClick=${() => { setSkinTone(i); setToneOpen(false); }}>${'👋' + tn}</button>`)}</div>` : null}</div></div>
     <div class="emoji-main">
       ${!results ? html`<div class="cat-bar">${cats.map((c) => html`<button type="button" class=${cx(active === c.key && 'on')} data-tip=${c.name} data-tip-pos="right" onClick=${() => scrollTo(c.key)}>${c.icon}</button>`)}</div>` : null}
       <div class="emoji-scroll" ref=${scroller} onScroll=${onScroll}>
-        ${!data ? html`<div class="pk-center"><${Spinner} /></div>` : results ? (results.length ? html`<div class="emoji-grid">${results.map((e) => html`<${Btn} char=${applyTone(e, tone)} label=${e.label} code=${e.code} />`)}</div>` : html`<${Empty} icon="search" title="No emoji found">Try a different search.<//>`)
-          : html`${freq.length ? html`<section data-sec="freq"><h4>Frequently Used</h4><div class="emoji-grid">${freq.slice(0, 24).map((c) => html`<${Btn} char=${c} label=${c} />`)}</div></section>` : null}
-            ${groups.map((g) => html`<section key=${g.key} data-sec=${g.key}><h4>${g.name}</h4><div class="emoji-grid">${g.emojis.map((e) => html`<${Btn} char=${e[4] && tone ? e[4][tone - 1] : e[0]} label=${e[1]} code=${e[3]} />`)}</div></section>`)}`}
+        ${!data ? html`<div class="pk-center"><${Spinner} /></div>` : results ? (results.length ? html`<div class="emoji-grid">${results.map((e) => cell(applyTone(e, tone), e.label, e.code))}</div>` : html`<${Empty} icon="search" title="No emoji found">Try a different search.<//>`)
+          : html`${freq.length ? html`<section data-sec="freq"><h4>Frequently Used</h4><div class="emoji-grid">${freq.slice(0, 24).map((c) => cell(c, c, null))}</div></section>` : null}
+            ${groups.map((g) => html`<section key=${g.key} data-sec=${g.key}><h4>${g.name}</h4><div class="emoji-grid">${g.emojis.map((e) => cell(e[4] && tone ? e[4][tone - 1] : e[0], e[1], e[3]))}</div></section>`)}`}
       </div>
     </div>
-    <div class="emoji-preview">${hover ? html`<span class="big">${hover.char}</span><span class="nm">${hover.code ? ':' + hover.code + ':' : hover.label}</span>` : html`<span class="hint">${t('Pick an emoji…')}</span>`}</div>
+    <${EmojiPreview} api=${previewApi} />
   </div>`;
 }
 
@@ -104,13 +118,13 @@ function GifTab({ kind, initialQuery, onPick }) {
 }
 
 /* ------------------------------------------------------------------ popover */
-POPOVERS.picker = function Picker({ handlers, tab: initial, query, emojiOnly, close }) {
+POPOVERS.picker = function Picker({ handlers, tab: initial, query, emojiOnly, gifOnly, close }) {
   const [tab, setTab] = useState(initial);
   const gifOk = useSel((s) => s.gifOk);
   const tabs = [['gif', 'GIFs'], ['stickers', 'Stickers'], ['emoji', 'Emoji']];
   const idx = tabs.findIndex((x) => x[0] === tab);
   return html`<div class="picker pop-card" style=${emojiOnly ? { width: '390px' } : null}>
-    ${!emojiOnly ? html`<div class="picker-tabs" style=${{ '--i': idx }}><span class="thumb"></span>${tabs.map(([k, l]) => html`<button type="button" class=${cx(tab === k && 'on')} onClick=${() => setTab(k)}>${t(l)}</button>`)}</div>` : null}
+    ${!emojiOnly && !gifOnly ? html`<div class="picker-tabs" style=${{ '--i': idx }}><span class="thumb"></span>${tabs.map(([k, l]) => html`<button type="button" class=${cx(tab === k && 'on')} onClick=${() => setTab(k)}>${t(l)}</button>`)}</div>` : null}
     <div class="picker-body">
       ${tab === 'emoji' ? html`<${EmojiTab} onEmoji=${(c, e) => { handlers.onEmoji?.(c, e); if (emojiOnly && !e?.shiftKey) close(); }} />`
         : gifOk === false ? html`<${Empty} icon="alert-circle" title="GIFs not configured">Add a KLIPY_API_KEY to .env to enable GIFs.<//>`

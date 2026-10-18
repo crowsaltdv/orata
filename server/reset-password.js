@@ -11,6 +11,6 @@ const password = given || crypto.randomBytes(9).toString('base64url');
 const salt = crypto.randomBytes(16).toString('hex');
 user.salt = salt; user.hash = crypto.scryptSync(password, salt, 64).toString('hex');
 for (const [k, s] of Object.entries(db.sessions)) if (s.userId === user.id) delete db.sessions[k];
-save(); flush();
+save(); await flush();
 console.log(`Password for @${user.username} is now: ${password}\nAll existing sessions were signed out.`);
 process.exit(0);

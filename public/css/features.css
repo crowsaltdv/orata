@@ -78,7 +78,7 @@
 .friend-row { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 14px; cursor: pointer; border-top: 1px solid var(--border); transition: background var(--t-fast), transform var(--t-fast) var(--ease); animation: slide-up var(--t-med) var(--ease) both; }
 .friend-row:first-child { border-top-color: transparent; } .friend-row:hover { background: var(--hover); border-top-color: transparent; }
 .friend-row.sug { cursor: default; }
-.fr-text { flex: 1; min-width: 0; } .fr-name { display: flex; align-items: center; gap: 8px; } .fr-name b { font-size: 16px; } .fr-name .tag-chip { order: 1; } .fr-user { order: 2; font-size: 13.5px; color: var(--text-3); opacity: 0; max-width: 0; overflow: hidden; white-space: nowrap; transition: opacity var(--t-fast), max-width var(--t-med) var(--ease); } .friend-row:hover .fr-user { opacity: 1; max-width: 220px; }
+.fr-text { flex: 1; min-width: 0; } .fr-name { display: flex; align-items: center; gap: 8px; } .fr-name b { font-size: 16px; } .fr-user { order: 2; font-size: 13.5px; color: var(--text-3); opacity: 0; max-width: 0; overflow: hidden; white-space: nowrap; transition: opacity var(--t-fast), max-width var(--t-med) var(--ease); } .friend-row:hover .fr-user { opacity: 1; max-width: 220px; }
 .fr-sub { font-size: 13px; color: var(--text-3); margin-top: 1px; }
 .fr-actions { display: flex; gap: 8px; }
 .fr-btn { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--input-bg); color: var(--text-2); transition: all var(--t-fast) var(--ease-spring); }

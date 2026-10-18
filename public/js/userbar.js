@@ -64,7 +64,6 @@ export function UserBar() {
       <div class="vc-btns">
         <${IconBtn} icon=${conn.video ? 'video' : 'video-off'} label=${conn.video ? t('Turn Off Camera') : t('Turn On Camera')} active=${conn.video} onClick=${() => voice.toggleCamera()} glass="buttons" />
         <${IconBtn} icon="monitor" label=${conn.screen ? t('Stop Sharing') : t('Share Your Screen')} active=${conn.screen} onClick=${() => voice.toggleScreen()} glass="buttons" />
-        <${IconBtn} icon="grid" label=${t('Open voice view')} onClick=${() => ch && (ch.serverId ? goChannel(ch.serverId, ch.id) : go(`/channels/@me/${ch.id}`))} glass="buttons" />
       </div></div>` : null}
     <div class="ub-row">
       <button type="button" class="ub-user" onClick=${(e) => openPopover(e.currentTarget, 'user-menu', {}, { placement: 'top-start' })} data-popover-anchor>

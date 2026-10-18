@@ -5,7 +5,7 @@ import { Icon } from '/js/icons.js';
 import { Avatar, Btn, IconBtn, Empty, Badge } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { act, openDm } from '/js/actions.js';
-import { openProfile, TagChip } from '/js/sidebar.js';
+import { openProfile } from '/js/sidebar.js';
 import { userMenu } from '/js/profile.js';
 import { voice } from '/js/voice.js';
 import { copyText } from '/js/lib.js';
@@ -19,7 +19,7 @@ function FriendRow({ id, type }) {
   const btn = (icon, label, fn, cls) => html`<button type="button" class=${cx('fr-btn', cls)} data-tip=${label} aria-label=${label} onClick=${(e) => { e.stopPropagation(); fn(e); }}><${Icon} name=${icon} size=${19} /></button>`;
   return html`<div class="friend-row" role="button" tabindex="0" onClick=${(e) => (type === 'friend' ? openDm(id) : openProfile(id, e.currentTarget))} onContextMenu=${(e) => openContext(e, userMenu(id, null))}>
     <${Avatar} user=${u} size=${40} status=${type === 'friend' || type === 'blocked' ? u.status : undefined} />
-    <div class="fr-text"><div class="fr-name"><b>${u.displayName}</b><span class="fr-user">${u.username}</span>${u.tag ? html`<${TagChip} tag=${u.tag} />` : null}</div><div class="fr-sub">${sub}</div></div>
+    <div class="fr-text"><div class="fr-name"><b>${u.displayName}</b><span class="fr-user">${u.username}</span></div><div class="fr-sub">${sub}</div></div>
     <div class="fr-actions">
       ${type === 'friend' ? html`${btn('message', t('Message'), () => openDm(id))}${inVoice ? btn('volume', t('Join voice'), () => { const ch = state.channelIndex[inVoice]; if (ch?.serverId) { voice.join(inVoice); import('/js/store.js').then((m) => m.goChannel(ch.serverId, inVoice)); } }, 'live') : ''}${btn('more-v', t('More'), (e) => { const r = e.currentTarget.getBoundingClientRect(); openContext({ clientX: r.left, clientY: r.bottom + 4 }, userMenu(id, null)); })}` : null}
       ${type === 'incoming' ? html`${btn('check', t('Accept'), () => act(api.put(`/relationships/${id}`)), 'ok')}${btn('x', t('Ignore'), () => act(api.del(`/relationships/${id}`)), 'no')}` : null}

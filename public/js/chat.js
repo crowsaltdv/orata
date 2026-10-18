@@ -6,7 +6,6 @@ import { Avatar, IconBtn, Modal, MODALS } from '/js/ui.js';
 import { MessageList } from '/js/messagelist.js';
 import { Composer, composerApi } from '/js/composer.js';
 import { MembersPanel, DmProfilePanel, PinsPanel, SearchPanel } from '/js/panels.js';
-import { TagChip } from '/js/sidebar.js';
 import { voice } from '/js/voice.js';
 import { closeModal } from '/js/store.js';
 import { t } from '/js/i18n.js';
@@ -75,7 +74,7 @@ export function ChatView() {
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label="Menu"><${Icon} name="menu" size=${22} /></button>
       <div class="m-title">
         ${isDm ? (isGroup ? html`<span class="group-av sm"><${Icon} name="users" size=${15} /></span>` : html`<${Avatar} user=${other} size=${28} status=${other?.status || 'offline'} />`) : html`<${Icon} name=${ch.private ? 'hash-lock' : 'hash'} size=${23} />`}
-        <span class="name">${isDm ? dmName(ch, 5) : ch.name}</span>${other?.tag ? html`<${TagChip} tag=${other.tag} />` : null}
+        <span class="name">${isDm ? dmName(ch, 5) : ch.name}</span>
         ${isDm && !isGroup && other?.customStatus ? html`<span class="m-topic" style="border:0;padding:0">${other.customStatus.emoji} ${other.customStatus.text}</span>` : null}
       </div>
       ${!isDm && ch.topic ? html`<div class="m-topic" onClick=${() => openModal('topic', { channelId: ch.id })} title=${ch.topic}>${ch.topic}</div>` : null}

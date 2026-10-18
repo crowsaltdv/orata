@@ -10,11 +10,6 @@ import { voice } from '/js/voice.js';
 import { copyText, cmpId } from '/js/lib.js';
 import { t } from '/js/i18n.js';
 
-export function TagChip({ tag }) {
-  if (!tag?.text) return null;
-  return html`<span class="tag-chip" style=${tag.color ? { '--tc': tag.color } : null} data-tip="Server tag"><${Icon} name=${tag.icon || 'bolt'} size=${11} fill=${true} sw=${0} style=${{ color: tag.color }} />${tag.text}</span>`;
-}
-
 /* ------------------------------------------------------------------ DM list */
 export function dmMenu(ch) {
   const other = dmUserId(ch); const muted = !!state.settings.mutedChannels[ch.id];
@@ -46,7 +41,7 @@ const DmItem = memo(function DmItem({ id, active }) {
       ? html`<span class="group-av">${ch.icon ? html`<img src=${ch.icon} alt="" />` : html`<${Icon} name="users" size=${19} />`}</span>`
       : html`<${Avatar} user=${user} size=${36} status=${user?.status || 'offline'} />`}
     <span class="dm-text">
-      <span class="dm-name"><span>${names}</span>${user?.tag ? html`<${TagChip} tag=${user.tag} />` : null}</span>
+      <span class="dm-name"><span>${names}</span></span>
       <span class="dm-sub">${ch.type === 'group' ? `${ch.recipients.length} Members` : user?.customStatus ? `${user.customStatus.emoji || ''} ${user.customStatus.text}`.trim() : ''}</span>
     </span>
     ${Number(mentions) ? html`<${Badge} n=${Number(mentions)} />` : null}

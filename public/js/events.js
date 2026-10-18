@@ -11,10 +11,18 @@ export async function login(loginName, password) {
   const r = await api.post('/auth/login', { login: loginName, password });
   await startSession(r.token);
 }
+/** Resolves undefined once signed in, or `{ verify: true, ticket, email, mode, resendIn }` when an emailed code must be typed first. */
 export async function register(payload) {
   const r = await api.post('/auth/register', payload);
+  if (r.verify) return r;
   await startSession(r.token);
 }
+/** Step 2 of a verified sign-up: the code from the email creates the account. */
+export async function confirmRegistration(ticket, code) {
+  const r = await api.post('/auth/register/confirm', { ticket, code });
+  await startSession(r.token);
+}
+export const resendRegistrationCode = (ticket) => api.post('/auth/register/resend', { ticket });
 export async function startSession(token) {
   ls('token', null, token);
   set({ token, phase: 'loading' });
@@ -24,7 +32,7 @@ export async function logout({ silent } = {}) {
   try { if (!silent && state.token) await api.post('/auth/logout'); } catch { /* ignore */ }
   gateway.disconnect(); lsRemove('token');
   set({
-    token: null, phase: 'auth', me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {}, msgs: {}, reads: {}, lastMsg: {}, typing: {},
+    token: null, phase: 'auth', gated: false, verifyDismissed: false, me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {}, msgs: {}, reads: {}, lastMsg: {}, typing: {},
     voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel,
   });
   history.replaceState({}, '', '/login');
@@ -51,19 +59,19 @@ function bootstrap(d) {
   const reconnect = state.phase === 'ready';
   set({
     me: d.user, users, servers, dms, relationships: rel, reads: d.readStates, lastMsg, voice: { ...state.voice, states: voiceStates }, botId: d.botId, settings,
-    sessionId: d.connId, phase: 'ready', typing: {},
+    sessionId: d.connId, phase: 'ready', typing: {}, gated: !!d.gated,
   });
   ls('settings', null, settings);
   if (!Object.keys(remote).length) updateSettings({}, { sync: true });
   rebuildIndex();
   const r = resolveRoute(state.route.view === 'login' || state.route.view === 'register' || state.route.view === 'boot' ? parseRoute(location.pathname) : state.route);
-  if (!reconnect || !getChannel(state.route.channelId)) go(r.view === 'login' || r.view === 'register' ? { view: 'friends', serverId: '@me', channelId: null } : r, { replace: true });
+  if (r.view !== 'verify' && (!reconnect || !getChannel(state.route.channelId))) go(r.view === 'login' || r.view === 'register' ? { view: 'friends', serverId: '@me', channelId: null } : r, { replace: true });
   if (reconnect) { // re-sync whatever is on screen after a dropped connection
     for (const chId of Object.keys(state.msgs)) if (state.msgs[chId].loaded) loadMessages(chId, { force: true });
   }
   if (state.settings.notif.desktop && 'Notification' in window && Notification.permission === 'default') { /* asked from settings, never on load */ }
 }
-gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, maxUpload: c.maxUpload, turn: !!c.turn })).catch(() => {}); });
+gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, maxUpload: c.maxUpload, turn: !!c.turn, emailVerif: { enabled: !!c.emailVerification?.enabled, required: !!c.emailVerification?.required, smtp: !!c.emailVerification?.smtp } })).catch(() => {}); });
 
 /* ------------------------------------------------------------ helpers */
 function isMentioned(m, ch) {

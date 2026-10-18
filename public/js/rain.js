@@ -396,7 +396,7 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 /** Weather presets — the same moods as the original demo, expressed in Orate's slider units. */
 export const RAIN_PRESETS = {
-  rain: { label: 'Rain', amount: 0.35, size: 1, speed: 1, refraction: 1, mist: 3, trails: 1, droplets: 50, lightning: 0 },
+  rain: { label: 'Rain', amount: 0.7, size: 0.88, speed: 1, refraction: 1, mist: 3, trails: 1, droplets: 50, lightning: 0 },
   drizzle: { label: 'Drizzle', amount: 0.15, size: 0.8, speed: 1, refraction: 1, mist: 2, trails: 1, droplets: 10, lightning: 0 },
   storm: { label: 'Storm', amount: 0.4, size: 1.1, speed: 1.1, refraction: 1, mist: 5, trails: 2.5, droplets: 80, lightning: 0.1 },
   fallout: { label: 'Fallout', amount: 0.35, size: 1.4, speed: 1, refraction: 1, mist: 3, trails: 4, droplets: 20, lightning: 0 },

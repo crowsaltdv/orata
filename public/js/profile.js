@@ -5,7 +5,6 @@ import { Icon } from '/js/icons.js';
 import { Avatar, Btn, IconBtn, MODALS, POPOVERS, Modal, Spinner, TextInput, confirmDialog } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { act, openDm } from '/js/actions.js';
-import { TagChip } from '/js/sidebar.js';
 import { renderMarkdown } from '/js/markdown.js';
 import { t } from '/js/i18n.js';
 
@@ -79,7 +78,7 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
       <${Avatar} user=${user} size=${mode === 'panel' ? 96 : 80} status=${user.status} class="pc-avatar" />
     </div>
     <div class="pc-body">
-      <div class="pc-name"><span>${nick || user.displayName}</span>${user.tag ? html`<${TagChip} tag=${user.tag} />` : null}${user.bot ? html`<span class="bot-tag">APP</span>` : null}</div>
+      <div class="pc-name"><span>${nick || user.displayName}</span>${user.bot ? html`<span class="bot-tag">APP</span>` : null}</div>
       <div class="pc-user">${user.username}${user.pronouns ? html`<i> • ${user.pronouns}</i>` : null}</div>
       ${cs ? html`<div class="pc-status"><span>${cs.emoji}</span>${cs.text}</div>` : null}
       ${mode === 'panel' && d ? html`<div class="pc-mutual-row">${d.mutualServers.length ? html`<span class="mut-avs">${d.mutualServers.slice(0, 3).map((s) => html`<span class="mut-av" title=${s.name}>${s.icon ? html`<img src=${s.icon} alt="" />` : s.name[0]}</span>`)}</span><span>${d.mutualServers.length} ${t('Mutual Servers')}</span>` : null}</div>` : null}

@@ -2,7 +2,7 @@
 import { html, useState, useEffect, useRef, cx, debounce, ls } from '/js/lib.js';
 import { state, set, useSel, toast } from '/js/store.js';
 import { api } from '/js/api.js';
-import { login, register } from '/js/events.js';
+import { login, register, confirmRegistration, resendRegistrationCode } from '/js/events.js';
 import { Icon, Logo } from '/js/icons.js';
 import { Btn, Field, TextInput, Spinner } from '/js/ui.js';
 import { t } from '/js/i18n.js';
@@ -43,7 +43,42 @@ function LoginForm({ go }) {
   </div>`;
 }
 
-function RegisterForm({ go }) {
+/** Step 2 of sign-up (only when the server has email verification on): type the 6-digit code from the email. */
+function CodeForm({ pending, onBack }) {
+  const [code, setCode] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null); const [dead, setDead] = useState(false);
+  const [shake, setShake] = useState(0); const [left, setLeft] = useState(pending.resendIn || 60); const [sending, setSending] = useState(false);
+  const box = useRef(null);
+  useEffect(() => { const id = setTimeout(() => box.current?.focus(), 30); return () => clearTimeout(id); }, [shake, dead]);   // the form remounts to replay the shake, so take focus back each time
+  useEffect(() => { if (left <= 0) return undefined; const id = setTimeout(() => setLeft(left - 1), 1000); return () => clearTimeout(id); }, [left]);
+  const submit = async (value = code) => {
+    if (busy) return;
+    if (!/^\d{6}$/.test(value)) { setErr('Enter the 6-digit code from the email.'); setShake((s) => s + 1); return; }
+    setBusy(true); setErr(null);
+    try { await confirmRegistration(pending.ticket, value); } catch (e) {
+      setBusy(false); setErr(e.message); setShake((s) => s + 1);
+      if (e.code === 'code') setCode(''); else setDead(true);   // wrong code: try again; expired / locked / taken: start over
+    }
+  };
+  const onInput = (v) => { const d = v.replace(/\D/g, '').slice(0, 6); setCode(d); setErr(null); if (d.length === 6) submit(d); };
+  const resend = async () => {
+    setSending(true); setErr(null);
+    try { const r = await resendRegistrationCode(pending.ticket); setLeft(r.resendIn || 60); toast('A new code is on its way', 'success', 3500); } catch (e) { setErr(e.message); if (e.code !== 'rate_limited') setDead(true); }
+    setSending(false);
+  };
+  return html`<div class="auth-form" key=${shake} style=${err ? 'animation: shake .4s' : ''}>
+    <input ref=${box} class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••" autofocus value=${code} disabled=${busy || dead}
+      onInput=${(e) => onInput(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && submit()} aria-label="Verification code" />
+    ${pending.mode === 'console' ? html`<div class="note-chip"><${Icon} name="info" size=${14} /> No email server is set up, so the code was printed in the server console.</div>` : null}
+    ${err ? html`<div class="auth-error slide-down"><${Icon} name="alert-circle" size=${16} />${err}</div>` : null}
+    <${Btn} variant="primary" size="lg" class="btn-block" loading=${busy} disabled=${dead || code.length < 6} onClick=${() => submit()}>${t('Verify and create account')}<//>
+    <div class="verify-links">
+      <button type="button" class="link-btn" onClick=${onBack}>${dead ? t('Start over') : t('← Change my details')}</button>
+      ${dead ? null : html`<button type="button" class="link-btn" disabled=${left > 0 || sending} onClick=${resend}>${left > 0 ? `${t('Resend code')} (${left}s)` : t('Resend code')}</button>`}
+    </div>
+  </div>`;
+}
+
+function RegisterForm({ go, onPending }) {
   const now = new Date().getFullYear();
   const [f, setF] = useState({ email: '', displayName: '', username: '', password: '', month: '', day: '', year: '' });
   const [errs, setErrs] = useState({}); const [busy, setBusy] = useState(false); const [avail, setAvail] = useState(null);
@@ -63,7 +98,10 @@ function RegisterForm({ go }) {
     if (!f.month || !f.day || !f.year) e.dob = 'Enter your birthday';
     if (Object.keys(e).length) { setErrs(e); return; }
     setBusy(true);
-    try { await register({ email: f.email, username: f.username, displayName: f.displayName.trim() || f.username, password: f.password, dob: { year: +f.year, month: +f.month, day: +f.day } }); } catch (er) {
+    try {
+      const r = await register({ email: f.email, username: f.username, displayName: f.displayName.trim() || f.username, password: f.password, dob: { year: +f.year, month: +f.month, day: +f.day } });
+      if (r?.verify) { setBusy(false); onPending(r); }   // the server emailed a code: ask for it
+    } catch (er) {
       setBusy(false);
       if (['email', 'username', 'password', 'dob'].includes(er.code)) setErrs({ [er.code]: er.message }); else setErrs({ general: er.message });
     }
@@ -98,7 +136,8 @@ function RegisterForm({ go }) {
 export function AuthScreen() {
   const view = useSel((s) => (s.route.view === 'register' ? 'register' : 'login'));
   const [dir, setDir] = useState(1);
-  const go = (v) => { setDir(v === 'register' ? 1 : -1); history.replaceState({}, '', '/' + v); set({ route: { ...state.route, view: v } }); };
+  const [pending, setPending] = useState(null);   // set while an emailed sign-up code is awaited
+  const go = (v) => { setDir(v === 'register' ? 1 : -1); setPending(null); history.replaceState({}, '', '/' + v); set({ route: { ...state.route, view: v } }); };
   useEffect(() => { if (state.route.view !== 'login' && state.route.view !== 'register') go('login'); }, []);
   const invite = state.route.param || ls('pendingInvite', null);
   return html`<div class="auth-screen">
@@ -106,17 +145,18 @@ export function AuthScreen() {
     <div class="auth-hero">
       <div class="auth-mark"><${Logo} size=${150} /></div>
       <h1>Orate</h1>
-      <p>${t('Say it your way.')}</p>
     </div>
     <div class=${cx('auth-card panel', view)}>
       <div class="auth-card-in" key=${view} data-dir=${dir}>
         <header>
           <${Logo} size=${46} class="auth-logo" />
-          <h2>${view === 'login' ? t('Welcome back!') : t('Create an account')}</h2>
-          <p>${view === 'login' ? t("We're so excited to see you again!") : t('Join the conversation — it takes less than a minute.')}</p>
-          ${invite ? html`<div class="invite-note"><${Icon} name="link" size=${15} /> You’ve been invited to join a server. ${view === 'login' ? 'Log in' : 'Sign up'} to accept.</div>` : null}
+          <h2>${view === 'login' ? t('Welcome back!') : pending ? t('Check your email') : t('Create an account')}</h2>
+          <p>${view === 'login' ? t("We're so excited to see you again!") : pending ? html`${t('We sent a 6-digit code to')} <b>${pending.email}</b>` : t('Join the conversation — it takes less than a minute.')}</p>
+          ${invite && !pending ? html`<div class="invite-note"><${Icon} name="link" size=${15} /> You’ve been invited to join a server. ${view === 'login' ? 'Log in' : 'Sign up'} to accept.</div>` : null}
         </header>
-        ${view === 'login' ? html`<${LoginForm} go=${go} />` : html`<${RegisterForm} go=${go} />`}
+        ${view === 'login' ? html`<${LoginForm} go=${go} />` : html`
+          <div style=${pending ? 'display:none' : ''}><${RegisterForm} go=${go} onPending=${setPending} /></div>
+          ${pending ? html`<${CodeForm} key=${pending.ticket} pending=${pending} onBack=${() => setPending(null)} />` : null}`}
       </div>
     </div>
   </div>`;

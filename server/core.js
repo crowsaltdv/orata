@@ -2,48 +2,109 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
-export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+import { ROOT, ENV, loadEnv } from './env.js';
+import { PgStore, ConflictError, isSafeFileName } from './storage.js';
+export { ROOT, ENV, loadEnv };
 export const DATA_DIR = process.env.ORATE_DATA || path.join(ROOT, 'data');
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-/* ---------------------------------------------------------------- env */
-export function loadEnv() {
-  const env = {};
-  try {
-    const raw = fs.readFileSync(path.join(ROOT, '.env'), 'utf8');
-    for (const line of raw.split(/\r?\n/)) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/i);
-      if (m && !line.trim().startsWith('#')) env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-    }
-  } catch { /* no .env */ }
-  return { ...env, ...process.env };
-}
-export const ENV = loadEnv();
-
-/* ---------------------------------------------------------------- db */
-const empty = () => ({ users: {}, sessions: {}, servers: {}, channels: {}, messages: {}, invites: {}, botId: null, defaultServerId: null });
+/* ---------------------------------------------------------------- db: files in data/ (default) or PostgreSQL (DATABASE_URL) */
+export const pg = ENV.DATABASE_URL ? new PgStore(ENV.DATABASE_URL, ENV) : null;
+const empty = () => ({ users: {}, sessions: {}, servers: {}, channels: {}, messages: {}, invites: {}, emailTokens: {}, botId: null, defaultServerId: null });
 export let db = empty();
-try {
-  if (fs.existsSync(DB_FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
-} catch (e) {
-  console.error('[orate] db.json unreadable, keeping a backup and starting fresh:', e.message);
-  try { fs.copyFileSync(DB_FILE, DB_FILE + '.corrupt-' + Date.now()); } catch { /* ignore */ }
+let pgVersion = 0;   // the version of the database row this process last loaded or wrote
+
+if (pg) {
+  await pg.init();
+  const st = await pg.loadState();
+  if (st) { db = { ...empty(), ...JSON.parse(st.json) }; pgVersion = st.version; }
+  else {
+    // A brand-new database. Adopt local files (data/db.json + uploads/) if there are any, so moving to Postgres loses nothing.
+    let seed = empty(); let adopted = false;
+    if (fs.existsSync(DB_FILE)) {
+      try { seed = { ...empty(), ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) }; adopted = true; } catch (e) { console.error('[orate] data/db.json is unreadable, not importing it:', e.message); }
+    }
+    pgVersion = await pg.createState(JSON.stringify(seed));
+    if (pgVersion) {
+      db = seed;
+      if (adopted) {
+        console.log('[orate] This database is empty, so your local data/db.json was imported into it.');
+        const r = await pg.importDir(UPLOAD_DIR, console.log);
+        console.log(`[orate] ${r.added} uploaded file(s) copied to the database.`);
+      }
+    } else { const again = await pg.loadState(); db = { ...empty(), ...JSON.parse(again.json) }; pgVersion = again.version; }   // another instance created it a moment ago
+  }
+} else {
+  try {
+    if (fs.existsSync(DB_FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
+  } catch (e) {
+    console.error('[orate] db.json unreadable, keeping a backup and starting fresh:', e.message);
+    try { fs.copyFileSync(DB_FILE, DB_FILE + '.corrupt-' + Date.now()); } catch { /* ignore */ }
+  }
 }
-let timer = null; let dirty = false;
-export function save() { dirty = true; if (!timer) timer = setTimeout(flush, 500); }
+
+const SAVE_DELAY_MS = pg ? (Number(ENV.DATABASE_SAVE_DELAY_MS) || 2500) : 500;
+let timer = null; let dirty = false; let lastSaveAt = 0; let retryMs = 2000; let chain = Promise.resolve(); let writing = false;
+export function save() { dirty = true; lastSaveAt = Date.now(); if (!timer) timer = setTimeout(flush, SAVE_DELAY_MS); }
+/** Writes pending changes. Always returns a promise (already settled when storing in files). */
 export function flush() {
   clearTimeout(timer); timer = null;
-  if (!dirty) return; dirty = false;
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(db));
-  fs.renameSync(tmp, DB_FILE);
+  if (!pg) {
+    if (!dirty) return Promise.resolve();
+    dirty = false;
+    const tmp = DB_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(db));
+    fs.renameSync(tmp, DB_FILE);
+    return Promise.resolve();
+  }
+  chain = chain.then(async () => {
+    if (!dirty) return;
+    dirty = false; writing = true;
+    try { pgVersion = await pg.saveState(JSON.stringify(db), pgVersion); retryMs = 2000; } catch (e) {
+      if (e instanceof ConflictError || e.code === 'CONFLICT') anotherInstance();
+      dirty = true; console.error('[orate] could not save to the database, will retry:', e.message);
+      if (!timer) { timer = setTimeout(flush, retryMs); retryMs = Math.min(60_000, retryMs * 2); }
+    } finally { writing = false; }
+  });
+  return chain;
 }
-process.on('exit', flush);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { flush(); process.exit(0); });
+/** Two Orate processes share this database (e.g. an old and a new deploy). Never overwrite; restart so we load the latest data. */
+function anotherInstance() {
+  console.error('[orate] The database was changed by another Orate instance. Exiting so this one restarts with the latest data.\n        (Run only one Orate instance per database.)');
+  process.exit(1);
+}
+if (pg) {
+  // While people are active, notice quickly when another instance wrote. Stay quiet when idle so a serverless database can suspend.
+  setInterval(async () => {
+    if (dirty || writing || Date.now() - lastSaveAt > 10 * 60_000) return;
+    try { const v = await pg.peekVersion(); if (v && v !== pgVersion && !dirty && !writing) anotherInstance(); } catch { /* the next write will tell */ }
+  }, 30_000).unref();
+}
+process.on('exit', () => { if (!pg) flush(); });
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {   // flush, then leave (at most ~8 s for a slow database)
+  const bye = setTimeout(() => process.exit(0), 8000); bye.unref();
+  Promise.resolve(flush()).catch(() => {}).finally(() => process.exit(0));
+});
+
+/** Uploads: always kept in data/uploads (a cache when Postgres is used) and, with DATABASE_URL, also in the database. */
+export async function storeUpload(name, type, buf) {
+  if (pg) await pg.putFile(name, type, buf);   // first, so a full database refuses the upload before anything is kept
+  fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+}
+/** Makes sure an uploaded file is on local disk (fetching it from the database after a restart). Resolves whether it exists. */
+export async function restoreUpload(name) {
+  if (!isSafeFileName(name)) return false;
+  const file = path.join(UPLOAD_DIR, name);
+  if (fs.existsSync(file)) return true;
+  if (!pg) return false;
+  const f = await pg.getFile(name); if (!f) return false;
+  const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, f.data); fs.renameSync(tmp, file);
+  return true;
+}
+export const storageSummary = () => (pg ? `PostgreSQL (${pg.host})` : `local files (${path.relative(ROOT, DATA_DIR) || '.'}/)`);
 
 let lastId = 0;
 export function newId() { let t = Date.now() * 1000; if (t <= lastId) t = lastId + 1; lastId = t; return String(t); }
@@ -53,7 +114,7 @@ export const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 /* indexes (rebuilt on load) */
 export const byUsername = new Map();
 export const byEmail = new Map();
-for (const u of Object.values(db.users)) { byUsername.set(u.username, u.id); if (u.email) byEmail.set(u.email, u.id); }
+for (const u of Object.values(db.users)) { byUsername.set(u.username, u.id); if (u.email) byEmail.set(u.email, u.id); delete u.tag; delete u.decoration; }   // tags and avatar decorations no longer exist
 export const inviteCodes = db.invites;
 
 /* ------------------------------------------------------------- errors */
@@ -67,6 +128,12 @@ export const notFound = (m = 'Not found') => new ApiError(404, m, 'not_found');
 /* -------------------------------------------------------- connections */
 // userId -> Set<conn>  (conn = { id, ws, userId, idle, voice })
 export const conns = new Map();
+// sockets of accounts that must verify their email first: they get no events and may do nothing (see verify.js)
+export const gatedConns = new Map();
+/** Closes every live socket of a user (so their client reconnects and re-bootstraps). */
+export function closeConns(userId, code, reason, { onlyGated = false } = {}) {
+  for (const set of onlyGated ? [gatedConns.get(userId)] : [conns.get(userId), gatedConns.get(userId)]) for (const c of set || []) { try { c.ws.close(code, reason); } catch { /* ignore */ } }
+}
 export function isOnline(userId) { return (conns.get(userId)?.size || 0) > 0; }
 export function send(conn, op, d) {
   if (conn.ws.readyState === 1) conn.ws.send(JSON.stringify({ op, d }));
@@ -150,12 +217,12 @@ export function publicUser(u) {
   return {
     id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar || null,
     banner: u.banner || null, bannerColor: u.bannerColor || null, accentColor: u.accentColor || null,
-    bio: u.bio || '', pronouns: u.pronouns || '', tag: u.tag || null, createdAt: u.createdAt,
+    bio: u.bio || '', pronouns: u.pronouns || '', createdAt: u.createdAt,
     bot: !!u.bot, status: effectiveStatus(u), customStatus: u.customStatus || null,
   };
 }
 export function selfUser(u) {
-  return { ...publicUser(u), email: u.email, status: u.status || 'online', settings: u.settings || {}, dob: u.dob || null, verified: true };
+  return { ...publicUser(u), email: u.email, status: u.status || 'online', settings: u.settings || {}, dob: u.dob || null, emailVerified: u.emailVerified !== false };
 }
 
 export function serverView(server, userId) {
@@ -226,7 +293,7 @@ export const RESERVED = new Set(['everyone', 'here', 'admin', 'administrator', '
 export function ensureBot() {
   if (db.botId && db.users[db.botId]) return db.users[db.botId];
   const id = newId();
-  db.users[id] = { id, username: 'orbit', displayName: 'Orbit', email: null, bot: true, status: 'online', createdAt: Date.now(), bio: 'Your friendly Orate helper. Say "help" in a DM.', tag: { text: 'ORATE', icon: 'bolt', color: '#8b5cf6' }, bannerColor: '#6d28d9', rel: {}, reads: {}, settings: {} };
+  db.users[id] = { id, username: 'orbit', displayName: 'Orbit', email: null, bot: true, status: 'online', createdAt: Date.now(), bio: 'Your friendly Orate helper. Say "help" in a DM.', bannerColor: '#6d28d9', rel: {}, reads: {}, settings: {} };
   byUsername.set('orbit', id);
   db.botId = id;
   save();

@@ -1,0 +1,33 @@
+# Render Blueprint: one free web service + a free external Postgres for the data.
+# Create the free database first (Neon or Supabase, see README → "Free hosting with a free database"),
+# then on render.com choose New → Blueprint, point it at this repo, and paste the values below when asked.
+services:
+  - type: web
+    name: orate
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL          # the connection string from Neon / Supabase (postgresql://user:password@host/db)
+        sync: false
+      - key: PUBLIC_URL            # https://<your-service>.onrender.com  (used for links in emails)
+        sync: false
+      - key: TRUST_PROXY           # Render puts a proxy in front of the app
+        value: "true"
+      - key: MAX_UPLOAD_MB         # uploads are stored in the free database, so keep files small
+        value: "8"
+      - key: KLIPY_API_KEY
+        sync: false
+      # Optional: sign-up codes by email (see README → "Email verification")
+      # - key: SMTP_HOST
+      #   value: smtp.gmail.com
+      # - key: SMTP_USER
+      #   sync: false
+      # - key: SMTP_PASS
+      #   sync: false
+      # - key: MAIL_FROM
+      #   sync: false

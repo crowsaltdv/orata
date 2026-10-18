@@ -18,7 +18,7 @@ set({ route: { ...state.route, ...route } });
 if (state.token) { set({ phase: 'loading' }); gateway.connect(); } else {
   set({ phase: 'auth' });
   if (route.view === 'invite') { import('/js/lib.js').then(({ ls }) => ls('pendingInvite', null, route.param)); history.replaceState({}, '', '/login'); set({ route: { view: 'login', serverId: '@me', channelId: null, param: route.param } }); }
-  else if (route.view !== 'register') { history.replaceState({}, '', '/login'); set({ route: { view: 'login', serverId: '@me', channelId: null } }); }
+  else if (route.view !== 'register' && route.view !== 'verify') { history.replaceState({}, '', '/login'); set({ route: { view: 'login', serverId: '@me', channelId: null } }); }
 }
 render(html`<${App} />`, document.getElementById('app'));
 window.__orate = { state };

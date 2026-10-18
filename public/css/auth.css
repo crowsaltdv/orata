@@ -47,3 +47,29 @@
 .splash-mark { animation: splash-pulse 1.8s ease-in-out infinite; filter: drop-shadow(0 12px 40px rgb(var(--accent-rgb) / .6)); }
 @keyframes splash-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08) rotate(-3deg); } }
 .splash-text { color: var(--text-2); font-weight: 600; letter-spacing: .02em; animation: pulse 1.6s ease-in-out infinite; }
+
+/* ------------------------------------------------ email verification */
+.verify-card { text-align: center; }
+.verify-card header { margin-bottom: 18px; }
+.verify-card header b { color: var(--text); }
+.verify-ic { width: 68px; height: 68px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--accent-grad); color: var(--on-accent); box-shadow: 0 12px 30px -10px rgb(var(--accent-rgb) / .8); animation: pop-in var(--t-med) var(--ease-spring) both; margin-bottom: 4px; }
+.verify-ic.ok { background: linear-gradient(135deg, #34d399, #10b981); color: #fff; box-shadow: 0 12px 30px -10px rgb(16 185 129 / .8); }
+.verify-ic.bad { background: linear-gradient(135deg, #f87171, #ef4444); color: #fff; box-shadow: 0 12px 30px -10px rgb(239 68 68 / .8); }
+.verify-card .note-chip { margin-bottom: 14px; text-align: left; }
+.verify-card .auth-form { margin-top: 4px; }
+.verify-links { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.verify-banner { position: fixed; top: 12px; left: 0; right: 0; margin: 0 auto; width: fit-content; max-width: calc(100vw - 24px); z-index: 55; display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 14px; border-radius: 99px; font-size: 13.5px; background: rgb(var(--panel-rgb) / .92); backdrop-filter: blur(20px) saturate(1.3); border: 1px solid var(--border); box-shadow: var(--shadow-pop); }
+.verify-banner span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.verify-banner .vb-btn { flex: none; padding: 5px 13px; border-radius: 99px; background: var(--accent-grad); color: var(--on-accent); font-weight: 700; font-size: 12.5px; transition: transform var(--t-fast) var(--ease-spring), filter var(--t-fast); }
+.verify-banner .vb-btn:hover:not(:disabled) { transform: scale(1.06); filter: brightness(1.1); }
+.verify-banner .vb-btn:disabled { opacity: .55; }
+.verify-banner .vb-x { flex: none; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
+.verify-banner .vb-x:hover { background: var(--hover); color: var(--text); }
+
+/* sign-up code entry */
+.code-input { width: 100%; height: 66px; text-align: center; font-size: 34px; font-weight: 700; letter-spacing: .5em; text-indent: .5em; font-variant-numeric: tabular-nums; font-family: var(--font-code); border-radius: var(--radius-sm); background: var(--input-bg); color: var(--text); border: 1px solid transparent; outline: none; transition: border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast); }
+.code-input::placeholder { color: var(--text-4); letter-spacing: .35em; }
+.code-input:focus { border-color: rgb(var(--accent-rgb) / .8); box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / .2); }
+.code-input:disabled { opacity: .6; }
+.auth-form .note-chip { text-align: left; }
+.verify-links .link-btn:disabled { opacity: .5; text-decoration: none; cursor: default; }

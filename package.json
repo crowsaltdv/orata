@@ -8,14 +8,20 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node server/selftest.js",
-    "reset-password": "node server/reset-password.js"
+    "test": "node server/selftest.js && node server/selftest-email.js && node server/selftest-pg.js",
+    "reset-password": "node server/reset-password.js",
+    "verify-email": "node server/verify-user.js",
+    "test-mail": "node server/test-mail.js",
+    "db:info": "node server/db-tool.js info",
+    "db:import": "node server/db-tool.js import",
+    "db:export": "node server/db-tool.js export"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "express": "^4.21.2",
+    "pg": "^8.23.1",
     "ws": "^8.18.0"
   }
 }

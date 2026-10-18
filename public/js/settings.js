@@ -1,16 +1,18 @@
 // Orate — user settings overlay (account, profile, appearance, voice, notifications, language …).
 import { html, useState, useEffect, useRef, cx, copyText, formatMemberSince, relTime, ls } from '/js/lib.js';
-import { state, set, useSel, closeModal, openModal, setSetting, updateSettings, resetSettings, toast, updateLocal } from '/js/store.js';
+import { state, set, useSel, closeModal, openModal, closePopover, setSetting, updateSettings, resetSettings, toast, updateLocal } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
 import { Btn, Field, TextInput, Toggle, SettingRow, Section, Segmented, Modal, MODALS, Avatar, ColorSwatch, Empty, confirmDialog, Dropdown, useEscape } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { act, errMsg, closeSettings, openSettings } from '/js/actions.js';
 import { logout } from '/js/events.js';
-import { chooseAndUploadImage } from '/js/imageutil.js';
+import { chooseAndUploadImage, uploadGifFrom } from '/js/imageutil.js';
+import { openPicker } from '/js/pickers.js';
 import { ProfileCard, Banner } from '/js/profile.js';
 import { ThemePage, WallpaperPage, EffectsPage, FontsPage, ChatPage, SToggle, SSlider } from '/js/settings-appearance.js';
 import { VoicePage } from '/js/settings-voice.js';
 import { LANGUAGES, t } from '/js/i18n.js';
+import { resendVerification } from '/js/verify.js';
 import { playSound } from '/js/sound.js';
 import { DEFAULT_SETTINGS } from '/js/defaults.js';
 
@@ -53,7 +55,7 @@ function AccountPage() {
   const row = (label, val, action, btn) => html`<div class="acct-row"><div><small>${label}</small><b>${val}</b></div>${action ? html`<${Btn} size="sm" onClick=${action}>${btn || t('Edit')}<//>` : null}</div>`;
   return html`<div class="s-page">
     <div class="acct-card panel"><${Banner} user=${me} height=${100} /><div class="acct-head"><${Avatar} user=${me} size=${84} status=${me.status} class="acct-av" /><div class="acct-name"><b>${me.displayName}</b><span>@${me.username}</span></div><${Btn} variant="primary" icon="edit" onClick=${() => openSettings('profile')}>${t('Edit User Profile')}<//></div>
-      <div class="acct-rows">${row(t('Display name'), me.displayName, () => openSettings('profile'))}${row(t('Username'), me.username, () => openModal('account-edit', { field: 'username' }))}${row(t('Email'), reveal ? me.email : masked, () => openModal('account-edit', { field: 'email' }))}<button type="button" class="link-btn reveal" onClick=${() => setReveal(!reveal)}>${reveal ? t('Hide') : t('Reveal')} ${t('email')}</button></div></div>
+      <div class="acct-rows">${row(t('Display name'), me.displayName, () => openSettings('profile'))}${row(t('Username'), me.username, () => openModal('account-edit', { field: 'username' }))}${row(t('Email'), reveal ? me.email : masked, () => openModal('account-edit', { field: 'email' }))}<button type="button" class="link-btn reveal" onClick=${() => setReveal(!reveal)}>${reveal ? t('Hide') : t('Reveal')} ${t('email')}</button>${me.emailVerified === false && state.emailVerif.enabled ? html`<div class="note-chip"><${Icon} name="alert-circle" size=${14} /> ${t('Your email isn’t verified yet.')} <button type="button" class="link-btn" onClick=${() => resendVerification()}>${t('Resend link')}</button></div>` : me.emailVerified === true && state.emailVerif.enabled ? html`<div class="note-chip ok"><${Icon} name="check" size=${14} /> ${t('Email verified')}</div>` : null}</div></div>
     <${Section} title=${t('Password & devices')}>
       <${SettingRow} title=${t('Password')} desc=${t('Changing your password signs you out of every other device.')}><${Btn} onClick=${() => openModal('account-edit', { field: 'password' })}>${t('Change Password')}<//><//>
       <h4 class="s-sub">${t('Where you’re signed in')}</h4><${Sessions} />
@@ -65,17 +67,23 @@ function AccountPage() {
 }
 
 /* ------------------------------------------------------------------ profile */
-const TAG_ICONS = ['bolt', 'star', 'heart', 'crown', 'sparkles', 'flag', 'droplet', 'shield', 'award', 'music', 'globe', 'target'];
 function ProfilePage() {
   const me = useSel((s) => s.me);
-  const orig = { displayName: me.displayName, pronouns: me.pronouns || '', bio: me.bio || '', avatar: me.avatar, banner: me.banner, bannerColor: me.bannerColor || '#6d28d9', tag: me.tag || null };
+  const orig = { displayName: me.displayName, pronouns: me.pronouns || '', bio: me.bio || '', avatar: me.avatar, banner: me.banner, bannerColor: me.bannerColor || '#6d28d9' };
   const [d, setD] = useState(orig); const [busy, setBusy] = useState(false); const [up, setUp] = useState(null);
   const dirty = JSON.stringify(d) !== JSON.stringify(orig);
   const up1 = (k, v) => setD((p) => ({ ...p, [k]: v }));
   const img = async (key, opts) => { setUp(key); try { const u = await chooseAndUploadImage(opts); if (u) up1(key, u); } catch (e) { toast(errMsg(e), 'error'); } setUp(null); };
-  const save = async () => { setBusy(true); const r = await act(api.patch('/me', { displayName: d.displayName.trim() || me.displayName, pronouns: d.pronouns, bio: d.bio, avatar: d.avatar, banner: d.banner, bannerColor: d.bannerColor, tag: d.tag }), { success: 'Profile saved' }); setBusy(false); if (r) set({}); };
-  const tag = d.tag || { text: '', icon: 'bolt', color: '#8b5cf6' };
-  const preview = { ...me, ...d, tag: d.tag?.text ? d.tag : null };
+  // a GIF from KLIPY becomes the avatar: fetched through the image proxy, stored on this server like any other upload
+  const gifAvatar = (anchor) => openPicker(anchor, {
+    onGif: async (item) => {
+      closePopover(); setUp('avatar');
+      try { up1('avatar', await uploadGifFrom(item.preview?.gif || item.full?.gif || item.preview?.url, 'avatar.gif')); } catch (e) { toast(errMsg(e), 'error'); }
+      setUp(null);
+    },
+  }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });
+  const save = async () => { setBusy(true); const r = await act(api.patch('/me', { displayName: d.displayName.trim() || me.displayName, pronouns: d.pronouns, bio: d.bio, avatar: d.avatar, banner: d.banner, bannerColor: d.bannerColor }), { success: 'Profile saved' }); setBusy(false); if (r) set({}); };
+  const preview = { ...me, ...d };
   return html`<div class="s-page profile-edit">
     <div class="pe-form">
       <${Section} title=${t('Profile')} desc=${t('How you appear to everyone on Orate.')}>
@@ -84,16 +92,12 @@ function ProfilePage() {
         <${Field} label=${t('About me')} hint=${`${d.bio.length}/400 — ${t('supports markdown')}`}><textarea class="textarea" rows="4" maxlength="400" value=${d.bio} onInput=${(e) => up1('bio', e.target.value)} placeholder=${t('Tell everyone a little about yourself')}></textarea><//>
       <//>
       <${Section} title=${t('Avatar')}>
-        <div class="pe-media"><${Avatar} user=${preview} size=${72} /><div class="pe-btns"><${Btn} variant="primary" loading=${up === 'avatar'} icon="upload" onClick=${() => img('avatar', { aspect: 1, out: 256, round: true, title: 'Avatar', allowGif: true })}>${t('Change Avatar')}<//>${d.avatar ? html`<${Btn} variant="ghost" onClick=${() => up1('avatar', null)}>${t('Remove')}<//>` : null}</div></div>
+        <div class="pe-media"><${Avatar} user=${preview} size=${72} /><div class="pe-btns"><${Btn} variant="primary" loading=${up === 'avatar'} icon="upload" onClick=${() => img('avatar', { aspect: 1, out: 256, round: true, title: 'Avatar', allowGif: true })}>${t('Change Avatar')}<//>${state.gifOk !== false ? html`<${Btn} icon="sticker" disabled=${up === 'avatar'} onClick=${(e) => gifAvatar(e.currentTarget)}>${t('Choose a GIF')}<//>` : null}${d.avatar ? html`<${Btn} variant="ghost" onClick=${() => up1('avatar', null)}>${t('Remove')}<//>` : null}</div></div>
+        <p class="text-muted" style="font-size:13px;margin:10px 0 0">${t('Upload a GIF or pick one from KLIPY — animated avatars play everywhere.')}</p>
       <//>
       <${Section} title=${t('Banner')}>
         <div class="pe-banner"><${Banner} user=${preview} height=${96} /></div>
         <div class="pe-btns"><${Btn} variant="primary" loading=${up === 'banner'} icon="image" onClick=${() => img('banner', { aspect: 3, out: 960, title: 'Banner' })}>${t('Change Banner')}<//>${d.banner ? html`<${Btn} variant="ghost" onClick=${() => up1('banner', null)}>${t('Remove')}<//>` : null}<span class="pe-color"><${ColorSwatch} value=${d.bannerColor} onChange=${(c) => up1('bannerColor', c)} label="Banner color" size=${34} /><small>${t('Banner color')}</small></span></div>
-      <//>
-      <${Section} title=${t('Tag')} desc=${t('A short badge shown next to your name — 4 letters or numbers.')}>
-        <div class="tag-edit"><${TextInput} value=${tag.text} onInput=${(v) => up1('tag', v.trim() ? { ...tag, text: v.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 4).toUpperCase() } : null)} placeholder="ORAT" maxlength="4" />
-          <${ColorSwatch} value=${tag.color} onChange=${(c) => up1('tag', { ...tag, color: c })} label="Tag color" size=${38} /></div>
-        <div class="tag-icons">${TAG_ICONS.map((i) => html`<button type="button" class=${cx(tag.icon === i && 'sel')} onClick=${() => up1('tag', { ...tag, icon: i })}><${Icon} name=${i} size=${17} fill=${true} sw=${0} /></button>`)}</div>
       <//>
     </div>
     <div class="pe-preview"><h4 class="s-sub">${t('Preview')}</h4><div class="pop-card profile-pop"><${ProfileCard} userId=${me.id} userOverride=${preview} mode="modal" /></div></div>

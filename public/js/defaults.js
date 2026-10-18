@@ -31,24 +31,24 @@ export const PANEL_PRESETS = [
   ['#1f1a14', 'Mocha'], ['#ffffff', 'Snow'], ['#f3ecff', 'Lavender'], ['#e8f4ff', 'Sky'], ['#fff1f2', 'Blush'],
 ];
 
-export const SETTINGS_VERSION = 4;
+export const SETTINGS_VERSION = 5;
 export const DEFAULT_SETTINGS = {
   v: SETTINGS_VERSION,
   theme: {
-    mode: 'dark', accentType: 'gradient', accent: '#8b5cf6', accent2: '#ec4899',
-    panelType: 'solid', panelColor: '#15121f', panelColor2: '#241238', panelAngle: 160, panelOpacity: 0.5, panelBlur: 10,
+    mode: 'dark', accentType: 'gradient', accent: '#64748b', accent2: '#94a3b8',
+    panelType: 'solid', panelColor: '#0b0b10', panelColor2: '#241238', panelAngle: 160, panelOpacity: 0.58, panelBlur: 17,
     radius: 18, gap: 10, textColor: null, saturation: 1.15,
   },
   bg: {
-    type: 'mesh', mesh: 'aurora', image: null, photo: null, color: '#0b0a14', gradient: { c1: '#1e1b4b', c2: '#7c3aed', angle: 135 },
+    type: 'photo', mesh: 'graphite', image: null, photo: 'photo-3', color: '#0b0a14', gradient: { c1: '#1e1b4b', c2: '#7c3aed', angle: 135 },
     blur: 0, dim: 0.22, brightness: 1, saturate: 1.1, posX: 50, posY: 50, zoom: 1, parallax: true, library: [],
   },
-  rain: { enabled: false, preset: 'rain', amount: 0.35, size: 1, speed: 1, refraction: 1, mist: 3, trails: 1, droplets: 50, lightning: 0, fps: 60 },
-  glass: { style: 'liquid', intensity: 0.65, rail: true, nav: true, toolbar: true, buttons: true, composer: true },
+  rain: { enabled: true, preset: 'rain', amount: 0.7, size: 0.88, speed: 1, refraction: 1, mist: 3, trails: 1, droplets: 50, lightning: 0, fps: 60 },
+  glass: { style: 'off', last: 'liquid', intensity: 1, rail: true, nav: true, toolbar: true, buttons: true, composer: true, panels: true },
   fx: { particles: true, ripples: true, amount: 1 },
-  fonts: { ui: 'Inter', chat: null, code: 'JetBrains Mono', size: 16, weight: 400, lineHeight: 1.45, letterSpacing: 0 },
+  fonts: { ui: 'Klee One', chat: null, code: 'JetBrains Mono', size: 16, weight: 400, lineHeight: 1.45, letterSpacing: 0 },
   motion: { reduce: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, parallaxHover: true },
-  chat: { compact: false, hour24: false, linkPreviews: true, inlineMedia: true, jumbo: true, showAvatars: true, spacing: 16, gifAutoplay: true, spoilerOnHover: false },
+  chat: { compact: true, hour24: false, linkPreviews: true, inlineMedia: true, jumbo: true, showAvatars: true, spacing: 16, gifAutoplay: true, spoilerOnHover: false },
   notif: { desktop: true, sounds: true, volume: 0.5, mentionsOnly: false, flash: true },
   lang: 'en',
   privacy: { dmFromServers: true, friendRequests: true, showActivity: true },
@@ -77,6 +77,7 @@ export function migrateSettings(saved) {
     if (s.theme && s.theme.panelOpacity === 0.58) s.theme.panelOpacity = DEFAULT_SETTINGS.theme.panelOpacity;
   }
   if ((s.v || 0) < 4) { delete s.rain; delete s.quests; delete s.shopEquipped; }   // v3/v4: rain is now the original Codrops effect with new options (lighter default mist)
+  if ((s.v || 0) < 5) { delete s.quests; delete s.shopEquipped; if (s.glass) s.glass.style = 'off'; }   // v5: glass is opt-in (off by default) and now covers the whole UI
   s.v = SETTINGS_VERSION;
   return s;
 }

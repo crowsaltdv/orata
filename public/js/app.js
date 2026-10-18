@@ -17,6 +17,7 @@ import '/js/modals.js';
 import '/js/pickers.js';
 import '/js/voice.js';
 import { markAllRead, ackChannel } from '/js/actions.js';
+import { VerifyScreen, VerifyGate, VerifyBanner } from '/js/verify.js';
 
 function MainView() {
   const view = useSel((s) => s.route.view);
@@ -84,10 +85,12 @@ function cycle(dir, unreadOnly) {
 export function App() {
   const phase = useSel((s) => s.phase);
   const lang = useSel((s) => s.settings.lang);
+  const gated = useSel((s) => s.gated);
+  const verifying = useSel((s) => s.route.view === 'verify');
   useEffect(() => { if (phase !== 'ready') document.title = 'Orate'; }, [phase]);
   return html`<div class="app-root" key=${lang}>
-    ${phase === 'auth' ? html`<${AuthScreen} />` : phase === 'ready' ? html`<${Shell} />` : html`<${Splash} />`}
-    ${phase === 'ready' ? html`<${CallOverlay} /><${QuickSwitcher} /><${SettingsHost} /><${ServerSettingsHost} />` : null}
+    ${verifying ? html`<${VerifyScreen} />` : phase === 'auth' ? html`<${AuthScreen} />` : phase === 'ready' ? (gated ? html`<${VerifyGate} />` : html`<${Shell} />`) : html`<${Splash} />`}
+    ${phase === 'ready' && !gated && !verifying ? html`<${CallOverlay} /><${QuickSwitcher} /><${SettingsHost} /><${ServerSettingsHost} /><${VerifyBanner} />` : null}
     <${Lightbox} /><${ModalHost} /><${ContextMenu} /><${PopoverHost} /><${ToastHost} />
   </div>`;
 }

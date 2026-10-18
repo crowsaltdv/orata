@@ -61,4 +61,14 @@ export async function chooseAndUploadImage(opts) {
   const r = await upload(new File([blob], 'image.webp', { type: 'image/webp' }));
   return r.url;
 }
+/** Downloads a remote image through the server's image proxy and stores it as an upload; resolves with the new /uploads URL. */
+export async function uploadGifFrom(url, name = 'image.gif') {
+  if (!url) throw new Error('That GIF has no image to use');
+  const r = await fetch('/api/img?url=' + encodeURIComponent(url));
+  if (!r.ok) throw new Error('Could not download that GIF');
+  const blob = await r.blob();
+  if (blob.size > 8 * 1024 * 1024) throw new Error('That GIF is too large for an avatar (max 8 MB)');
+  const res = await upload(new File([blob], name, { type: blob.type || 'image/gif' }));
+  return res.url;
+}
 void state;

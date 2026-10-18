@@ -136,7 +136,7 @@ export function WallpaperPage() {
 export function EffectsPage() {
   const rain = useSel((s) => s.settings.rain); const g = useSel((s) => s.settings.glass); const m = useSel((s) => s.settings.motion); const fx = useSel((s) => s.settings.fx);
   const rainOn = rain.enabled && !m.reduce;
-  const scopes = [['rail', 'Server icons'], ['nav', 'Navigation buttons'], ['toolbar', 'Toolbar & header buttons'], ['buttons', 'Action buttons'], ['composer', 'Message box']];
+  const scopes = [['panels', 'Panels, menus & windows'], ['rail', 'Server icons'], ['nav', 'Navigation buttons'], ['toolbar', 'Toolbar & header buttons'], ['buttons', 'Action buttons'], ['composer', 'Message box']];
   return html`<div class="s-page">
     <${Section} title=${t('Rain on glass')} desc=${t('The original Codrops raindrop effect: drops refract your wallpaper upside-down, merge, slide down and leave trails on foggy glass.')}>
       <${SettingRow} title=${t('Enable rain')} desc=${m.reduce ? t('Turn off “Reduce motion” to use this.') : t('Runs on the GPU. Pauses automatically when the tab is hidden.')}><${SToggle} path="rain.enabled" onChange=${(on) => on && state.settings.bg.type === 'solid' && updateSettings({ bg: { type: 'mesh' } })} /><//>
@@ -153,13 +153,16 @@ export function EffectsPage() {
         <${SettingRow} title=${t('Frame rate')} desc=${t('30 FPS saves battery.')}><${Segmented} size="sm" options=${[{ value: 30, label: '30' }, { value: 60, label: '60' }]} value=${rain.fps} onChange=${(v) => setSetting('rain.fps', v)} /><//>
       </div>
     <//>
-    <${Section} title=${t('Liquid glass buttons')} desc=${t('Reflective, refractive buttons inspired by Apple’s glass — the rim bends whatever is behind it.')}>
+    <${Section} title=${t('Liquid glass')} desc=${t('Apple-style glass for the whole interface — panels, menus, windows and buttons. The rims bend whatever is behind them.')}>
       <div class="glass-demo"><button type="button" class="btn glass glass-buttons">${t('Primary')}</button><button type="button" class="icon-btn glass glass-toolbar"><${Icon} name="settings" size=${19} /></button><button type="button" class="btn glass glass-buttons"><${Icon} name="sparkles" size=${16} />${t('Explore')}</button><span class="rail-btn glass glass-rail" style="--s:46px"><${Icon} name="hash" size=${22} /></span></div>
-      <${SettingRow} title=${t('Style')}><${Segmented} size="sm" options=${[{ value: 'liquid', label: t('Liquid') }, { value: 'frosted', label: t('Frosted') }, { value: 'off', label: t('Off') }]} value=${g.style} onChange=${(v) => setSetting('glass.style', v)} /><//>
-      ${g.style === 'liquid' ? html`<div class="note-chip"><${Icon} name="info" size=${14} /> ${t('Liquid glass is drawn on the GPU (WebGL). If your browser can’t run it, buttons fall back to frosted glass.')}</div>` : null}
-      <${SettingRow} title=${t('Intensity')} desc=${t('Refraction strength, reflection and rim light.')} stack><${SSlider} path="glass.intensity" scale=${100} min=${10} max=${100} format=${pct} disabled=${g.style === 'off'} /><//>
-      <h4 class="s-sub">${t('Apply to')}</h4>
-      ${scopes.map(([k, l]) => html`<${SettingRow} title=${t(l)}><${SToggle} path=${'glass.' + k} /><//>`)}
+      <${SettingRow} title=${t('Enable liquid glass')} desc=${t('Off by default. Turn it on for glass everywhere, or pick which parts below.')}><${Toggle} checked=${g.style !== 'off'} onChange=${(on) => setSetting('glass.style', on ? (g.last === 'frosted' ? 'frosted' : 'liquid') : 'off')} /><//>
+      <div class=${cx(g.style === 'off' && 'dim')}>
+        <${SettingRow} title=${t('Style')}><${Segmented} size="sm" options=${[{ value: 'liquid', label: t('Liquid') }, { value: 'frosted', label: t('Frosted') }]} value=${g.style === 'off' ? (g.last || 'liquid') : g.style} onChange=${(v) => updateSettings({ glass: { style: v, last: v } })} /><//>
+        ${g.style === 'liquid' ? html`<div class="note-chip"><${Icon} name="info" size=${14} /> ${t('Liquid glass is drawn on the GPU (WebGL). If your browser can’t run it, glass falls back to a frosted look.')}</div>` : null}
+        <${SettingRow} title=${t('Intensity')} desc=${t('Refraction strength, reflection and rim light.')} stack><${SSlider} path="glass.intensity" scale=${100} min=${10} max=${100} format=${pct} /><//>
+        <h4 class="s-sub">${t('Apply to')}</h4>
+        ${scopes.map(([k, l]) => html`<${SettingRow} title=${t(l)}><${SToggle} path=${'glass.' + k} /><//>`)}
+      </div>
     <//>
     <${Section} title=${t('Button effects')} desc=${t('Little touches that make every click feel good.')}>
       <${SettingRow} title=${t('Particle bursts')} desc=${t('Sparkles when you send, react, toggle or confirm.')}><${SToggle} path="fx.particles" /><//>
@@ -192,7 +195,7 @@ export function FontsPage() {
       <${SettingRow} title=${t('Letter spacing')} stack><${SSlider} path="fonts.letterSpacing" scale=${100} min=${-5} max=${20} format=${(v) => (v / 100).toFixed(2) + 'em'} /><//>
     <//>
     <${Section} title=${t('Preview')}>
-      <div class="font-preview"><p class="fpv-ui">${t('Interface')}: Orate — Say it your way.</p>
+      <div class="font-preview"><p class="fpv-ui">${t('Interface')}: Orate — The quick brown fox jumps over the lazy dog.</p>
         <p class="msg-content" style="font-size:var(--font-size)">${t('Chat')}: The quick brown fox jumps over the lazy dog. <strong>Bold</strong>, <em>italic</em> and <span class="mention">@mention</span>.</p>
         <pre class="codeblock fpv-code"><code>const greeting = "hello, world"; // ${t('Code')}</code></pre></div>
     <//>

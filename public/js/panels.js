@@ -5,7 +5,7 @@ import { Icon } from '/js/icons.js';
 import { Avatar, Empty, Spinner, IconBtn } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { jumpToMessage, pinMessage } from '/js/actions.js';
-import { TagChip, openProfile } from '/js/sidebar.js';
+import { openProfile } from '/js/sidebar.js';
 import { ProfileCard, userMenu } from '/js/profile.js';
 import { renderMarkdown, plainPreview } from '/js/markdown.js';
 import { addUsers } from '/js/store.js';
@@ -21,7 +21,7 @@ const MemberRow = memo(function MemberRow({ id, serverId, groupColor }) {
   const off = u.status === 'offline';
   return html`<button type="button" class=${cx('member-row', off && 'off')} onClick=${(e) => openProfile(id, e.currentTarget)} onContextMenu=${(e) => openContext(e, userMenu(id, serverId))}>
     <${Avatar} user=${u} size=${34} status=${u.status} />
-    <span class="mr-text"><span class="mr-name" style=${color ? { color } : null}>${nick || u.displayName}${owner ? html`<${Icon} name="crown" size=${13} class="crown" />` : null}${u.tag ? html`<${TagChip} tag=${u.tag} />` : null}${u.bot ? html`<span class="bot-tag">APP</span>` : null}</span>
+    <span class="mr-text"><span class="mr-name" style=${color ? { color } : null}>${nick || u.displayName}${owner ? html`<${Icon} name="crown" size=${13} class="crown" />` : null}${u.bot ? html`<span class="bot-tag">APP</span>` : null}</span>
       ${u.customStatus ? html`<span class="mr-sub">${u.customStatus.emoji} ${u.customStatus.text}</span>` : null}</span>
   </button>`;
 });

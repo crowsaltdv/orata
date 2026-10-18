@@ -12,6 +12,9 @@ import {
   ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId,
 } from './core.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
+import { verificationMode, isGated, issueVerification, consumeVerification, resendWait, maskEmail } from './verify.js';
+import { beginSignup, confirmSignup, resendSignup } from './signup.js';
+import { closeConns, storeUpload, restoreUpload } from './core.js';
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -97,6 +100,7 @@ export function buildIceConfig(userId) {
 
 /* ------------------------------------------------------------ ready */
 export function buildReady(user) {
+  if (isGated(user)) return { user: selfUser(user), servers: [], dms: [], users: [], relationships: [], readStates: {}, voiceStates: [], botId: db.botId, gated: true };   // must verify their email first
   const servers = Object.values(db.servers).filter((s) => s.members[user.id]);
   const dms = Object.values(db.channels).filter((c) => !c.serverId && c.recipients?.includes(user.id) && !user.closedDms?.[c.id]);
   const userIds = new Set([user.id, ...relatedUserIds(user.id)]);
@@ -125,6 +129,7 @@ export function createApi() {
   r.get('/config', (req, res) => res.json({
     name: 'Orate', gifs: !!ENV.KLIPY_API_KEY, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0, maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
     users: Object.keys(db.users).length, botId: db.botId,
+    emailVerification: verificationMode(),   // { enabled, required, smtp }
   }));
 
   /* --------------------------- auth --------------------------- */
@@ -157,11 +162,37 @@ export function createApi() {
 
     ensureBot();
     const { salt, hash } = await hashPassword(password);
+    const fields = { email, username, displayName, salt, hash, dob };
+    if (verificationMode().enabled) {
+      // nobody gets an account until they type the code we email them (the half-finished sign-up is only kept in memory)
+      const out = await beginSignup(fields);
+      return res.json({ verify: true, ticket: out.ticket, email: maskEmail(email), mode: out.mode, expiresIn: out.expiresIn, resendIn: out.resendIn });
+    }
+    res.json(createAccount(fields, req));
+  }));
+
+  // step 2 of a verified sign-up: the code from the email creates the account
+  r.post('/auth/register/confirm', limit('regconfirm', 20, 60_000), h(async (req, res) => {
+    const { ticket, code } = req.body || {};
+    const fields = confirmSignup(ticket, code);
+    if (byEmail.has(fields.email)) throw bad('That email was registered while you were verifying. Log in instead.', 'email');
+    if (byUsername.has(fields.username)) throw bad('That username was taken while you were verifying. Pick another one.', 'username');
+    res.json(createAccount(fields, req));
+  }));
+  r.post('/auth/register/resend', limit('regresend', 10, 60_000), h(async (req, res) => {
+    const out = await resendSignup((req.body || {}).ticket);
+    res.json({ ok: true, mode: out.mode, expiresIn: out.expiresIn, resendIn: out.resendIn });
+  }));
+
+  /** Creates the user, joins the community server, sets up the welcome DM and returns { token, user }. */
+  function createAccount({ email, username, displayName, salt, hash, dob }, req) {
+    ensureBot();
     const id = newId();
     const hues = ['#8b5cf6', '#ec4899', '#f97316', '#10b981', '#06b6d4', '#3b82f6', '#ef4444', '#eab308'];
     const user = {
       id, username, displayName, email, salt, hash, dob, avatar: null, banner: null, bannerColor: hues[Number(id) % hues.length],
-      accentColor: null, bio: '', pronouns: '', tag: null, status: 'online', customStatus: null, createdAt: Date.now(), rel: {}, reads: {}, settings: {}, closedDms: {},
+      accentColor: null, bio: '', pronouns: '', status: 'online', customStatus: null, createdAt: Date.now(), rel: {}, reads: {}, settings: {}, closedDms: {},
+      emailVerified: true,   // new accounts are verified: either verification is off, or they typed the emailed code
     };
     db.users[id] = user; byUsername.set(username, id); byEmail.set(email, id);
 
@@ -192,8 +223,8 @@ export function createApi() {
       const dm = db.channels[dmId]; if (!dm) return;
       postMessage(dm, bot.id, { content: `**Welcome to Orate, ${displayName}!** 🎉\nI’m Orbit, your built-in helper. Say \`help\` any time to see what you can do.\nA community server called **${community.name}** is already waiting for you on the left.` });
     }, 1500);
-    res.json({ token, user: selfUser(user) });
-  }));
+    return { token, user: selfUser(user) };
+  }
 
   r.post('/auth/login', limit('login', 12, 60_000), h(async (req, res) => {
     const { login, password } = req.body || {};
@@ -202,6 +233,13 @@ export function createApi() {
     const user = id && db.users[id];
     if (!user || user.bot || !(await checkPassword(user, password))) throw new ApiError(401, 'Invalid login or password', 'invalid_login');
     res.json({ token: newSession(user, req), user: selfUser(user) });
+  }));
+
+  // The emailed link opens /verify?token=… in the app, which POSTs the token here (a POST, so mail scanners that pre-fetch links can't burn it).
+  r.post('/auth/verify-email', limit('verify', 30, 60_000), h(async (req, res) => {
+    const user = consumeVerification((req.body || {}).token);
+    if (!user) throw bad('This verification link is invalid or has expired. Sign in and ask for a new one.', 'invalid_token');
+    res.json({ ok: true, username: user.username, email: maskEmail(user.email) });
   }));
 
   /* ---- image proxy + disk cache (wallpapers; works pre-login, CORS-safe for WebGL, survives hotlink blocks) ---- */
@@ -235,6 +273,21 @@ export function createApi() {
     next();
   });
 
+  // REQUIRE_EMAIL_VERIFICATION: until the address is verified only these calls work
+  const GATE_OK = new Set(['POST /auth/logout', 'POST /auth/resend-verification', 'GET /ready', 'GET /me', 'PATCH /me', 'DELETE /me']);
+  r.use((req, res, next) => (isGated(req.user) && !GATE_OK.has(`${req.method} ${req.path}`) ? next(new ApiError(403, 'Verify your email to continue', 'email_unverified')) : next()));
+
+  r.post('/auth/resend-verification', limit('resend', 8, 3600_000, (req) => req.user.id), h(async (req, res) => {
+    const u = req.user;
+    if (!verificationMode().enabled) throw bad('Email verification is not enabled on this server');
+    if (u.emailVerified !== false) throw bad('Your email is already verified', 'already_verified');
+    const wait = resendWait(u);
+    if (wait > 0) throw new ApiError(429, `Please wait ${Math.ceil(wait / 1000)} seconds before asking for another email.`, 'rate_limited');
+    const out = await issueVerification(u, req);
+    if (!out.sent) throw new ApiError(502, 'The email could not be sent. Ask the server admin to check the SMTP settings.', 'mail_failed');
+    res.json({ sent: true, mode: out.mode, email: maskEmail(u.email) });
+  }));
+
   r.post('/auth/logout', h(async (req, res) => { delete db.sessions[req.sessionId]; save(); res.json({ ok: true }); }));
   r.get('/ready', (req, res) => res.json(buildReady(req.user)));
 
@@ -245,7 +298,7 @@ export function createApi() {
   r.get('/ice', (req, res) => res.json(buildIceConfig(req.user.id)));
 
   r.patch('/me', h(async (req, res) => {
-    const u = req.user; const b = req.body || {};
+    const u = req.user; const b = req.body || {}; let emailChanged = false;
     if (b.displayName !== undefined) u.displayName = str(b.displayName, 1, 32, 'Display name');
     if (b.bio !== undefined) u.bio = String(b.bio).slice(0, 400);
     if (b.pronouns !== undefined) u.pronouns = String(b.pronouns).slice(0, 40);
@@ -255,13 +308,6 @@ export function createApi() {
     if (b.customStatus !== undefined) {
       if (b.customStatus === null || (!b.customStatus.text && !b.customStatus.emoji)) u.customStatus = null;
       else u.customStatus = { emoji: String(b.customStatus.emoji || '').slice(0, 16) || null, text: String(b.customStatus.text || '').slice(0, 128), expiresAt: b.customStatus.expiresAt ? Number(b.customStatus.expiresAt) : null };
-    }
-    if (b.tag !== undefined) {
-      if (b.tag === null || !b.tag.text) u.tag = null;
-      else {
-        const text = String(b.tag.text).replace(/[^\p{L}\p{N}]/gu, '').slice(0, 4).toUpperCase();
-        u.tag = text ? { text, icon: String(b.tag.icon || 'bolt').slice(0, 20), color: HEX.test(b.tag.color) ? b.tag.color : '#8b5cf6' } : null;
-      }
     }
     if (b.username !== undefined && b.username.toLowerCase() !== u.username) {
       if (!(await checkPassword(u, b.password))) throw bad('Current password is incorrect', 'password');
@@ -276,12 +322,14 @@ export function createApi() {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw bad('Enter a valid email address', 'email');
       if (byEmail.has(email)) throw bad('That email is already registered', 'email');
       byEmail.delete(u.email); byEmail.set(email, u.id); u.email = email;
+      if (verificationMode().enabled) { u.emailVerified = false; emailChanged = true; }   // the new address must be confirmed too
     }
     save();
     emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) });
     emitTo([u.id], 'self_update', { user: selfUser(u) });
     if (b.status !== undefined || b.customStatus !== undefined) broadcastPresence(u.id);
     res.json(selfUser(u));
+    if (emailChanged) { issueVerification(u, req); if (isGated(u)) setTimeout(() => closeConns(u.id, 4011, 'email changed'), 50); }   // gated tabs reconnect onto the verify screen
   }));
 
   r.patch('/me/settings', h(async (req, res) => {
@@ -323,7 +371,7 @@ export function createApi() {
     for (const id of Object.keys(u.rel || {})) { const o = db.users[id]; if (o?.rel) { delete o.rel[u.id]; emitTo([id], 'relationship_update', { id: u.id, type: null }); } }
     for (const [k, s] of Object.entries(db.sessions)) if (s.userId === u.id) delete db.sessions[k];
     byUsername.delete(u.username); byEmail.delete(u.email);
-    Object.assign(u, { deleted: true, username: 'deleted_' + u.id.slice(-8), displayName: 'Deleted User', email: null, hash: null, salt: null, avatar: null, banner: null, bio: '', tag: null, customStatus: null, rel: {}, settings: {} });
+    Object.assign(u, { deleted: true, username: 'deleted_' + u.id.slice(-8), displayName: 'Deleted User', email: null, hash: null, salt: null, avatar: null, banner: null, bio: '', customStatus: null, rel: {}, settings: {} });
     emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) });
     for (const set of [...(conns.get(u.id) || [])]) set.ws.close(4001, 'deleted');
     save(); res.json({ ok: true });
@@ -732,6 +780,7 @@ export function createApi() {
       const last = [...(db.messages[ch.id] || [])].reverse().find((m) => m.authorId === req.user.id);
       if (last && Date.now() - last.createdAt < ch.slowmode * 1000) throw new ApiError(429, `Slowmode is on — wait ${Math.ceil((ch.slowmode * 1000 - (Date.now() - last.createdAt)) / 1000)}s`, 'slowmode');
     }
+    await Promise.all((Array.isArray(b.attachments) ? b.attachments.slice(0, 10) : []).map((a) => restoreUpload(path.basename(String(a?.url || '')))));   // after a restart the file may only be in the database
     let attachments = sanitizeAttachments(b.attachments, fs, path, UPLOAD_DIR);
     if (server && attachments.length && !can(server, req.user.id, 'ATTACH_FILES')) attachments = [];
     const gif = sanitizeMedia(b.gif, 'gif'); const sticker = sanitizeMedia(b.sticker, 'sticker');
@@ -873,7 +922,10 @@ export function createApi() {
     const type = String(req.headers['content-type'] || 'application/octet-stream').split(';')[0].slice(0, 100);
     const id = newId();
     const file = `${id}${ext}`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, file), req.body);
+    try { await storeUpload(file, type, req.body); } catch (e) {   // files go to data/uploads, and with DATABASE_URL into the database too
+      if (e.code === 'QUOTA') throw new ApiError(507, e.message, 'storage_full');
+      console.error('[orate] could not store an upload:', e.message); throw new ApiError(503, 'Could not save the file right now. Try again in a moment.', 'storage_error');
+    }
     res.json({ id, url: `/uploads/${file}`, name: rawName, size: req.body.length, type });
   }));
 

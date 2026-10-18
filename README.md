@@ -21,7 +21,7 @@ Requires Node.js 20 or newer. Nothing else — there is no database to set up, d
 
 ```bash
 npm run dev                      # restart on file changes
-npm test                         # backend self-test (62 checks: auth, servers, messages, DMs, uploads, GIFs, settings sync, TURN credentials, voice signalling …)
+npm test                         # backend self-tests (145 checks: auth, servers, messages, DMs, uploads, GIFs, settings sync, TURN credentials, voice signalling, email verification …)
 npm run reset-password <user>    # forgot a password? prints a new one
 ```
 
@@ -43,6 +43,50 @@ npm run reset-password <user>    # forgot a password? prints a new one
 | `ICE_TRANSPORT_POLICY` | `all` | Set to `relay` to force every call through TURN (testing / hiding IP addresses) |
 
 > **Microphone, camera, screen sharing and desktop notifications only work on `localhost` or over HTTPS.** To use voice with other devices on your network, set `HTTPS_KEY`/`HTTPS_CERT`, or put Orate behind a TLS reverse proxy (Caddy, nginx, Cloudflare Tunnel …). Make sure it forwards WebSocket upgrades on `/gateway`.
+
+## Email verification
+
+Orate can make people prove they own the address they sign up with: after filling in the sign-up form they get an email with a **6-digit code** and the account is only created once they type it in. It is **off until you configure it** — with nothing in `.env` the sign-up form just creates the account. When it is on, the server prints `Email verification: ON …` at startup (and `OFF …` when it isn't), so you can always tell.
+
+| You set | What happens |
+| --- | --- |
+| nothing | No verification (the default). |
+| `SMTP_HOST` (+ login) | Sign-up sends the code by email through your mail server. If the email can't be sent, the person sees an error instead of waiting for nothing. |
+| `REQUIRE_EMAIL_VERIFICATION=true` | Same flow, even without a mail server (dev mode: the code is printed in the console). It also locks accounts out of the app until they re-verify after changing their email address. |
+
+Add the mail settings to `.env` and restart:
+
+```ini
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587              # 587 = STARTTLS (default), 465 = implicit TLS (set SMTP_SECURE=true)
+SMTP_USER=you@gmail.com
+SMTP_PASS=your-app-password
+MAIL_FROM=Orate <you@gmail.com>
+PUBLIC_URL=https://chat.example.com   # where people reach Orate; used for links in emails (address changes)
+# REQUIRE_EMAIL_VERIFICATION=true
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SMTP_HOST` / `SMTP_PORT` | – / `587` | Your mail server. Port 465 with `SMTP_SECURE=true` uses TLS from the start; anything else upgrades with STARTTLS. |
+| `SMTP_USER` / `SMTP_PASS` | – | Login (AUTH PLAIN / LOGIN). Credentials are never sent without TLS (loopback servers excepted). |
+| `MAIL_FROM` | `Orate <SMTP_USER>` | The sender, e.g. `Orate <no-reply@example.com>`. Most providers require a verified sender or domain. |
+| `PUBLIC_URL` | the address the request came to | **Set this in production.** Base of the verification *link* (used when someone changes their address later); without it Orate trusts the `Host` header of the request. |
+| `REQUIRE_EMAIL_VERIFICATION` | `false` | Turn verification on even without SMTP (dev mode), and lock unverified accounts out (see above). |
+| `EMAIL_TOKEN_TTL_HOURS` | `24` | How long a verification link works. (Sign-up codes always expire after 10 minutes.) |
+| `SMTP_TLS_VERIFY` | `true` | Set `false` only for a self-signed certificate on a private mail server. |
+
+**Check your settings without signing anyone up:** `npm run test-mail` connects to your mail server and logs in (sending nothing) and tells you what's wrong if it can't; `npm run test-mail you@example.com` also sends a real test email. Remember that lines in `.env` that start with `#` are comments and are ignored.
+
+Working providers: Gmail or Google Workspace (create an *app password*; 2-step verification must be on), Outlook / Microsoft 365, Brevo, Mailgun, SendGrid, Postmark, Resend and Amazon SES — each shows its SMTP host, port and credentials in its dashboard.
+
+**No mail server yet? Dev mode.** Leave `SMTP_HOST` empty and set `REQUIRE_EMAIL_VERIFICATION=true`: the email is printed in the terminal where Orate runs, code included — type it in. If someone has an *existing* unverified account and can't receive email, you can mark them verified yourself:
+
+```bash
+npm run verify-email <username>
+```
+
+How the sign-up code works: nothing is written to the database until the code is typed in (the half-finished sign-up only lives in server memory for 10 minutes); five wrong guesses cancel it; "Resend code" is limited to once a minute (five times in all), and only the browser that started the sign-up can finish it. Accounts created before you turned this on count as verified. Changing the email address later in Settings sends a verification *link* to the new address and marks the account unverified until it is clicked (links are random 256-bit tokens, stored hashed, single-use, verified through a POST so mail scanners that pre-open links can't use them up).
 
 ## TURN relay for voice & video
 
@@ -80,22 +124,64 @@ Orate asks its own server for the ICE configuration every time you join a call (
 
 Hosted TURN services (Cloudflare, Twilio, Metered …) work too: use the URLs and static username/credential they give you.
 
+## Free hosting with a free database
+
+Hosts like Render's free plan wipe the app's folder on every restart, so Orate's usual `data/` folder would lose everything. Set **`DATABASE_URL`** and Orate keeps *all* its data — accounts, servers, messages, sessions and uploaded files — in a PostgreSQL database instead (a free one is enough). Without `DATABASE_URL` nothing changes: it uses local files.
+
+**1. Make the free database.** Create a project on [Neon](https://neon.tech) (or [Supabase](https://supabase.com)); neither needs a card. Copy the *connection string* — it looks like `postgresql://user:password@host/dbname?sslmode=require`. Orate creates its two tables (`orate_state`, `orate_files`) by itself.
+
+**2. (Optional) bring your existing data.** Put the connection string in your local `.env` and start Orate once:
+
+```ini
+DATABASE_URL=postgresql://user:password@ep-xxxx.neon.tech/neondb?sslmode=require
+```
+
+An empty database adopts your local `data/db.json` and `data/uploads/` automatically, and the startup text says `Storage: PostgreSQL (…)`. Check it with `npm run db:info`. (`npm run db:import -- --force` re-copies local data over what's there.)
+
+**3. Deploy on Render.** Push the project to GitHub (`.env` and `data/` are git-ignored — keep it that way), then either use **New → Blueprint** (this repo contains a `render.yaml`) or create a **Web Service** with build command `npm install` and start command `npm start`. Set these environment variables in Render's dashboard:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | the connection string from step 1 |
+| `TRUST_PROXY` | `true` (Render puts a proxy in front of the app) |
+| `PUBLIC_URL` | `https://<your-service>.onrender.com` |
+| `MAX_UPLOAD_MB` | `8` (uploads are stored in the free database, so keep files small) |
+| `KLIPY_API_KEY`, `SMTP_*` | as in your `.env` — put secrets here, never in git |
+
+**Settings**
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | – | Set it to use PostgreSQL. |
+| `DATABASE_SSL` | verify | `no-verify` if the database's certificate can't be verified (some Supabase connections), `off` for a database without TLS. Local databases never use TLS. |
+| `DATABASE_FILES_MB` | `350` | Cap for uploaded files in the database, so a 0.5 GB free plan can't fill up; uploads beyond it are refused with a clear message. |
+| `DATABASE_SAVE_DELAY_MS` | `2500` | Changes are saved a moment after they happen (batched). |
+| `DATABASE_POOL_MAX` | `3` | Database connections. |
+
+**What to expect**
+- **Render's free service sleeps** after about 15 minutes without visitors; the next visit wakes it (up to a minute) and everybody's live connection reconnects by itself. The data is untouched.
+- **Run one Orate per database.** Orate keeps live state (who is online, voice calls) in memory, so two servers can't share a database. If a second one writes, the stale one *refuses to overwrite* and exits so it restarts with the newest data — don't leave your PC's copy running against the same database as Render.
+- **Storage:** the database holds the whole chat history as one compressed record plus your uploads; the free tier's ~0.5 GB goes a long way for a friend group. `npm run db:info` shows what's used.
+- **Backups / leaving:** `npm run db:export` writes `data/db.json` and `data/uploads/` from the database (an existing `db.json` is backed up first), and that folder runs as a normal local Orate.
+- Your Postgres password is as sensitive as the data: keep `DATABASE_URL` out of git.
+
 ## What's inside
 
-**Chat** — servers with categories, text & voice channels, private channels, roles & permissions, invites (expiry / max uses), kicks & bans, nicknames; DMs and group DMs; friends, requests, blocking; replies, edits, deletes, pins, reactions; unread markers and mention badges; typing indicators; message search with filters; markdown (bold, italic, underline, strike, spoilers, quotes, headings, lists, code blocks with syntax highlighting, timestamps); `@user`, `@role`, `#channel` and `:emoji:` autocomplete; slash commands (`/shrug`, `/me`, `/spoiler`, `/gif`, `/nick` …); link previews with inline YouTube; images, video and audio inline with a lightbox; drag-and-drop & paste uploads with progress; GIFs and stickers from KLIPY; a full emoji picker with skin tones and "frequently used".
+**Chat** — servers with categories, text & voice channels, private channels, roles & permissions, invites (expiry / max uses), kicks & bans, nicknames; DMs and group DMs; friends, requests, blocking; replies, edits, deletes, pins, reactions; unread markers and mention badges; typing indicators; message search with filters; markdown (bold, italic, underline, strike, spoilers, quotes, headings, lists, code blocks with syntax highlighting, timestamps); `@user`, `@role`, `#channel` and `:emoji:` autocomplete; slash commands (`/shrug`, `/me`, `/spoiler`, `/gif`, `/nick` …); link previews with inline YouTube; images, video and audio inline with a lightbox; drag-and-drop & paste uploads with progress; GIFs and stickers from KLIPY (picking one stages it in the message box like an upload — you press send); a full emoji picker with skin tones and "frequently used".
 
 **Voice & video** — WebRTC mesh calls in voice channels and DMs, speaking indicators, mute / deafen, camera, screen share (with audio), per-user volume, push-to-talk, noise suppression, echo cancellation, device pickers and a mic level test. Incoming-call ring for DMs. Connects peer-to-peer using STUN; add a [TURN relay](#turn-relay-for-voice--video) for people behind strict NATs or firewalls.
 
-**Customization** (User Settings → Appearance)
+**Customization** (User Settings → Appearance) — new accounts start with a slate-blue dark theme, the Snow Peaks wallpaper, light rain and the Klee One font; everything below can be changed.
 
 * **Theme** — dark / light / midnight / system, solid or gradient accent, solid or gradient panels, panel opacity, panel blur, saturation, corner radius, spacing, custom text color.
 * **Wallpaper** — 8 built-in gradients, 6 photos, your own upload or image link, solid color or custom gradient; live brightness, saturation, zoom, position, mouse parallax, and two separate blur controls: **Wallpaper blur** (the picture itself) and **Panel blur** (the frosted glass of the panels in front of it). Both default to subtle values — set them to 0 for a crisp wallpaper.
-* **Rain & Glass** — the original Codrops raindrop effect (see [credits](#credits)) with weather presets (Rain / Drizzle / Storm / Fallout) and sliders for amount, drop size, speed, refraction, mist, wet trails, tiny droplets, lightning and frame rate; plus Apple-style **liquid glass** buttons (a WebGL lens that refracts your real wallpaper, with a specular rim and pointer-following light) or frosted glass, switchable per area.
+* **Rain & Glass** — the original Codrops raindrop effect (see [credits](#credits)) with weather presets (Rain / Drizzle / Storm / Fallout) and sliders for amount, drop size, speed, refraction, mist, wet trails, tiny droplets, lightning and frame rate; plus Apple-style **liquid glass** for the whole interface — panels, menus, windows, toasts and buttons get a WebGL glass lip that refracts your real wallpaper, with a specular rim. It reacts to the cursor: buttons catch the light where you hover, and panels glow and bend more under the pointer and send a light ripple through the glass when you click. It is **off by default**; switch it on (or choose frosted instead) and pick which areas it covers.
 * **Button effects** — press ripples and particle bursts (send, reactions, toggles, confirmations, colour swatches), with an intensity slider; all of it off under *Reduce motion*.
 * **Fonts** — search the whole Google Fonts catalogue; every font is previewed in its own typeface. Separate interface, chat and code fonts, plus size, weight, line height and letter spacing.
 * **Chat** — compact mode, 24-hour time, link previews, GIF autoplay, large emoji.
 * Themes can be exported / imported as JSON. Settings sync to your account, so your look follows you.
-* Also: server tags, custom status, 12 interface languages, accessibility options, notification sounds.
+* **Profile** — animated avatars: upload a GIF or pick one from KLIPY (it's downloaded once and stored on your server).
+* Also: custom status, 12 interface languages, accessibility options, notification sounds.
 
 Everything is smooth by default; **Reduce motion** turns most animation (and the rain) off. If the GPU can't keep up, Orate automatically steps liquid glass down to frosted glass once per session.
 
@@ -113,6 +199,11 @@ server/
   core.js       JSON-file persistence, permissions, serializers, event fan-out
   messages.js   message creation (mentions, replies, DM reopening)
   bot.js        Orbit, the helper bot
+  mail.js       dependency-free SMTP client (TLS / STARTTLS) with a console fallback
+  signup.js     emailed sign-up codes
+  storage.js    optional PostgreSQL storage (DATABASE_URL): state + uploaded files
+  env.js        .env parsing   db-tool.js  db:import / db:export / db:info
+  verify.js     email verification tokens, modes and gating
 public/
   js/           Preact + htm (vendored, no build step), ES modules (rain.js, glass.js, fx.js: rain, liquid glass, button particles)
   css/          base · layout · chat · ui · features · settings · auth

@@ -1,7 +1,8 @@
 // Orate — realtime gateway: presence, voice rooms and WebRTC signalling over WebSocket.
 import { WebSocketServer } from 'ws';
-import { db, sha, conns, send, emitTo, canView, audienceOf, publicUser, broadcastPresence, newId, can, voice, effectiveStatus } from './core.js';
+import { db, sha, conns, gatedConns, send, emitTo, canView, audienceOf, publicUser, broadcastPresence, newId, can, voice, effectiveStatus } from './core.js';
 import { buildReady } from './api.js';
+import { isGated } from './verify.js';
 
 const offlineTimers = new Map();
 
@@ -70,6 +71,13 @@ export function attachGateway(server) {
         if (!user || user.deleted) return ws.close(4004, 'invalid token');
         clearTimeout(authTimer);
         conn.userId = user.id;
+        if (isGated(user)) {   // REQUIRE_EMAIL_VERIFICATION: an empty world, no events, no voice
+          conn.gated = true;
+          let g = gatedConns.get(user.id); if (!g) gatedConns.set(user.id, (g = new Set()));
+          g.add(conn);
+          send(conn, 'ready', { ...buildReady(user), connId: conn.id });
+          return;
+        }
         let set = conns.get(user.id); if (!set) conns.set(user.id, (set = new Set()));
         const first = set.size === 0;
         set.add(conn);
@@ -78,6 +86,7 @@ export function attachGateway(server) {
         if (first || user.status) broadcastPresence(user.id);
         return;
       }
+      if (conn.gated) { if (op === 'ping') send(conn, 'pong', { t: d.t }); return; }
       switch (op) {
         case 'ping': send(conn, 'pong', { t: d.t }); break;
         case 'idle': { const v = !!d.idle; if (conn.idle !== v) { conn.idle = v; broadcastPresence(conn.userId); } break; }
@@ -106,6 +115,7 @@ export function attachGateway(server) {
     ws.on('close', () => {
       clearTimeout(authTimer);
       if (!conn.userId) return;
+      if (conn.gated) { const g = gatedConns.get(conn.userId); g?.delete(conn); if (g && !g.size) gatedConns.delete(conn.userId); return; }
       conn.leaveVoice?.('disconnected');
       const set = conns.get(conn.userId);
       set?.delete(conn);
@@ -122,7 +132,7 @@ export function attachGateway(server) {
 
   // protocol-level keepalive
   const iv = setInterval(() => {
-    for (const set of conns.values()) for (const c of set) {
+    for (const set of [...conns.values(), ...gatedConns.values()]) for (const c of set) {
       if (!c.alive) { c.ws.terminate(); continue; }
       c.alive = false; try { c.ws.ping(); } catch { /* ignore */ }
     }

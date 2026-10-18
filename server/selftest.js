@@ -12,7 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-test-'));
 const PORT = 3900 + Math.floor(Math.random() * 90);
 const base = `http://127.0.0.1:${PORT}`;
-const child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], { env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', TURN_URLS: 'turn:turn.test:3478,turns:turn.test:5349', TURN_SECRET: 'test-secret', TURN_TTL: '600' }, stdio: ['ignore', 'pipe', 'inherit'] });
+const child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], { env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', TURN_URLS: 'turn:turn.test:3478,turns:turn.test:5349', TURN_SECRET: 'test-secret', TURN_TTL: '600' }, stdio: ['ignore', 'pipe', 'inherit'] });
 let pass = 0; let fail = 0;
 const ok = (c, name, extra = '') => { if (c) { pass++; console.log('  ✓', name); } else { fail++; console.log('  ✗', name, extra); } };
 
@@ -140,8 +140,8 @@ async function main() {
   ok(Array.isArray(r.body) && r.body.length > 500, 'fonts list');
 
   console.log('\nSettings & profile');
-  r = await api('PATCH', '/me', A, { displayName: 'Alice ✨', bio: 'hi', status: 'dnd', customStatus: { emoji: '🎧', text: 'coding' }, tag: { text: 'orat', icon: 'bolt', color: '#8b5cf6' } });
-  ok(r.body.displayName === 'Alice ✨' && r.body.tag.text === 'ORAT', 'update profile');
+  r = await api('PATCH', '/me', A, { displayName: 'Alice ✨', bio: 'hi', status: 'dnd', customStatus: { emoji: '🎧', text: 'coding' }, tag: { text: 'orat' } });
+  ok(r.body.displayName === 'Alice ✨' && r.body.customStatus.text === 'coding' && !('tag' in r.body), 'update profile (tags are gone)');
   r = await api('PATCH', '/me/settings', A, { theme: { accent: '#ff00aa' } });
   ok(r.body.theme.accent === '#ff00aa', 'sync settings');
   r = await api('POST', '/me/password', A, { current: 'hunter2hunter2', password: 'new-password-123' });

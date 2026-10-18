@@ -5,10 +5,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import { ROOT, UPLOAD_DIR, ENV, ensureBot, db } from './core.js';
+import { ROOT, UPLOAD_DIR, ENV, ensureBot, db, pg, restoreUpload, storageSummary } from './core.js';
 import { createApi } from './api.js';
 import { attachGateway } from './gateway.js';
 import './bot.js';
+import { mailConfig } from './mail.js';
+import { verificationMode } from './verify.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -39,6 +41,12 @@ app.use('/api', createApi());
 
 // Uploaded files: only well-known media renders inline; everything else downloads. CSP sandbox keeps stray HTML inert.
 const INLINE = /\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm|mov|m4v|mp3|ogg|oga|wav|m4a|flac|opus|pdf|txt)$/i;
+// with Postgres the disk is only a cache: fetch a file back from the database if a restart wiped it
+app.use('/uploads', (req, res, next) => {
+  if (!pg) return next();
+  let name; try { name = decodeURIComponent(req.path.replace(/^\//, '')); } catch { return next(); }
+  restoreUpload(name).then(() => next(), (e) => { console.error('[orate] could not load an upload from the database:', e.message); next(); });
+});
 app.use('/uploads', express.static(UPLOAD_DIR, {
   index: false, dotfiles: 'deny', maxAge: '30d', immutable: true,
   setHeaders(res, file) {
@@ -75,6 +83,9 @@ server.listen(PORT, HOST, () => {
   console.log(`    Local:   ${proto}://localhost:${PORT}`);
   for (const ip of lan) console.log(`    Network: ${proto}://${ip}:${PORT}`);
   if (!useTls && lan.length) console.log('    (voice/video/notifications on other devices need HTTPS — see README)');
-  console.log(`\n    ${Object.values(db.users).filter((u) => !u.bot).length} user(s) · GIFs ${ENV.KLIPY_API_KEY ? 'enabled' : 'disabled (set KLIPY_API_KEY in .env)'}\n`);
+  console.log(`\n    ${Object.values(db.users).filter((u) => !u.bot).length} user(s) · GIFs ${ENV.KLIPY_API_KEY ? 'enabled' : 'disabled (set KLIPY_API_KEY in .env)'}`);
+  console.log(`    Storage: ${storageSummary()}`);
+  const vm = verificationMode(); const mc = mailConfig();
+  console.log(`    Email verification: ${vm.enabled ? (mc ? `ON — sign-up needs a code emailed via ${mc.host}:${mc.port}` : 'ON (dev mode) — no SMTP_HOST, so sign-up codes are printed in this console') : 'OFF — add SMTP_HOST to .env to require an emailed code at sign-up (see README)'}\n`);
 });
 server.on('error', (e) => { console.error(e.code === 'EADDRINUSE' ? `Port ${PORT} is already in use. Set PORT in .env.` : e); process.exit(1); });

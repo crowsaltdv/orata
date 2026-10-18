@@ -54,6 +54,7 @@ export function Composer({ chId }) {
   const dropdownRef = useRef(null);
   const [text, setText] = useState(() => drafts.get(chId) || '');
   const [atts, setAtts] = useState([]);
+  const [media, setMedia] = useState(null);       // a GIF or sticker waiting to be sent with the next message
   const [drag, setDrag] = useState(false);
   const [ac, setAc] = useState(null); const [acIdx, setAcIdx] = useState(0);
   const [ping, setPing] = useState(true);
@@ -63,7 +64,7 @@ export function Composer({ chId }) {
   const canAttach = !server || hasPerm(server.id, 'ATTACH_FILES');
 
   // swap drafts when the channel changes
-  useEffect(() => { setText(drafts.get(chId) || ''); setAtts([]); setAc(null); setPing(true); if (matchMedia('(pointer:fine)').matches) setTimeout(() => ta.current?.focus(), 30); }, [chId]);
+  useEffect(() => { setText(drafts.get(chId) || ''); setAtts([]); setMedia(null); setAc(null); setPing(true); if (matchMedia('(pointer:fine)').matches) setTimeout(() => ta.current?.focus(), 30); }, [chId]);
   useEffect(() => { drafts.set(chId, text); }, [text, chId]);
   useEffect(() => { if (replyTo) { setPing(true); ta.current?.focus(); } }, [replyTo]);
   useLayoutEffect(() => { const el = ta.current; if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, Math.round(innerHeight * 0.45)) + 'px'; } }, [text, chId]);
@@ -106,7 +107,7 @@ export function Composer({ chId }) {
     if (!canSend || !ch) return;
     let v = text.replace(/\s+$/, '');
     const ready = atts.filter((a) => a.status !== 'error');
-    if (!v.trim() && !ready.length) return;
+    if (!v.trim() && !ready.length && !media) return;
     // slash commands
     const cm = /^\/([a-z]+)(?:\s+([\s\S]*))?$/i.exec(v);
     if (cm && COMMANDS.some((c) => c.name === cm[1].toLowerCase())) {
@@ -126,10 +127,10 @@ export function Composer({ chId }) {
       const done = await Promise.all(ready.map((a) => a.promise));
       return done.map((r, i) => ({ ...r, width: ready[i].width, height: ready[i].height, spoiler: ready[i].spoiler, name: ready[i].spoiler && !/^SPOILER_/i.test(r.name) ? 'SPOILER_' + r.name : r.name }));
     } : null;
-    const reply = replyTo; const doPing = ping;
-    setText(''); setAtts([]); setAc(null); drafts.delete(chId); set({ replyTo: null });
+    const reply = replyTo; const doPing = ping; const m = media;
+    setText(''); setAtts([]); setMedia(null); setAc(null); drafts.delete(chId); set({ replyTo: null });
     fx.send();
-    await sendMessage(ch, { content: v, attachments, replyTo: reply, replyPing: doPing, wait });
+    await sendMessage(ch, { content: v, attachments, gif: m?.kind === 'gif' ? m.data : null, sticker: m?.kind === 'sticker' ? m.data : null, replyTo: reply, replyPing: doPing, wait });
   };
 
   /* ---- autocomplete ---- */
@@ -215,10 +216,11 @@ export function Composer({ chId }) {
 
   if (!ch) return null;
   const placeholder = ch.serverId ? `${t('Message')} #${ch.name}` : `${t('Message')} ${ch.type === 'group' ? dmName(ch) : '@' + (getUser(dmUserId(ch))?.displayName || '')}`;
-  const hasContent = text.trim() || atts.length;
-  const sendGif = (item) => sendMessage(ch, { gif: { id: item.id, title: item.title, url: item.full.mp4 || item.full.gif || item.full.webp, mp4: item.full.mp4, gif: item.full.gif, poster: item.full.poster, w: item.w, h: item.h }, replyTo, replyPing: ping }).then(() => set({ replyTo: null }));
-  const sendSticker = (item) => sendMessage(ch, { sticker: { id: item.id, title: item.title, url: item.full.url, webp: item.full.webp, gif: item.full.gif, png: item.full.png, w: item.w, h: item.h }, replyTo, replyPing: ping }).then(() => set({ replyTo: null }));
-  const handlers = { onEmoji: (c, e) => { composerApi.insert(c); noteEmojiUse(c); if (!e?.shiftKey) closePopover(); }, onGif: (i) => { closePopover(); sendGif(i); }, onSticker: (i) => { closePopover(); sendSticker(i); } };
+  const hasContent = text.trim() || atts.length || media;
+  // picking a GIF or sticker only stages it in the message box (like an upload); the person presses send
+  const stageGif = (item) => setMedia({ kind: 'gif', title: item.title || 'GIF', preview: item.preview, data: { id: item.id, title: item.title, url: item.full.mp4 || item.full.gif || item.full.webp, mp4: item.full.mp4, gif: item.full.gif, poster: item.full.poster, w: item.w, h: item.h } });
+  const stageSticker = (item) => setMedia({ kind: 'sticker', title: item.title || 'Sticker', preview: item.preview, data: { id: item.id, title: item.title, url: item.full.url, webp: item.full.webp, gif: item.full.gif, png: item.full.png, w: item.w, h: item.h } });
+  const handlers = { onEmoji: (c, e) => { composerApi.insert(c); noteEmojiUse(c); if (!e?.shiftKey) closePopover(); }, onGif: (i) => { closePopover(); stageGif(i); ta.current?.focus(); }, onSticker: (i) => { closePopover(); stageSticker(i); ta.current?.focus(); } };
   const openPickerFor = (anchor, tab, query) => openPicker(anchor || ta.current, handlers, { tab, query, placement: 'top-end' });
 
   if (blockedBy) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="ban" size=${18} /> You have blocked this user. <button type="button" class="link-btn" onClick=${() => act(api.del(`/relationships/${dmUserId(ch)}`))}>Unblock</button></div></div>`;
@@ -234,7 +236,12 @@ export function Composer({ chId }) {
     </div>` : null}
     ${replyTo ? html`<div class="reply-bar slide-up"><span>${t('Replying to')} <b>${replyName || '…'}</b></span><span class="reply-ctl"><button type="button" class=${cx('ping-toggle', ping && 'on')} onClick=${() => setPing(!ping)} data-tip=${ping ? 'Mention on' : 'Mention off'}><${Icon} name="at" size=${14} sw=${2.4} />${ping ? 'ON' : 'OFF'}</button><button type="button" class="icon-btn" onClick=${() => set({ replyTo: null })} aria-label="Cancel reply"><${Icon} name="x" size=${15} /></button></span></div>` : null}
     <div class=${cx('composer glass glass-composer', replyTo && 'has-reply')}>
-      ${atts.length ? html`<div class="att-tray">${atts.map((a) => html`<div class=${cx('att-chip', a.status)} key=${a.id}>
+      ${atts.length || media ? html`<div class="att-tray">
+        ${media ? html`<div class="att-chip done media-chip" key="media">
+          <div class="att-thumb"><img src=${media.preview?.url} alt="" /><span class="media-badge">${media.kind === 'gif' ? 'GIF' : t('Sticker')}</span></div>
+          <div class="att-meta" title=${media.title}>${media.title}</div>
+          <div class="att-acts"><button type="button" class="del" data-tip=${t('Remove')} aria-label="Remove" onClick=${() => setMedia(null)}><${Icon} name="trash" size=${15} /></button></div></div>` : null}
+        ${atts.map((a) => html`<div class=${cx('att-chip', a.status)} key=${a.id}>
         <div class="att-thumb">${a.preview && a.type.startsWith('image/') ? html`<img src=${a.preview} alt="" class=${a.spoiler ? 'blur' : ''} />` : a.preview ? html`<video src=${a.preview} muted></video>` : html`<${Icon} name=${a.type.startsWith('audio/') ? 'music' : 'file'} size=${34} sw=${1.5} />`}
           ${a.status === 'uploading' ? html`<div class="att-prog"><i style=${{ width: a.progress * 100 + '%' }}></i></div>` : null}${a.status === 'error' ? html`<div class="att-err"><${Icon} name="alert-circle" size=${22} /></div>` : null}</div>
         <div class="att-meta" title=${a.name}>${a.name}</div>
