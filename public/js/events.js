@@ -1,0 +1,220 @@
+// Orate — gateway event handlers, session lifecycle (login / logout / bootstrap).
+import { state, set, rebuildIndex, addUsers, getChannel, toast, go, parseRoute, resolveRoute, updateSettings, dmName, nameOf, isMuted, notify } from '/js/store.js';
+import { api, gateway, hooks } from '/js/api.js';
+import { ls, lsRemove, cmpId } from '/js/lib.js';
+import { DEFAULT_SETTINGS, deepMerge, migrateSettings } from '/js/defaults.js';
+import { mapMessage, patchEntry, applyReaction, loadMessages, ackChannel } from '/js/actions.js';
+import { playSound, startRing, stopRing } from '/js/sound.js';
+
+/* ------------------------------------------------------------ session */
+export async function login(loginName, password) {
+  const r = await api.post('/auth/login', { login: loginName, password });
+  await startSession(r.token);
+}
+export async function register(payload) {
+  const r = await api.post('/auth/register', payload);
+  await startSession(r.token);
+}
+export async function startSession(token) {
+  ls('token', null, token);
+  set({ token, phase: 'loading' });
+  gateway.connect();
+}
+export async function logout({ silent } = {}) {
+  try { if (!silent && state.token) await api.post('/auth/logout'); } catch { /* ignore */ }
+  gateway.disconnect(); lsRemove('token');
+  set({
+    token: null, phase: 'auth', me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {}, msgs: {}, reads: {}, lastMsg: {}, typing: {},
+    voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel,
+  });
+  history.replaceState({}, '', '/login');
+  set({ route: { view: 'login', serverId: '@me', channelId: null } });
+}
+hooks.unauthorized = () => { if (state.token) { toast('Your session has expired — please sign in again.', 'error'); logout({ silent: true }); } };
+
+/* ------------------------------------------------------------ bootstrap */
+function bootstrap(d) {
+  const users = {}; for (const u of d.users) users[u.id] = u;
+  users[d.user.id] = { ...users[d.user.id], ...d.user };
+  const servers = {}; for (const s of d.servers) servers[s.id] = s;
+  const dms = {}; for (const c of d.dms) dms[c.id] = c;
+  const rel = {}; for (const r of d.relationships) rel[r.id] = r.type;
+  const lastMsg = {};
+  for (const c of [...d.dms, ...d.servers.flatMap((s) => s.channels)]) if (c.lastMessageId) lastMsg[c.id] = c.lastMessageId;
+  const voiceStates = {};
+  for (const v of d.voiceStates) (voiceStates[v.channelId] ||= {})[v.userId] = v;
+
+  // settings: the account copy wins on a new device; otherwise push this device's choices up
+  let settings = state.settings;
+  const remote = d.user.settings || {};
+  if (Object.keys(remote).length) settings = deepMerge(DEFAULT_SETTINGS, migrateSettings(remote));
+  const reconnect = state.phase === 'ready';
+  set({
+    me: d.user, users, servers, dms, relationships: rel, reads: d.readStates, lastMsg, voice: { ...state.voice, states: voiceStates }, botId: d.botId, settings,
+    sessionId: d.connId, phase: 'ready', typing: {},
+  });
+  ls('settings', null, settings);
+  if (!Object.keys(remote).length) updateSettings({}, { sync: true });
+  rebuildIndex();
+  const r = resolveRoute(state.route.view === 'login' || state.route.view === 'register' || state.route.view === 'boot' ? parseRoute(location.pathname) : state.route);
+  if (!reconnect || !getChannel(state.route.channelId)) go(r.view === 'login' || r.view === 'register' ? { view: 'friends', serverId: '@me', channelId: null } : r, { replace: true });
+  if (reconnect) { // re-sync whatever is on screen after a dropped connection
+    for (const chId of Object.keys(state.msgs)) if (state.msgs[chId].loaded) loadMessages(chId, { force: true });
+  }
+  if (state.settings.notif.desktop && 'Notification' in window && Notification.permission === 'default') { /* asked from settings, never on load */ }
+}
+gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, maxUpload: c.maxUpload, turn: !!c.turn })).catch(() => {}); });
+
+/* ------------------------------------------------------------ helpers */
+function isMentioned(m, ch) {
+  const me = state.me; if (!me) return false;
+  if (m.mentions?.includes(me.id) || m.mentionEveryone) return true;
+  if (ch.serverId && m.mentionRoles?.length) { const mem = state.servers[ch.serverId]?.members.find((x) => x.id === me.id); return !!mem?.roles.some((r) => m.mentionRoles.includes(r)); }
+  return false;
+}
+function previewText(m) {
+  if (m.content) return m.content.replace(/<@!?(\d+)>/g, (_, id) => '@' + (state.users[id]?.displayName || 'user')).replace(/<#(\d+)>/g, (_, id) => '#' + (getChannel(id)?.name || 'channel')).replace(/[*_~`|>]/g, '').slice(0, 140);
+  if (m.gif) return 'sent a GIF'; if (m.sticker) return 'sent a sticker'; if (m.attachments?.length) return m.attachments.length > 1 ? `sent ${m.attachments.length} attachments` : 'sent an attachment';
+  return '';
+}
+function notifyMessage(m, ch, mentioned) {
+  const n = state.settings.notif; if (state.me.status === 'dnd') return;
+  const dm = !ch.serverId;
+  const wants = dm ? !n.mentionsOnly || mentioned : mentioned;
+  if (!wants || isMuted(ch)) return;
+  const here = state.route.channelId === ch.id && state.focused && !document.hidden;
+  if (here) return;
+  playSound(mentioned ? 'mention' : 'message');
+  if (n.desktop && 'Notification' in window && Notification.permission === 'granted' && (!state.focused || document.hidden)) {
+    const author = nameOf(m.authorId, ch.serverId);
+    const title = dm ? (ch.type === 'group' ? `${author} · ${dmName(ch)}` : author) : `${author} (#${ch.name}, ${state.servers[ch.serverId]?.name})`;
+    try {
+      const note = new Notification(title, { body: previewText(m), icon: state.users[m.authorId]?.avatar || '/img/icon-192.png', tag: ch.id, silent: true });
+      note.onclick = () => { window.focus(); go(dm ? { view: 'dm', serverId: '@me', channelId: ch.id } : { view: 'channel', serverId: ch.serverId, channelId: ch.id }); note.close(); };
+    } catch { /* ignore */ }
+  }
+}
+
+/* ------------------------------------------------------------ messages */
+gateway.on('message_create', ({ message: m, users }) => {
+  addUsers(users);
+  const ch = getChannel(m.channelId); if (!ch) return;
+  const prevLast = state.lastMsg[ch.id];
+  if (!prevLast || cmpId(m.id, prevLast) > 0) state.lastMsg = { ...state.lastMsg, [ch.id]: m.id };
+  const e = state.msgs[ch.id];
+  if (e?.loaded && !e.hasNewer) {
+    patchEntry(ch.id, (cur) => {
+      const idx = m.nonce ? cur.list.findIndex((x) => x.nonce === m.nonce) : -1;
+      if (idx >= 0) return { ...cur, list: cur.list.map((x, i) => (i === idx ? m : x)) };
+      if (cur.list.some((x) => x.id === m.id)) return cur;
+      return { ...cur, list: [...cur.list, m] };
+    });
+  }
+  // typing stops when a message lands
+  const t = state.typing[ch.id];
+  if (t?.[m.authorId]) { const nt = { ...t }; delete nt[m.authorId]; state.typing = { ...state.typing, [ch.id]: nt }; }
+  const mine = m.authorId === state.me.id;
+  if (mine) { if (!state.reads[ch.id] || cmpId(m.id, state.reads[ch.id].lastRead || '0') > 0) state.reads = { ...state.reads, [ch.id]: { lastRead: m.id, mentions: 0 } }; notify(); return; }
+  const mentioned = isMentioned(m, ch);
+  const viewing = state.route.channelId === ch.id && state.focused;
+  if (!viewing && mentioned && !isMuted(ch)) state.reads = { ...state.reads, [ch.id]: { ...state.reads[ch.id], mentions: (state.reads[ch.id]?.mentions || 0) + 1 } };
+  if (m.type === 'default' || m.type === undefined) notifyMessage(m, ch, mentioned);
+  if (viewing) ackChannel(ch.id);
+  notify();
+});
+gateway.on('message_update', ({ message: m }) => mapMessage(m.channelId, m.id, () => m));
+gateway.on('message_delete', ({ channelId, messageId }) => {
+  const e = state.msgs[channelId]; if (!e) return;
+  patchEntry(channelId, { ...e, list: e.list.filter((x) => x.id !== messageId) });
+  if (state.lastMsg[channelId] === messageId) { const l = (state.msgs[channelId]?.list || []).slice(-1)[0]; state.lastMsg = { ...state.lastMsg, [channelId]: l?.id || null }; }
+});
+gateway.on('reaction_add', ({ channelId, messageId, emoji, userId }) => mapMessage(channelId, messageId, (m) => applyReaction(m, emoji, userId, true)));
+gateway.on('reaction_remove', ({ channelId, messageId, emoji, userId }) => mapMessage(channelId, messageId, (m) => applyReaction(m, emoji, userId, false)));
+gateway.on('typing', ({ channelId, userId }) => {
+  const cur = state.typing[channelId] || {};
+  set({ typing: { ...state.typing, [channelId]: { ...cur, [userId]: Date.now() + 9000 } } });
+});
+gateway.on('read_ack', ({ channelId, lastRead, mentions }) => set({ reads: { ...state.reads, [channelId]: { lastRead, mentions } } }));
+setInterval(() => {
+  const now = Date.now(); let changed = false; const next = {};
+  for (const [ch, users] of Object.entries(state.typing)) {
+    const keep = {}; for (const [u, t] of Object.entries(users)) if (t > now) keep[u] = t; else changed = true;
+    next[ch] = keep;
+  }
+  if (changed) set({ typing: next });
+}, 1500);
+
+/* ------------------------------------------------------------ users & presence */
+gateway.on('presence_update', ({ userId, status, customStatus }) => {
+  const u = state.users[userId]; if (!u) return;
+  set({ users: { ...state.users, [userId]: { ...u, status, customStatus } } });
+});
+gateway.on('user_update', ({ user }) => addUsersNotify([user]));
+gateway.on('self_update', ({ user }) => { set({ me: { ...state.me, ...user } }); addUsersNotify([user]); });
+gateway.on('settings_update', ({ settings }) => { const next = deepMerge(DEFAULT_SETTINGS, migrateSettings(settings)); set({ settings: next }); ls('settings', null, next); });
+function addUsersNotify(list) { addUsers(list); notify(); }
+
+/* ------------------------------------------------------------ servers / channels / members */
+gateway.on('server_create', ({ server, users }) => { addUsers(users); set({ servers: { ...state.servers, [server.id]: server } }); rebuildIndex(); });
+gateway.on('server_update', ({ server }) => { if (!state.servers[server.id]) return; set({ servers: { ...state.servers, [server.id]: server } }); rebuildIndex(); });
+gateway.on('server_delete', ({ serverId }) => {
+  const servers = { ...state.servers }; delete servers[serverId];
+  set({ servers }); rebuildIndex();
+  if (state.route.serverId === serverId) go('/channels/@me');
+  if (state.serverSettings?.id === serverId) set({ serverSettings: null });
+});
+const patchServer = (id, fn) => { const s = state.servers[id]; if (s) { set({ servers: { ...state.servers, [id]: fn(s) } }); rebuildIndex(); } };
+gateway.on('channel_create', ({ channel }) => patchServer(channel.serverId, (s) => ({ ...s, channels: s.channels.some((c) => c.id === channel.id) ? s.channels : [...s.channels, channel].sort((a, b) => a.position - b.position) })));
+gateway.on('channel_update', ({ channel }) => patchServer(channel.serverId, (s) => ({ ...s, channels: s.channels.some((c) => c.id === channel.id) ? s.channels.map((c) => (c.id === channel.id ? { ...c, ...channel, lastMessageId: c.lastMessageId } : c)) : [...s.channels, channel] })));
+gateway.on('channel_delete', ({ serverId, channelId }) => {
+  patchServer(serverId, (s) => ({ ...s, channels: s.channels.filter((c) => c.id !== channelId) }));
+  if (state.route.channelId === channelId) go({ view: 'channel', serverId, channelId: null });
+});
+gateway.on('member_add', ({ serverId, member, user }) => { addUsers([user]); patchServer(serverId, (s) => ({ ...s, members: s.members.some((m) => m.id === member.id) ? s.members : [...s.members, member] })); });
+gateway.on('member_remove', ({ serverId, userId }) => patchServer(serverId, (s) => ({ ...s, members: s.members.filter((m) => m.id !== userId) })));
+gateway.on('member_update', ({ serverId, member }) => patchServer(serverId, (s) => ({ ...s, members: s.members.map((m) => (m.id === member.id ? member : m)) })));
+
+/* ------------------------------------------------------------ DMs & relationships */
+function putDm(channel, users) { addUsers(users); set({ dms: { ...state.dms, [channel.id]: { ...state.dms[channel.id], ...channel } } }); rebuildIndex(); if (channel.lastMessageId && !state.lastMsg[channel.id]) state.lastMsg = { ...state.lastMsg, [channel.id]: channel.lastMessageId }; }
+gateway.on('dm_create', ({ channel, users }) => putDm(channel, users));
+gateway.on('dm_open', ({ channel, users }) => putDm(channel, users));
+gateway.on('dm_update', ({ channel, users }) => putDm(channel, users));
+gateway.on('dm_close', ({ channelId }) => {
+  const dms = { ...state.dms }; delete dms[channelId]; set({ dms }); rebuildIndex();
+  if (state.route.channelId === channelId) go('/channels/@me');
+});
+gateway.on('relationship_update', ({ id, type, user }) => {
+  if (user) addUsers([user]);
+  const rel = { ...state.relationships }; if (type) rel[id] = type; else delete rel[id];
+  set({ relationships: rel });
+  if (type === 'incoming') { playSound('message'); toast(`${state.users[id]?.displayName || 'Someone'} sent you a friend request`, 'info'); }
+});
+
+/* ------------------------------------------------------------ voice state + calls */
+gateway.on('voice_state_update', ({ channelId, userId, state: st }) => {
+  const room = { ...(state.voice.states[channelId] || {}) };
+  if (st) room[userId] = st; else delete room[userId];
+  const states = { ...state.voice.states, [channelId]: room }; if (!Object.keys(room).length) delete states[channelId];
+  set({ voice: { ...state.voice, states } });
+  if (state.voice.conn?.channelId === channelId && userId !== state.me.id) playSound(st ? 'join' : 'leave');
+});
+gateway.on('call_ring', ({ channelId, from, users }) => {
+  addUsers(users);
+  if (state.me.status === 'dnd' || state.voice.conn) return;
+  set({ calls: { ...state.calls, [channelId]: { from, at: Date.now() } } }); startRing();
+  setTimeout(() => dismissCall(channelId), 45000);
+});
+gateway.on('call_end', ({ channelId }) => dismissCall(channelId));
+export function dismissCall(channelId) {
+  if (!state.calls[channelId]) return;
+  const calls = { ...state.calls }; delete calls[channelId]; set({ calls });
+  if (!Object.keys(calls).length) stopRing();
+}
+
+/* ------------------------------------------------------------ idle detection */
+let idleTimer = null;
+function setIdle(v) { if (state.idle !== v) { state.idle = v; gateway.send('idle', { idle: v }); } }
+function bump() { setIdle(false); clearTimeout(idleTimer); idleTimer = setTimeout(() => setIdle(true), 5 * 60_000); }
+for (const ev of ['mousemove', 'keydown', 'pointerdown', 'wheel', 'touchstart']) window.addEventListener(ev, bump, { passive: true });
+document.addEventListener('visibilitychange', bump);
+bump();

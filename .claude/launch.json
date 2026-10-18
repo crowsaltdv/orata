@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "orate", "runtimeExecutable": "node", "runtimeArgs": ["--watch", "server/index.js"], "port": 3000 }
+  ]
+}

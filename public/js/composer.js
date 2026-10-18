@@ -1,0 +1,257 @@
+// Orate — message composer: attachments, drag & drop, paste, autocomplete (@ # :), slash commands, replies, pickers.
+import { html, useState, useEffect, useRef, useLayoutEffect, useMemo, cx, fileSize, uid, isImageType, throttle } from '/js/lib.js';
+import { state, set, useSel, getChannel, dmName, dmUserId, toast, hasPerm, openContext, closePopover, openPopover, getUser } from '/js/store.js';
+import { Icon } from '/js/icons.js';
+import { Avatar, IconBtn, Spinner } from '/js/ui.js';
+import { sendMessage, sendTyping, act, getEntry } from '/js/actions.js';
+import { upload, api } from '/js/api.js';
+import { encodeMentions, decodeMentions } from '/js/markdown.js';
+import { searchEmoji, shortcodeEmoji, loadEmoji, noteEmojiUse } from '/js/emoji.js';
+import { openPicker } from '/js/pickers.js';
+import { t } from '/js/i18n.js';
+import { fx } from '/js/fx.js';
+
+const drafts = new Map(); // channelId -> text
+export const composerApi = { insert: () => {}, focus: () => {}, setText: () => {} };
+
+const COMMANDS = [
+  { name: 'shrug', desc: 'Appends ¯\\_(ツ)_/¯ to your message', arg: 'message' },
+  { name: 'tableflip', desc: 'Appends (╯°□°）╯︵ ┻━┻ to your message', arg: 'message' },
+  { name: 'unflip', desc: 'Appends ┬─┬ ノ( ゜-゜ノ) to your message', arg: 'message' },
+  { name: 'me', desc: 'Show action text in italics', arg: 'action' },
+  { name: 'spoiler', desc: 'Hide your message behind a spoiler', arg: 'message' },
+  { name: 'gif', desc: 'Search for a GIF', arg: 'query' },
+  { name: 'nick', desc: 'Change your nickname in this server', arg: 'name', server: true },
+];
+
+function TypingBar({ chId }) {
+  const names = useSel((s) => {
+    const ty = s.typing[chId]; if (!ty) return '';
+    const ch = getChannel(chId);
+    return Object.keys(ty).filter((id) => id !== s.me.id && s.relationships[id] !== 'blocked').map((id) => (ch?.serverId ? s.servers[ch.serverId]?.members.find((m) => m.id === id)?.nick : null) || s.users[id]?.displayName || 'Someone').join('\u0001');
+  });
+  const list = names ? names.split('\u0001') : [];
+  return html`<div class=${cx('typing-bar', list.length && 'on')} aria-live="polite">
+    ${list.length ? html`<span class="dots"><i></i><i></i><i></i></span><span class="typing-text">${list.length === 1 ? html`<b>${list[0]}</b> ${t('is typing…')}` : list.length === 2 ? html`<b>${list[0]}</b> ${t('and')} <b>${list[1]}</b> ${t('are typing…')}` : list.length === 3 ? html`<b>${list[0]}</b>, <b>${list[1]}</b>, ${t('and')} <b>${list[2]}</b> ${t('are typing…')}` : t('Several people are typing…')}</span>` : null}
+  </div>`;
+}
+
+function getTrigger(text, caret) {
+  const before = text.slice(0, caret);
+  let m = /(^|[\s(])([@#])([^\s@#]{0,32})$/.exec(before); if (m) return { kind: m[2], query: m[3], start: caret - m[3].length - 1 };
+  m = /(^|[\s(]):([a-z0-9_+-]{2,32})$/i.exec(before); if (m) return { kind: ':', query: m[2], start: caret - m[2].length - 1 };
+  if (/^\/[a-z]*$/i.test(before) && before.length === text.length) return { kind: '/', query: before.slice(1), start: 0 };
+  return null;
+}
+
+export function Composer({ chId }) {
+  const ch = useSel((s) => getChannel(chId));
+  const replyTo = useSel((s) => (s.replyTo?.channelId === chId ? s.replyTo.id : null));
+  const replyMsg = useSel((s) => (s.replyTo?.channelId === chId ? s.msgs[chId]?.list.find((m) => m.id === s.replyTo.id) : null));
+  const replyName = useSel((s) => { const m = s.msgs[chId]?.list.find((x) => x.id === s.replyTo?.id); return m ? ((ch?.serverId && s.servers[ch.serverId]?.members.find((x) => x.id === m.authorId)?.nick) || s.users[m.authorId]?.displayName) : ''; });
+  const perms = useSel((s) => (ch?.serverId ? s.servers[ch.serverId]?.perms?.join() : ''));
+  const blockedBy = useSel((s) => { const o = ch?.type === 'dm' ? dmUserId(ch) : null; return o ? s.relationships[o] === 'blocked' : false; });
+  const dropdownRef = useRef(null);
+  const [text, setText] = useState(() => drafts.get(chId) || '');
+  const [atts, setAtts] = useState([]);
+  const [drag, setDrag] = useState(false);
+  const [ac, setAc] = useState(null); const [acIdx, setAcIdx] = useState(0);
+  const [ping, setPing] = useState(true);
+  const ta = useRef(null); const file = useRef(null); const dragDepth = useRef(0);
+  const server = ch?.serverId ? state.servers[ch.serverId] : null;
+  const canSend = !server || hasPerm(server.id, 'SEND_MESSAGES');
+  const canAttach = !server || hasPerm(server.id, 'ATTACH_FILES');
+
+  // swap drafts when the channel changes
+  useEffect(() => { setText(drafts.get(chId) || ''); setAtts([]); setAc(null); setPing(true); if (matchMedia('(pointer:fine)').matches) setTimeout(() => ta.current?.focus(), 30); }, [chId]);
+  useEffect(() => { drafts.set(chId, text); }, [text, chId]);
+  useEffect(() => { if (replyTo) { setPing(true); ta.current?.focus(); } }, [replyTo]);
+  useLayoutEffect(() => { const el = ta.current; if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, Math.round(innerHeight * 0.45)) + 'px'; } }, [text, chId]);
+  useEffect(() => { loadEmoji(); }, []);
+
+  composerApi.focus = () => ta.current?.focus();
+  composerApi.setText = (v) => { setText(v); setTimeout(() => ta.current?.focus(), 0); };
+  composerApi.insert = (s) => {
+    const el = ta.current; if (!el) return;
+    const a = el.selectionStart ?? text.length; const b = el.selectionEnd ?? text.length;
+    const next = text.slice(0, a) + s + text.slice(b); setText(next);
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(a + s.length, a + s.length); });
+  };
+
+  /* ---- attachments ---- */
+  const addFiles = async (files) => {
+    if (!canAttach) { toast('You don’t have permission to upload files here', 'error'); return; }
+    const list = [...files].filter((f) => f.size >= 0).slice(0, 10 - atts.length);
+    if (!list.length) return;
+    const max = (state.maxUpload || 25 * 1024 * 1024);
+    const staged = [];
+    for (const f of list) {
+      if (f.size > max) { toast(`${f.name} is too large (max ${fileSize(max)})`, 'error'); continue; }
+      const a = { id: uid(), file: f, name: f.name || 'pasted-file', size: f.size, type: f.type || 'application/octet-stream', preview: isImageType(f.type) || f.type.startsWith('video/') ? URL.createObjectURL(f) : null, progress: 0, status: 'uploading', spoiler: /^SPOILER_/i.test(f.name) };
+      if (isImageType(f.type)) { try { const bmp = await createImageBitmap(f); a.width = bmp.width; a.height = bmp.height; bmp.close?.(); } catch { /* ignore */ } }
+      const handle = {}; a.handle = handle;
+      a.promise = upload(f, (p) => setAtts((cur) => cur.map((x) => (x.id === a.id ? { ...x, progress: p } : x))), handle)
+        .then((r) => { setAtts((cur) => cur.map((x) => (x.id === a.id ? { ...x, status: 'done', progress: 1, result: r } : x))); return r; })
+        .catch((e) => { setAtts((cur) => cur.map((x) => (x.id === a.id ? { ...x, status: 'error', error: e.message } : x))); if (e.code !== 'abort') toast(`${f.name}: ${e.message}`, 'error'); throw e; });
+      a.promise.catch(() => {});
+      staged.push(a);
+    }
+    setAtts((cur) => [...cur, ...staged]);
+    ta.current?.focus();
+  };
+  const removeAtt = (a) => { a.handle?.abort?.(); setAtts((cur) => cur.filter((x) => x.id !== a.id)); if (a.preview) setTimeout(() => URL.revokeObjectURL(a.preview), 4000); };
+
+  /* ---- sending ---- */
+  const submit = async () => {
+    if (!canSend || !ch) return;
+    let v = text.replace(/\s+$/, '');
+    const ready = atts.filter((a) => a.status !== 'error');
+    if (!v.trim() && !ready.length) return;
+    // slash commands
+    const cm = /^\/([a-z]+)(?:\s+([\s\S]*))?$/i.exec(v);
+    if (cm && COMMANDS.some((c) => c.name === cm[1].toLowerCase())) {
+      const cmd = cm[1].toLowerCase(); const arg = (cm[2] || '').trim();
+      if (cmd === 'shrug') v = `${arg} ¯\\_(ツ)_/¯`.trim();
+      else if (cmd === 'tableflip') v = `${arg} (╯°□°）╯︵ ┻━┻`.trim();
+      else if (cmd === 'unflip') v = `${arg} ┬─┬ ノ( ゜-゜ノ)`.trim();
+      else if (cmd === 'me') { if (!arg) return; v = `_${arg}_`; }
+      else if (cmd === 'spoiler') { if (!arg) return; v = `||${arg}||`; }
+      else if (cmd === 'gif') { setText(''); const el = document.querySelector('.emoji-btn'); openPickerFor(el, 'gif', arg); return; }
+      else if (cmd === 'nick') { if (!server) { toast('Nicknames only work in servers', 'error'); return; } setText(''); await act(api.patch(`/servers/${server.id}/members/${state.me.id}`, { nick: arg }), { success: arg ? 'Nickname updated' : 'Nickname cleared' }); return; }
+    }
+    v = encodeMentions(v.replace(/:([a-z0-9_+-]+):/gi, (all, code) => shortcodeEmoji(code.toLowerCase()) || all), ch);
+    const pending = ready.filter((a) => a.status === 'uploading');
+    const attachments = ready.map((a) => ({ id: a.id, url: a.preview || a.result?.url, name: a.name, size: a.size, type: a.type, width: a.width, height: a.height, spoiler: a.spoiler }));
+    const wait = pending.length || ready.length ? async () => {
+      const done = await Promise.all(ready.map((a) => a.promise));
+      return done.map((r, i) => ({ ...r, width: ready[i].width, height: ready[i].height, spoiler: ready[i].spoiler, name: ready[i].spoiler && !/^SPOILER_/i.test(r.name) ? 'SPOILER_' + r.name : r.name }));
+    } : null;
+    const reply = replyTo; const doPing = ping;
+    setText(''); setAtts([]); setAc(null); drafts.delete(chId); set({ replyTo: null });
+    fx.send();
+    await sendMessage(ch, { content: v, attachments, replyTo: reply, replyPing: doPing, wait });
+  };
+
+  /* ---- autocomplete ---- */
+  const computeAc = (value, caret) => {
+    const trig = getTrigger(value, caret); if (!trig) { setAc(null); return; }
+    let items = [];
+    const q = trig.query.toLowerCase();
+    if (trig.kind === '@') {
+      const ids = server ? server.members.map((m) => m.id) : (ch.recipients || []);
+      const people = ids.map((id) => { const u = state.users[id]; const nick = server?.members.find((m) => m.id === id)?.nick; return u && { type: 'user', id, label: nick || u.displayName, sub: '@' + u.username, insert: '@' + u.username + ' ', user: u, rank: u.username.startsWith(q) || (nick || u.displayName).toLowerCase().startsWith(q) ? 0 : 1, hit: u.username.includes(q) || (nick || u.displayName).toLowerCase().includes(q) }; }).filter((x) => x && x.hit && x.id !== state.me.id);
+      people.sort((a, b) => a.rank - b.rank || a.label.localeCompare(b.label));
+      items = people.slice(0, 7);
+      if (server) {
+        const roles = server.roles.filter((r) => r.id !== server.id && r.name.toLowerCase().includes(q)).slice(0, 3).map((r) => ({ type: 'role', id: r.id, label: r.name, sub: 'Role', color: r.color, insert: '@' + r.name + ' ' }));
+        const evr = ['everyone', 'here'].filter((x) => x.startsWith(q) && hasPerm(server.id, 'MENTION_EVERYONE')).map((x) => ({ type: 'special', id: x, label: '@' + x, sub: x === 'everyone' ? 'Notify everyone' : 'Notify online members', insert: '@' + x + ' ' }));
+        items = [...items, ...roles, ...evr].slice(0, 9);
+      }
+    } else if (trig.kind === '#' && server) {
+      items = server.channels.filter((c) => c.type !== 'category' && c.name.toLowerCase().includes(q)).slice(0, 8).map((c) => ({ type: 'channel', id: c.id, label: c.name, sub: c.type === 'voice' ? 'Voice' : server.name, insert: '#' + c.name + ' ', icon: c.type === 'voice' ? 'volume' : 'hash' }));
+    } else if (trig.kind === ':') {
+      items = searchEmoji(q, 8).map((e) => ({ type: 'emoji', id: e.char, label: `:${e.code || e.label}:`, sub: '', insert: e.char + ' ', char: e.char }));
+    } else if (trig.kind === '/') {
+      items = COMMANDS.filter((c) => c.name.startsWith(q) && (!c.server || server)).map((c) => ({ type: 'cmd', id: c.name, label: '/' + c.name, sub: c.desc, insert: '/' + c.name + ' ' }));
+    }
+    if (!items.length) { setAc(null); return; }
+    setAc({ items, trig }); setAcIdx(0);
+  };
+  const pick = (it) => {
+    const el = ta.current; const caret = el.selectionStart; const trig = ac.trig;
+    const next = text.slice(0, trig.start) + it.insert + text.slice(caret); setText(next); setAc(null);
+    if (it.type === 'emoji') noteEmojiUse(it.char);
+    requestAnimationFrame(() => { el.focus(); const p = trig.start + it.insert.length; el.setSelectionRange(p, p); });
+  };
+
+  const typingPing = useRef(throttle(() => sendTyping(chId), 3000)).current;
+  const onInput = (e) => {
+    let v = e.target.value; const caret = e.target.selectionStart;
+    // finished :shortcode: → emoji
+    const sm = /(^|[\s(]):([a-z0-9_+-]{2,32}):$/i.exec(v.slice(0, caret));
+    if (sm) { const ch2 = shortcodeEmoji(sm[2].toLowerCase()); if (ch2) { const start = caret - sm[2].length - 2; v = v.slice(0, start) + ch2 + v.slice(caret); setText(v); noteEmojiUse(ch2); requestAnimationFrame(() => ta.current?.setSelectionRange(start + ch2.length, start + ch2.length)); setAc(null); return; } }
+    setText(v); computeAc(v, caret);
+    if (v.trim() && !v.startsWith('/')) typingPing();
+  };
+  const wrap = (before, after = before) => {
+    const el = ta.current; const a = el.selectionStart; const b = el.selectionEnd; const sel = text.slice(a, b);
+    const next = text.slice(0, a) + before + sel + after + text.slice(b); setText(next);
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(a + before.length, b + before.length); });
+  };
+  const onKeyDown = (e) => {
+    if (e.isComposing) return;
+    if (ac) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setAcIdx((acIdx + 1) % ac.items.length); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setAcIdx((acIdx - 1 + ac.items.length) % ac.items.length); return; }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); pick(ac.items[acIdx]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setAc(null); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); return; }
+    if (e.key === 'Escape') { if (replyTo) { set({ replyTo: null }); e.preventDefault(); } return; }
+    if (e.key === 'ArrowUp' && !text && !atts.length) {
+      const last = [...(getEntry(chId).list)].reverse().find((m) => m.authorId === state.me.id && (!m.type || m.type === 'default') && !m.pending);
+      if (last) { e.preventDefault(); set({ editing: last.id }); }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey) {
+      if (e.key === 'b') { e.preventDefault(); wrap('**'); } else if (e.key === 'i') { e.preventDefault(); wrap('*'); } else if (e.key === 'u') { e.preventDefault(); wrap('__'); }
+    }
+  };
+  const onPaste = (e) => {
+    const files = [...(e.clipboardData?.files || [])];
+    if (files.length) { e.preventDefault(); addFiles(files.map((f) => (f.name === 'image.png' ? new File([f], `pasted-${Date.now()}.png`, { type: f.type }) : f))); }
+  };
+  // drag & drop anywhere on the chat column
+  useEffect(() => {
+    const root = document.querySelector('.chat-col'); if (!root) return undefined;
+    const has = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+    const enter = (e) => { if (!has(e)) return; e.preventDefault(); dragDepth.current++; setDrag(true); };
+    const over = (e) => { if (has(e)) e.preventDefault(); };
+    const leave = (e) => { if (!has(e)) return; dragDepth.current--; if (dragDepth.current <= 0) { dragDepth.current = 0; setDrag(false); } };
+    const drop = (e) => { if (!has(e)) return; e.preventDefault(); dragDepth.current = 0; setDrag(false); addFiles(e.dataTransfer.files); };
+    root.addEventListener('dragenter', enter); root.addEventListener('dragover', over); root.addEventListener('dragleave', leave); root.addEventListener('drop', drop);
+    return () => { root.removeEventListener('dragenter', enter); root.removeEventListener('dragover', over); root.removeEventListener('dragleave', leave); root.removeEventListener('drop', drop); };
+  }, [chId, atts.length, canAttach]);
+
+  if (!ch) return null;
+  const placeholder = ch.serverId ? `${t('Message')} #${ch.name}` : `${t('Message')} ${ch.type === 'group' ? dmName(ch) : '@' + (getUser(dmUserId(ch))?.displayName || '')}`;
+  const hasContent = text.trim() || atts.length;
+  const sendGif = (item) => sendMessage(ch, { gif: { id: item.id, title: item.title, url: item.full.mp4 || item.full.gif || item.full.webp, mp4: item.full.mp4, gif: item.full.gif, poster: item.full.poster, w: item.w, h: item.h }, replyTo, replyPing: ping }).then(() => set({ replyTo: null }));
+  const sendSticker = (item) => sendMessage(ch, { sticker: { id: item.id, title: item.title, url: item.full.url, webp: item.full.webp, gif: item.full.gif, png: item.full.png, w: item.w, h: item.h }, replyTo, replyPing: ping }).then(() => set({ replyTo: null }));
+  const handlers = { onEmoji: (c, e) => { composerApi.insert(c); noteEmojiUse(c); if (!e?.shiftKey) closePopover(); }, onGif: (i) => { closePopover(); sendGif(i); }, onSticker: (i) => { closePopover(); sendSticker(i); } };
+  const openPickerFor = (anchor, tab, query) => openPicker(anchor || ta.current, handlers, { tab, query, placement: 'top-end' });
+
+  if (blockedBy) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="ban" size=${18} /> You have blocked this user. <button type="button" class="link-btn" onClick=${() => act(api.del(`/relationships/${dmUserId(ch)}`))}>Unblock</button></div></div>`;
+  if (!canSend) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="lock" size=${18} /> ${t('You do not have permission to send messages in this channel.')}</div></div>`;
+
+  return html`<div class="composer-wrap" ref=${dropdownRef}>
+    ${drag ? html`<div class="drop-overlay"><div class="drop-card"><${Icon} name="upload" size=${48} sw=${1.6} /><h3>${t('Upload to')} ${ch.serverId ? '#' + ch.name : dmName(ch)}</h3><p>${t('You can add comments before uploading.')}</p></div></div>` : null}
+    ${ac ? html`<div class="autocomplete pop-in" role="listbox">
+      <div class="ac-head">${ac.trig.kind === '@' ? t('Members') : ac.trig.kind === '#' ? t('Channels') : ac.trig.kind === ':' ? t('Emoji matching') + ' :' + ac.trig.query : t('Commands')}</div>
+      ${ac.items.map((it, i) => html`<button type="button" class=${cx('ac-item', i === acIdx && 'sel')} onMouseEnter=${() => setAcIdx(i)} onMouseDown=${(e) => { e.preventDefault(); pick(it); }} role="option">
+        ${it.type === 'user' ? html`<${Avatar} user=${it.user} size=${24} />` : it.type === 'emoji' ? html`<span class="ac-emoji">${it.char}</span>` : it.type === 'role' ? html`<span class="ac-role" style=${{ background: it.color || 'var(--accent)' }}></span>` : html`<${Icon} name=${it.icon || (it.type === 'cmd' ? 'bolt' : 'at')} size=${18} />`}
+        <span class="ac-label" style=${it.color ? { color: it.color } : null}>${it.label}</span><span class="ac-sub">${it.sub}</span></button>`)}
+    </div>` : null}
+    ${replyTo ? html`<div class="reply-bar slide-up"><span>${t('Replying to')} <b>${replyName || '…'}</b></span><span class="reply-ctl"><button type="button" class=${cx('ping-toggle', ping && 'on')} onClick=${() => setPing(!ping)} data-tip=${ping ? 'Mention on' : 'Mention off'}><${Icon} name="at" size=${14} sw=${2.4} />${ping ? 'ON' : 'OFF'}</button><button type="button" class="icon-btn" onClick=${() => set({ replyTo: null })} aria-label="Cancel reply"><${Icon} name="x" size=${15} /></button></span></div>` : null}
+    <div class=${cx('composer glass glass-composer', replyTo && 'has-reply')}>
+      ${atts.length ? html`<div class="att-tray">${atts.map((a) => html`<div class=${cx('att-chip', a.status)} key=${a.id}>
+        <div class="att-thumb">${a.preview && a.type.startsWith('image/') ? html`<img src=${a.preview} alt="" class=${a.spoiler ? 'blur' : ''} />` : a.preview ? html`<video src=${a.preview} muted></video>` : html`<${Icon} name=${a.type.startsWith('audio/') ? 'music' : 'file'} size=${34} sw=${1.5} />`}
+          ${a.status === 'uploading' ? html`<div class="att-prog"><i style=${{ width: a.progress * 100 + '%' }}></i></div>` : null}${a.status === 'error' ? html`<div class="att-err"><${Icon} name="alert-circle" size=${22} /></div>` : null}</div>
+        <div class="att-meta" title=${a.name}>${a.name}</div>
+        <div class="att-acts"><button type="button" data-tip=${a.spoiler ? 'Unmark spoiler' : 'Mark as spoiler'} onClick=${() => setAtts((cur) => cur.map((x) => (x.id === a.id ? { ...x, spoiler: !x.spoiler } : x)))} class=${a.spoiler ? 'on' : ''}><${Icon} name="eye-off" size=${15} /></button><button type="button" class="del" data-tip="Remove" onClick=${() => removeAtt(a)}><${Icon} name="trash" size=${15} /></button></div></div>`)}</div>` : null}
+      <div class="composer-row">
+        <button type="button" class="comp-btn plus" data-tip=${t('Upload a File')} data-tip-pos="top" aria-label="Upload a file" onClick=${() => file.current?.click()}><${Icon} name="plus" size=${22} sw=${2.4} /></button>
+        <input type="file" multiple hidden ref=${file} onChange=${(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+        <textarea ref=${ta} class="composer-input" rows="1" value=${text} placeholder=${placeholder} maxlength="4000" spellcheck="true" aria-label=${placeholder} onInput=${onInput} onKeyDown=${onKeyDown} onPaste=${onPaste} onBlur=${() => setTimeout(() => setAc(null), 120)} onClick=${(e) => computeAc(text, e.target.selectionStart)}></textarea>
+        <div class="comp-right">
+          <button type="button" class="comp-btn gif-btn" data-tip="GIF" data-tip-pos="top" aria-label="Open GIF picker" onClick=${(e) => openPickerFor(e.currentTarget, 'gif')}><span>GIF</span></button>
+          <button type="button" class="comp-btn hide-sm" data-tip="Stickers" data-tip-pos="top" aria-label="Open sticker picker" onClick=${(e) => openPickerFor(e.currentTarget, 'stickers')}><${Icon} name="sticker" size=${22} /></button>
+          <button type="button" class="comp-btn emoji-btn" data-tip="Emoji" data-tip-pos="top" aria-label="Open emoji picker" onClick=${(e) => openPickerFor(e.currentTarget, 'emoji')} onMouseEnter=${(e) => e.currentTarget.classList.add('wiggle')} onMouseLeave=${(e) => e.currentTarget.classList.remove('wiggle')}><${Icon} name="smile" size=${22} /></button>
+          <button type="button" class=${cx('comp-btn send', hasContent && 'ready')} data-tip=${t('Send')} data-tip-pos="top" aria-label="Send message" onClick=${submit}><${Icon} name="send" size=${20} /></button>
+        </div>
+      </div>
+    </div>
+    <${TypingBar} chId=${chId} />
+  </div>`;
+}
+void Spinner; void IconBtn; void openContext; void openPopover; void decodeMentions; void useMemo;

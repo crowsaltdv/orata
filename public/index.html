@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#14121f" />
+  <title>Orate</title>
+  <link rel="icon" href="/img/favicon.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="/css/base.css" />
+  <link rel="stylesheet" href="/css/layout.css" />
+  <link rel="stylesheet" href="/css/chat.css" />
+  <link rel="stylesheet" href="/css/ui.css" />
+  <link rel="stylesheet" href="/css/features.css" />
+  <link rel="stylesheet" href="/css/settings.css" />
+  <link rel="stylesheet" href="/css/auth.css" />
+  <script type="module" src="/js/boot.js"></script>
+</head>
+<body>
+  <!-- wallpaper stack: image -> rain canvas -> dim. Lives outside the app so it never re-renders. -->
+  <div id="wallpaper" aria-hidden="true">
+    <div class="wp-base"></div>
+    <div class="wp-image wp-a"></div>
+    <div class="wp-image wp-b"></div>
+    <canvas id="rain"></canvas>
+    <div class="wp-dim"></div>
+    <div class="wp-vignette"></div>
+  </div>
+  <div id="app"></div>
+  <div id="portals"></div>
+  <svg id="glass-defs" width="0" height="0" style="position:absolute" aria-hidden="true"><defs></defs></svg>
+  <noscript>Orate needs JavaScript to run.</noscript>
+</body>
+</html>

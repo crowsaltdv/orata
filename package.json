@@ -1,0 +1,21 @@
+{
+  "name": "orate",
+  "version": "1.0.0",
+  "description": "Orate - a realtime chat app with servers, DMs, voice and a fully customizable glass UI.",
+  "private": true,
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node server/selftest.js",
+    "reset-password": "node server/reset-password.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

@@ -1,0 +1,999 @@
+// Orate — REST API.
+import express from 'express';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import dns from 'node:dns/promises';
+import net from 'node:net';
+import {
+  db, save, newId, cmpId, sha, ENV, DATA_DIR, UPLOAD_DIR, ROOT, ApiError, bad, forbidden, notFound, byUsername, byEmail,
+  conns, emitTo, can, need, permsOf, topRolePos, canView, audienceOf, serverAudience, channelsOfServer, publicUser, selfUser,
+  serverView, channelView, messageView, relatedUserIds, broadcastPresence, readStateFor, systemMessage, randomCode, RESERVED,
+  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId,
+} from './core.js';
+import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
+
+const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+/* ------------------------------------------------------------ utilities */
+const buckets = new Map();
+function limit(name, max, windowMs, keyFn = (req) => req.ip) {
+  return (req, res, next) => {
+    const key = name + ':' + keyFn(req); const now = Date.now();
+    let b = buckets.get(key);
+    if (!b || b.reset < now) { b = { n: 0, reset: now + windowMs }; buckets.set(key, b); }
+    if (++b.n > max) return next(new ApiError(429, 'You are being rate limited. Slow down a little.', 'rate_limited'));
+    next();
+  };
+}
+setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (b.reset < now) buckets.delete(k); }, 60_000).unref();
+
+const scrypt = (pw, salt) => new Promise((res, rej) => crypto.scrypt(pw, salt, 64, (e, k) => (e ? rej(e) : res(k.toString('hex')))));
+async function hashPassword(pw) { const salt = crypto.randomBytes(16).toString('hex'); return { salt, hash: await scrypt(pw, salt) }; }
+async function checkPassword(user, pw) {
+  if (!user.hash || typeof pw !== 'string') return false;
+  const a = Buffer.from(await scrypt(pw, user.salt), 'hex'); const b = Buffer.from(user.hash, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+const HEX = /^#[0-9a-fA-F]{6}$/;
+function str(v, min, max, name) {
+  if (typeof v !== 'string') throw bad(`${name} is required`);
+  const s = v.trim();
+  if (s.length < min) throw bad(`${name} must be at least ${min} character${min > 1 ? 's' : ''}`);
+  if (s.length > max) throw bad(`${name} must be at most ${max} characters`);
+  return s;
+}
+const uploadRef = (v) => (v === null || v === '' ? null : (/^\/uploads\/[A-Za-z0-9_.-]+$/.test(String(v)) ? String(v) : undefined));
+
+function newSession(user, req) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  db.sessions[sha(token)] = { userId: user.id, createdAt: Date.now(), lastUsed: Date.now(), ua: String(req.headers['user-agent'] || '').slice(0, 200), ip: req.ip };
+  save();
+  return token;
+}
+
+function getChannel(req, id) {
+  const ch = db.channels[id];
+  if (!ch || !canView(req.user.id, ch)) throw notFound('Unknown channel');
+  return ch;
+}
+function getServer(req, id) {
+  const s = db.servers[id];
+  if (!s || !s.members[req.user.id]) throw notFound('Unknown server');
+  return s;
+}
+const usersFor = (ids) => [...new Set(ids)].map((id) => publicUser(db.users[id])).filter(Boolean);
+
+function pushServerUpdate(server) {
+  for (const uid of serverAudience(server)) emitTo([uid], 'server_update', { server: serverView(server, uid) });
+}
+
+/* ------------------------------------------------------------ ICE (STUN/TURN) */
+const csv = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+/**
+ * WebRTC ICE servers for the browser. Configure in .env:
+ *   STUN_URLS=stun:stun.example.com:3478            (default: Google's public STUN)
+ *   TURN_URLS=turn:turn.example.com:3478,turns:turn.example.com:5349
+ *   TURN_USERNAME / TURN_CREDENTIAL                  static credentials, or
+ *   TURN_SECRET=<coturn static-auth-secret>          time-limited credentials (TURN REST API, recommended)
+ *   TURN_TTL=86400                                   lifetime of generated credentials, seconds
+ *   ICE_TRANSPORT_POLICY=relay                       force all media through TURN (testing / privacy)
+ */
+export function buildIceConfig(userId) {
+  const stun = csv(ENV.STUN_URLS); const turn = csv(ENV.TURN_URLS || ENV.TURN_URL);
+  const iceServers = [{ urls: stun.length ? stun : ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  if (turn.length) {
+    if (ENV.TURN_SECRET) {
+      const ttl = Math.max(300, Number(ENV.TURN_TTL || 86400));
+      const username = `${Math.floor(Date.now() / 1000) + ttl}:${userId}`;
+      const credential = crypto.createHmac('sha1', ENV.TURN_SECRET).update(username).digest('base64');
+      iceServers.push({ urls: turn, username, credential });
+    } else if (ENV.TURN_USERNAME) {
+      iceServers.push({ urls: turn, username: ENV.TURN_USERNAME, credential: ENV.TURN_CREDENTIAL || '' });
+    } else iceServers.push({ urls: turn });
+  }
+  return { iceServers, iceTransportPolicy: ENV.ICE_TRANSPORT_POLICY === 'relay' && turn.length ? 'relay' : 'all', turn: turn.length > 0, ttl: ENV.TURN_SECRET ? Math.max(300, Number(ENV.TURN_TTL || 86400)) : 3600 };
+}
+
+/* ------------------------------------------------------------ ready */
+export function buildReady(user) {
+  const servers = Object.values(db.servers).filter((s) => s.members[user.id]);
+  const dms = Object.values(db.channels).filter((c) => !c.serverId && c.recipients?.includes(user.id) && !user.closedDms?.[c.id]);
+  const userIds = new Set([user.id, ...relatedUserIds(user.id)]);
+  for (const d of dms) for (const id of d.recipients) userIds.add(id);
+  for (const id of Object.keys(user.rel || {})) userIds.add(id);
+  const readStates = {};
+  const chans = [...dms, ...servers.flatMap((s) => channelsOfServer(s.id).filter((c) => canView(user.id, c) && c.type !== 'category' && c.type !== 'voice'))];
+  for (const ch of chans) readStates[ch.id] = readStateFor(user, ch);
+  const voiceStates = [];
+  for (const [channelId, room] of voice) { const ch = db.channels[channelId]; if (ch && canView(user.id, ch)) for (const st of room.values()) voiceStates.push(st); }
+  return {
+    user: selfUser(user),
+    servers: servers.map((s) => serverView(s, user.id)),
+    dms: dms.map(channelView),
+    users: usersFor([...userIds]),
+    relationships: Object.entries(user.rel || {}).map(([id, type]) => ({ id, type })),
+    readStates, voiceStates, botId: db.botId,
+  };
+}
+
+/* ------------------------------------------------------------ router */
+export function createApi() {
+  const r = express.Router();
+  r.use(express.json({ limit: '2mb' }));
+
+  r.get('/config', (req, res) => res.json({
+    name: 'Orate', gifs: !!ENV.KLIPY_API_KEY, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0, maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
+    users: Object.keys(db.users).length, botId: db.botId,
+  }));
+
+  /* --------------------------- auth --------------------------- */
+  r.post('/auth/check', limit('check', 60, 60_000), h(async (req, res) => {
+    const { username, email } = req.body || {};
+    res.json({
+      username: username ? !byUsername.has(String(username).toLowerCase()) && !RESERVED.has(String(username).toLowerCase()) : undefined,
+      email: email ? !byEmail.has(String(email).toLowerCase()) : undefined,
+    });
+  }));
+
+  r.post('/auth/register', limit('register', 8, 60_000), h(async (req, res) => {
+    const b = req.body || {};
+    const email = str(b.email, 5, 254, 'Email').toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw bad('Enter a valid email address', 'email');
+    if (byEmail.has(email)) throw bad('That email is already registered', 'email');
+    const username = str(b.username, 2, 32, 'Username').toLowerCase();
+    if (!/^[a-z0-9_.]+$/.test(username) || /\.\./.test(username)) throw bad('Usernames can only use letters, numbers, underscores and single periods', 'username');
+    if (byUsername.has(username) || RESERVED.has(username)) throw bad('That username is taken', 'username');
+    const displayName = str(b.displayName || b.username, 1, 32, 'Display name');
+    const password = typeof b.password === 'string' ? b.password : '';
+    if (password.length < 8) throw bad('Password must be at least 8 characters', 'password');
+    if (password.length > 128) throw bad('Password is too long', 'password');
+    const dob = b.dob && typeof b.dob === 'object' ? { year: clampInt(b.dob.year, 1900, 2100, 0), month: clampInt(b.dob.month, 1, 12, 0), day: clampInt(b.dob.day, 1, 31, 0) } : null;
+    if (!dob || !dob.year || !dob.month || !dob.day) throw bad('Enter your date of birth', 'dob');
+    const born = new Date(dob.year, dob.month - 1, dob.day); const now = new Date();
+    let age = now.getFullYear() - born.getFullYear();
+    if (now < new Date(now.getFullYear(), born.getMonth(), born.getDate())) age--;
+    if (age < 13) throw bad('You must be at least 13 years old to use Orate', 'dob');
+
+    ensureBot();
+    const { salt, hash } = await hashPassword(password);
+    const id = newId();
+    const hues = ['#8b5cf6', '#ec4899', '#f97316', '#10b981', '#06b6d4', '#3b82f6', '#ef4444', '#eab308'];
+    const user = {
+      id, username, displayName, email, salt, hash, dob, avatar: null, banner: null, bannerColor: hues[Number(id) % hues.length],
+      accentColor: null, bio: '', pronouns: '', tag: null, status: 'online', customStatus: null, createdAt: Date.now(), rel: {}, reads: {}, settings: {}, closedDms: {},
+    };
+    db.users[id] = user; byUsername.set(username, id); byEmail.set(email, id);
+
+    // First user owns the shared community server; everybody after joins it.
+    let community = db.defaultServerId && db.servers[db.defaultServerId];
+    if (!community) {
+      community = createServer(user, { name: 'Orate Community', template: 'community' });
+      community.description = 'The default hangout for everyone on this Orate instance.';
+      db.defaultServerId = community.id;
+    } else {
+      addMember(community, user);
+    }
+    // welcome DM from Orbit
+    const bot = ensureBot();
+    const dmId = newId();
+    db.channels[dmId] = { id: dmId, serverId: null, type: 'dm', recipients: [bot.id, id], createdAt: Date.now() };
+    db.messages[dmId] = [];
+    bot.rel ||= {}; bot.rel[id] = 'friend'; user.rel[bot.id] = 'friend';
+    save();
+    const token = newSession(user, req);
+    // announce join to community members
+    const sys = community.systemChannelId;
+    if (sys && community.ownerId !== id) {
+      for (const uid of serverAudience(community)) if (uid !== id) emitTo([uid], 'member_add', { serverId: community.id, member: { id, roles: [], nick: null, joinedAt: Date.now() }, user: publicUser(user) });
+      systemMessage(sys, 'join', id);
+    }
+    setTimeout(() => {
+      const dm = db.channels[dmId]; if (!dm) return;
+      postMessage(dm, bot.id, { content: `**Welcome to Orate, ${displayName}!** 🎉\nI’m Orbit, your built-in helper. Say \`help\` any time to see what you can do.\nA community server called **${community.name}** is already waiting for you on the left.` });
+    }, 1500);
+    res.json({ token, user: selfUser(user) });
+  }));
+
+  r.post('/auth/login', limit('login', 12, 60_000), h(async (req, res) => {
+    const { login, password } = req.body || {};
+    const key = String(login || '').trim().toLowerCase();
+    const id = byUsername.get(key) || byEmail.get(key);
+    const user = id && db.users[id];
+    if (!user || user.bot || !(await checkPassword(user, password))) throw new ApiError(401, 'Invalid login or password', 'invalid_login');
+    res.json({ token: newSession(user, req), user: selfUser(user) });
+  }));
+
+  /* ---- image proxy + disk cache (wallpapers; works pre-login, CORS-safe for WebGL, survives hotlink blocks) ---- */
+  const IMG_CACHE = path.join(DATA_DIR, 'imgcache');
+  fs.mkdirSync(IMG_CACHE, { recursive: true });
+  r.get('/img', limit('img', 90, 60_000), h(async (req, res) => {
+    const url = String(req.query.url || '');
+    if (!/^https?:\/\//i.test(url) || url.length > 2000) throw bad('Invalid URL');
+    const key = sha(url); const file = path.join(IMG_CACHE, key); const metaFile = file + '.json';
+    const serve = (type) => res.set({ 'Content-Type': type, 'Cache-Control': 'public, max-age=604800', 'Cross-Origin-Resource-Policy': 'cross-origin', 'Content-Security-Policy': "sandbox; default-src 'none'" }).sendFile(file);
+    if (fs.existsSync(file) && fs.existsSync(metaFile)) { try { return serve(JSON.parse(fs.readFileSync(metaFile, 'utf8')).type); } catch { /* refetch */ } }
+    const { resp } = await safeFetch(url, { image: true }).catch((e) => { throw new ApiError(502, e.message || 'Could not fetch that image', 'img_upstream'); });
+    const type = (resp.headers.get('content-type') || '').split(';')[0].toLowerCase();
+    if (!resp.ok || !/^image\/(png|jpe?g|webp|gif|avif|bmp)$/.test(type)) throw new ApiError(415, 'That link is not a supported image', 'img_type');
+    const len = Number(resp.headers.get('content-length') || 0);
+    if (len > 25 * 1024 * 1024) throw new ApiError(413, 'Image is too large', 'img_big');
+    const chunks = []; let total = 0;
+    for await (const c of resp.body) { total += c.length; if (total > 25 * 1024 * 1024) throw new ApiError(413, 'Image is too large', 'img_big'); chunks.push(c); }
+    fs.writeFileSync(file, Buffer.concat(chunks)); fs.writeFileSync(metaFile, JSON.stringify({ type, url }));
+    serve(type);
+  }));
+
+  // Everything below requires a session.
+  r.use((req, res, next) => {
+    const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
+    const token = m?.[1];
+    const s = token && db.sessions[sha(token)];
+    if (!s || !db.users[s.userId] || db.users[s.userId].deleted) return next(new ApiError(401, 'Not signed in', 'unauthorized'));
+    req.user = db.users[s.userId]; req.session = s; req.sessionId = sha(token);
+    if (Date.now() - s.lastUsed > 3600_000) { s.lastUsed = Date.now(); save(); }
+    next();
+  });
+
+  r.post('/auth/logout', h(async (req, res) => { delete db.sessions[req.sessionId]; save(); res.json({ ok: true }); }));
+  r.get('/ready', (req, res) => res.json(buildReady(req.user)));
+
+  /* --------------------------- me --------------------------- */
+  r.get('/me', (req, res) => res.json(selfUser(req.user)));
+
+  /* --------------------------- ICE servers (STUN / TURN for voice & video) --------------------------- */
+  r.get('/ice', (req, res) => res.json(buildIceConfig(req.user.id)));
+
+  r.patch('/me', h(async (req, res) => {
+    const u = req.user; const b = req.body || {};
+    if (b.displayName !== undefined) u.displayName = str(b.displayName, 1, 32, 'Display name');
+    if (b.bio !== undefined) u.bio = String(b.bio).slice(0, 400);
+    if (b.pronouns !== undefined) u.pronouns = String(b.pronouns).slice(0, 40);
+    for (const k of ['avatar', 'banner']) if (b[k] !== undefined) { const v = uploadRef(b[k]); if (v === undefined) throw bad(`Invalid ${k}`); u[k] = v; }
+    for (const k of ['bannerColor', 'accentColor']) if (b[k] !== undefined) { if (b[k] !== null && !HEX.test(b[k])) throw bad(`Invalid ${k}`); u[k] = b[k]; }
+    if (b.status !== undefined) { if (!['online', 'idle', 'dnd', 'invisible'].includes(b.status)) throw bad('Invalid status'); u.status = b.status; }
+    if (b.customStatus !== undefined) {
+      if (b.customStatus === null || (!b.customStatus.text && !b.customStatus.emoji)) u.customStatus = null;
+      else u.customStatus = { emoji: String(b.customStatus.emoji || '').slice(0, 16) || null, text: String(b.customStatus.text || '').slice(0, 128), expiresAt: b.customStatus.expiresAt ? Number(b.customStatus.expiresAt) : null };
+    }
+    if (b.tag !== undefined) {
+      if (b.tag === null || !b.tag.text) u.tag = null;
+      else {
+        const text = String(b.tag.text).replace(/[^\p{L}\p{N}]/gu, '').slice(0, 4).toUpperCase();
+        u.tag = text ? { text, icon: String(b.tag.icon || 'bolt').slice(0, 20), color: HEX.test(b.tag.color) ? b.tag.color : '#8b5cf6' } : null;
+      }
+    }
+    if (b.username !== undefined && b.username.toLowerCase() !== u.username) {
+      if (!(await checkPassword(u, b.password))) throw bad('Current password is incorrect', 'password');
+      const name = str(b.username, 2, 32, 'Username').toLowerCase();
+      if (!/^[a-z0-9_.]+$/.test(name) || /\.\./.test(name)) throw bad('Usernames can only use letters, numbers, underscores and single periods', 'username');
+      if (byUsername.has(name) || RESERVED.has(name)) throw bad('That username is taken', 'username');
+      byUsername.delete(u.username); byUsername.set(name, u.id); u.username = name;
+    }
+    if (b.email !== undefined && b.email.toLowerCase() !== u.email) {
+      if (!(await checkPassword(u, b.password))) throw bad('Current password is incorrect', 'password');
+      const email = str(b.email, 5, 254, 'Email').toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw bad('Enter a valid email address', 'email');
+      if (byEmail.has(email)) throw bad('That email is already registered', 'email');
+      byEmail.delete(u.email); byEmail.set(email, u.id); u.email = email;
+    }
+    save();
+    emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) });
+    emitTo([u.id], 'self_update', { user: selfUser(u) });
+    if (b.status !== undefined || b.customStatus !== undefined) broadcastPresence(u.id);
+    res.json(selfUser(u));
+  }));
+
+  r.patch('/me/settings', h(async (req, res) => {
+    const u = req.user; const patch = req.body || {};
+    const next = { ...(u.settings || {}), ...patch };
+    for (const k of Object.keys(next)) if (next[k] === null) delete next[k];
+    if (JSON.stringify(next).length > 120_000) throw bad('Settings are too large');
+    u.settings = next; save();
+    const origin = [...(conns.get(u.id) || [])].find((c) => c.id === req.headers['x-conn']);
+    emitTo([u.id], 'settings_update', { settings: next }, origin);
+    res.json(next);
+  }));
+
+  r.post('/me/password', limit('pw', 6, 60_000), h(async (req, res) => {
+    const { current, password } = req.body || {};
+    if (!(await checkPassword(req.user, current))) throw bad('Current password is incorrect', 'password');
+    if (typeof password !== 'string' || password.length < 8 || password.length > 128) throw bad('New password must be 8–128 characters', 'new_password');
+    Object.assign(req.user, await hashPassword(password));
+    // revoke every other session
+    for (const [k, s] of Object.entries(db.sessions)) if (s.userId === req.user.id && k !== req.sessionId) delete db.sessions[k];
+    save(); res.json({ ok: true });
+  }));
+
+  r.get('/me/sessions', (req, res) => {
+    res.json(Object.entries(db.sessions).filter(([, s]) => s.userId === req.user.id).map(([k, s]) => ({
+      id: k.slice(0, 16), ua: s.ua, ip: s.ip, createdAt: s.createdAt, lastUsed: s.lastUsed, current: k === req.sessionId,
+    })).sort((a, b) => b.lastUsed - a.lastUsed));
+  });
+  r.delete('/me/sessions/:id', (req, res) => {
+    for (const [k, s] of Object.entries(db.sessions)) if (s.userId === req.user.id && k.startsWith(req.params.id) && k !== req.sessionId) delete db.sessions[k];
+    save(); res.json({ ok: true });
+  });
+
+  r.delete('/me', limit('delacct', 4, 60_000), h(async (req, res) => {
+    const u = req.user;
+    if (!(await checkPassword(u, (req.body || {}).password))) throw bad('Password is incorrect', 'password');
+    for (const s of Object.values(db.servers)) if (s.ownerId === u.id) deleteServer(s);
+    for (const s of Object.values(db.servers)) if (s.members[u.id]) { delete s.members[u.id]; emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: u.id }); }
+    for (const id of Object.keys(u.rel || {})) { const o = db.users[id]; if (o?.rel) { delete o.rel[u.id]; emitTo([id], 'relationship_update', { id: u.id, type: null }); } }
+    for (const [k, s] of Object.entries(db.sessions)) if (s.userId === u.id) delete db.sessions[k];
+    byUsername.delete(u.username); byEmail.delete(u.email);
+    Object.assign(u, { deleted: true, username: 'deleted_' + u.id.slice(-8), displayName: 'Deleted User', email: null, hash: null, salt: null, avatar: null, banner: null, bio: '', tag: null, customStatus: null, rel: {}, settings: {} });
+    emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) });
+    for (const set of [...(conns.get(u.id) || [])]) set.ws.close(4001, 'deleted');
+    save(); res.json({ ok: true });
+  }));
+
+  /* --------------------------- users --------------------------- */
+  r.get('/users/:id', h(async (req, res) => {
+    const u = db.users[req.params.id]; if (!u) throw notFound('Unknown user');
+    const mutualServers = Object.values(db.servers).filter((s) => s.members[u.id] && s.members[req.user.id]).map((s) => ({ id: s.id, name: s.name, icon: s.icon, nick: s.members[u.id].nick || null }));
+    const mutualFriends = Object.entries(u.rel || {}).filter(([id, t]) => t === 'friend' && req.user.rel?.[id] === 'friend' && id !== req.user.id).map(([id]) => id);
+    res.json({ user: publicUser(u), mutualServers, mutualFriends: usersFor(mutualFriends), relationship: req.user.rel?.[u.id] || null });
+  }));
+  r.get('/users', h(async (req, res) => {
+    const q = String(req.query.q || '').toLowerCase().trim(); if (!q) return res.json([]);
+    const out = Object.values(db.users).filter((u) => !u.deleted && !u.bot && u.id !== req.user.id && (u.username.includes(q) || u.displayName.toLowerCase().includes(q))).slice(0, 20);
+    res.json(out.map(publicUser));
+  }));
+
+  /* --------------------------- relationships --------------------------- */
+  const setRel = (a, b, ta, tb) => {
+    for (const [x, y, t] of [[a, b, ta], [b, a, tb]]) {
+      const ux = db.users[x]; ux.rel ||= {};
+      if (t) ux.rel[y] = t; else delete ux.rel[y];
+      emitTo([x], 'relationship_update', { id: y, type: t || null, user: publicUser(db.users[y]) });
+    }
+    save();
+  };
+  r.post('/relationships', limit('friend', 20, 60_000), h(async (req, res) => {
+    const name = String((req.body || {}).username || '').trim().toLowerCase().replace(/^@/, '');
+    const id = byUsername.get(name); const other = id && db.users[id];
+    if (!other || other.deleted) throw notFound('No user with that username');
+    if (other.id === req.user.id) throw bad("You can't add yourself");
+    if (other.bot) throw bad("Bots can't be friends — just DM them!");
+    const mine = req.user.rel?.[other.id]; const theirs = other.rel?.[req.user.id];
+    if (theirs === 'blocked') throw forbidden('That user is not accepting friend requests');
+    if (mine === 'blocked') throw bad('Unblock this user first');
+    if (mine === 'friend') throw bad('You are already friends');
+    if (mine === 'outgoing') throw bad('Friend request already sent');
+    if (mine === 'incoming') setRel(req.user.id, other.id, 'friend', 'friend');
+    else setRel(req.user.id, other.id, 'outgoing', 'incoming');
+    res.json({ ok: true, type: req.user.rel[other.id] });
+  }));
+  r.put('/relationships/:id', h(async (req, res) => {
+    const other = db.users[req.params.id]; if (!other) throw notFound('Unknown user');
+    if (req.user.rel?.[other.id] !== 'incoming') throw bad('No incoming request from that user');
+    setRel(req.user.id, other.id, 'friend', 'friend'); res.json({ ok: true });
+  }));
+  r.put('/relationships/:id/block', h(async (req, res) => {
+    const other = db.users[req.params.id]; if (!other || other.id === req.user.id) throw notFound('Unknown user');
+    const theirs = other.rel?.[req.user.id] === 'blocked' ? 'blocked' : null;
+    setRel(req.user.id, other.id, 'blocked', theirs); res.json({ ok: true });
+  }));
+  r.delete('/relationships/:id', h(async (req, res) => {
+    const other = db.users[req.params.id]; if (!other) throw notFound('Unknown user');
+    const mine = req.user.rel?.[other.id]; if (!mine) throw notFound('No relationship');
+    const theirs = other.rel?.[req.user.id];
+    setRel(req.user.id, other.id, null, mine === 'blocked' ? theirs : null);
+    res.json({ ok: true });
+  }));
+
+  /* --------------------------- servers --------------------------- */
+  r.post('/servers', limit('mkserver', 10, 60_000), h(async (req, res) => {
+    const b = req.body || {};
+    if (Object.values(db.servers).filter((s) => s.ownerId === req.user.id).length >= 20) throw bad('You can own at most 20 servers');
+    const icon = b.icon ? uploadRef(b.icon) : null; if (icon === undefined) throw bad('Invalid icon');
+    const server = createServer(req.user, { name: str(b.name, 2, 100, 'Server name'), icon, template: b.template });
+    emitTo([req.user.id], 'server_create', { server: serverView(server, req.user.id), users: [publicUser(req.user)] });
+    res.json(serverView(server, req.user.id));
+  }));
+
+  r.get('/invites/:code', h(async (req, res) => {
+    const inv = db.invites[req.params.code]; if (!inv || (inv.expiresAt && inv.expiresAt < Date.now())) throw notFound('This invite is invalid or has expired');
+    const s = db.servers[inv.serverId]; if (!s) throw notFound('This invite is invalid or has expired');
+    const ids = Object.keys(s.members);
+    res.json({ code: inv.code, server: { id: s.id, name: s.name, icon: s.icon, banner: s.banner, description: s.description, memberCount: ids.length, onlineCount: ids.filter((id) => effectiveStatus(db.users[id]) !== 'offline').length }, inviter: publicUser(db.users[inv.inviterId]), joined: !!s.members[req.user.id] });
+  }));
+  r.post('/invites/:code/join', limit('join', 20, 60_000), h(async (req, res) => {
+    const code = String(req.params.code).split('/').pop();
+    const inv = db.invites[code]; if (!inv || (inv.expiresAt && inv.expiresAt < Date.now()) || (inv.maxUses && inv.uses >= inv.maxUses)) throw notFound('This invite is invalid or has expired');
+    const s = db.servers[inv.serverId]; if (!s) throw notFound('This invite is invalid or has expired');
+    if (s.bans?.includes(req.user.id)) throw forbidden('You are banned from this server');
+    if (!s.members[req.user.id]) {
+      addMember(s, req.user); inv.uses++; save();
+      emitTo(serverAudience(s).filter((id) => id !== req.user.id), 'member_add', { serverId: s.id, member: { id: req.user.id, roles: [], nick: null, joinedAt: Date.now() }, user: publicUser(req.user) });
+      emitTo([req.user.id], 'server_create', { server: serverView(s, req.user.id), users: usersFor(Object.keys(s.members)) });
+      if (s.systemChannelId) systemMessage(s.systemChannelId, 'join', req.user.id);
+    }
+    res.json(serverView(s, req.user.id));
+  }));
+
+  r.patch('/servers/:id', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_SERVER');
+    const b = req.body || {};
+    if (b.name !== undefined) s.name = str(b.name, 2, 100, 'Server name');
+    if (b.description !== undefined) s.description = String(b.description).slice(0, 300);
+    for (const k of ['icon', 'banner']) if (b[k] !== undefined) { const v = uploadRef(b[k]); if (v === undefined) throw bad(`Invalid ${k}`); s[k] = v; }
+    if (b.accent !== undefined) { if (b.accent !== null && !HEX.test(b.accent)) throw bad('Invalid accent'); s.accent = b.accent; }
+    if (b.systemChannelId !== undefined) s.systemChannelId = db.channels[b.systemChannelId]?.serverId === s.id ? b.systemChannelId : null;
+    save(); pushServerUpdate(s); res.json(serverView(s, req.user.id));
+  }));
+  function deleteServer(s) {
+    const aud = serverAudience(s);
+    for (const c of channelsOfServer(s.id)) { delete db.channels[c.id]; delete db.messages[c.id]; voice.delete(c.id); }
+    for (const [code, inv] of Object.entries(db.invites)) if (inv.serverId === s.id) delete db.invites[code];
+    delete db.servers[s.id];
+    if (db.defaultServerId === s.id) db.defaultServerId = null;
+    emitTo(aud, 'server_delete', { serverId: s.id });
+    save();
+  }
+  r.delete('/servers/:id', h(async (req, res) => {
+    const s = getServer(req, req.params.id);
+    if (s.ownerId !== req.user.id) throw forbidden('Only the owner can delete a server');
+    deleteServer(s); res.json({ ok: true });
+  }));
+  r.post('/servers/:id/leave', h(async (req, res) => {
+    const s = getServer(req, req.params.id);
+    if (s.ownerId === req.user.id) throw bad('Transfer ownership or delete the server instead of leaving it');
+    delete s.members[req.user.id]; save();
+    emitTo([req.user.id], 'server_delete', { serverId: s.id });
+    emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: req.user.id });
+    res.json({ ok: true });
+  }));
+  r.post('/servers/:id/transfer', h(async (req, res) => {
+    const s = getServer(req, req.params.id);
+    if (s.ownerId !== req.user.id) throw forbidden('Only the owner can transfer a server');
+    const to = String((req.body || {}).userId); if (!s.members[to] || db.users[to]?.bot) throw bad('Pick a member');
+    s.ownerId = to; save(); pushServerUpdate(s); res.json({ ok: true });
+  }));
+
+  /* ---- channels in a server ---- */
+  r.post('/servers/:id/channels', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_CHANNELS');
+    const b = req.body || {};
+    const type = ['text', 'voice', 'category'].includes(b.type) ? b.type : 'text';
+    let name = str(b.name, 1, 100, 'Channel name');
+    if (type === 'text') name = name.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || 'new-channel';
+    const siblings = channelsOfServer(s.id);
+    if (siblings.length >= 200) throw bad('Too many channels');
+    const parentId = b.parentId && db.channels[b.parentId]?.serverId === s.id && db.channels[b.parentId].type === 'category' ? b.parentId : null;
+    const position = Math.max(0, ...siblings.filter((c) => (c.parentId || null) === parentId).map((c) => c.position || 0)) + 1;
+    const id = newId();
+    const allowedRoles = Array.isArray(b.allowedRoles) ? b.allowedRoles.filter((rid) => s.roles.some((r) => r.id === rid)) : [];
+    db.channels[id] = { id, serverId: s.id, type, name, parentId: type === 'category' ? null : parentId, position: type === 'category' ? Math.max(0, ...siblings.filter((c) => c.type === 'category').map((c) => c.position)) + 1 : position, topic: String(b.topic || '').slice(0, 1024), private: !!b.private, allowedRoles };
+    db.messages[id] = []; save();
+    pushChannelEvent('channel_create', db.channels[id]);
+    res.json(channelView(db.channels[id]));
+  }));
+  function pushChannelEvent(op, ch) {
+    const s = db.servers[ch.serverId];
+    for (const uid of serverAudience(s)) {
+      const sees = canView(uid, ch);
+      if (op === 'channel_delete' || !sees) emitTo([uid], 'channel_delete', { serverId: s.id, channelId: ch.id });
+      else emitTo([uid], op, { channel: channelView(ch) });
+    }
+  }
+  r.put('/servers/:id/channel-order', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_CHANNELS');
+    const items = Array.isArray((req.body || {}).items) ? req.body.items : [];
+    for (const it of items) {
+      const ch = db.channels[it.id]; if (!ch || ch.serverId !== s.id) continue;
+      ch.position = clampInt(it.position, 0, 100000, ch.position);
+      if (ch.type !== 'category') ch.parentId = it.parentId && db.channels[it.parentId]?.type === 'category' && db.channels[it.parentId].serverId === s.id ? it.parentId : null;
+    }
+    save(); pushServerUpdate(s); res.json({ ok: true });
+  }));
+  r.patch('/channels/:id', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); const b = req.body || {};
+    if (ch.serverId) {
+      const s = db.servers[ch.serverId]; need(s, req.user.id, 'MANAGE_CHANNELS');
+      if (b.name !== undefined) { let n = str(b.name, 1, 100, 'Channel name'); if (ch.type === 'text') n = n.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || ch.name; ch.name = n; }
+      if (b.topic !== undefined) ch.topic = String(b.topic).slice(0, 1024);
+      if (b.private !== undefined) ch.private = !!b.private;
+      if (b.allowedRoles !== undefined) ch.allowedRoles = (Array.isArray(b.allowedRoles) ? b.allowedRoles : []).filter((rid) => s.roles.some((r) => r.id === rid));
+      if (b.nsfw !== undefined) ch.nsfw = !!b.nsfw;
+      if (b.slowmode !== undefined) ch.slowmode = clampInt(b.slowmode, 0, 21600, 0);
+      if (b.parentId !== undefined && ch.type !== 'category') ch.parentId = b.parentId && db.channels[b.parentId]?.type === 'category' && db.channels[b.parentId].serverId === s.id ? b.parentId : null;
+      save(); pushChannelEvent('channel_update', ch);
+    } else {
+      if (ch.type !== 'group') throw bad('Only group chats can be edited');
+      if (b.name !== undefined) ch.name = String(b.name).trim().slice(0, 100) || null;
+      if (b.icon !== undefined) { const v = uploadRef(b.icon); if (v === undefined) throw bad('Invalid icon'); ch.icon = v || undefined; }
+      save(); emitTo(ch.recipients, 'dm_update', { channel: channelView(ch) });
+    }
+    res.json(channelView(ch));
+  }));
+  r.delete('/channels/:id', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id);
+    if (ch.serverId) {
+      const s = db.servers[ch.serverId]; need(s, req.user.id, 'MANAGE_CHANNELS');
+      if (channelsOfServer(s.id).filter((c) => c.type === 'text').length <= 1 && ch.type === 'text') throw bad('A server needs at least one text channel');
+      if (ch.type === 'category') for (const c of channelsOfServer(s.id)) if (c.parentId === ch.id) c.parentId = null;
+      delete db.channels[ch.id]; delete db.messages[ch.id]; voice.delete(ch.id);
+      if (s.systemChannelId === ch.id) s.systemChannelId = channelsOfServer(s.id).find((c) => c.type === 'text')?.id || null;
+      save(); pushChannelEvent('channel_delete', ch); pushServerUpdate(s);
+    } else if (ch.type === 'group') {
+      leaveGroup(ch, req.user.id);
+    } else { // 1:1 DM → just close it for this user
+      req.user.closedDms ||= {}; req.user.closedDms[ch.id] = true; save();
+      emitTo([req.user.id], 'dm_close', { channelId: ch.id });
+    }
+    res.json({ ok: true });
+  }));
+
+  /* ---- DMs ---- */
+  r.post('/dms', limit('dm', 30, 60_000), h(async (req, res) => {
+    const b = req.body || {};
+    const ids = [...new Set((b.recipientIds || (b.recipientId ? [b.recipientId] : [])).map(String))].filter((id) => id !== req.user.id);
+    if (!ids.length) throw bad('Pick at least one person');
+    if (ids.length > 9) throw bad('Group chats are limited to 10 people');
+    for (const id of ids) {
+      const o = db.users[id]; if (!o || o.deleted) throw notFound('Unknown user');
+      if (o.rel?.[req.user.id] === 'blocked') throw forbidden('You can’t message that user');
+      const shares = o.bot || req.user.rel?.[id] === 'friend' || Object.values(db.servers).some((s) => s.members[id] && s.members[req.user.id]);
+      if (!shares) throw forbidden('You can only message friends or people who share a server with you');
+    }
+    let ch;
+    if (ids.length === 1) {
+      ch = Object.values(db.channels).find((c) => c.type === 'dm' && c.recipients.includes(req.user.id) && c.recipients.includes(ids[0]));
+      if (ch && req.user.closedDms?.[ch.id]) { delete req.user.closedDms[ch.id]; save(); }
+    }
+    if (!ch) {
+      const id = newId(); const recipients = [req.user.id, ...ids];
+      ch = { id, serverId: null, type: ids.length === 1 ? 'dm' : 'group', recipients, ownerId: ids.length > 1 ? req.user.id : undefined, name: ids.length > 1 ? (String(b.name || '').trim().slice(0, 100) || null) : null, createdAt: Date.now() };
+      db.channels[id] = ch; db.messages[id] = []; save();
+      emitTo(recipients, 'dm_create', { channel: channelView(ch), users: usersFor(recipients) });
+      if (ch.type === 'group') systemMessage(id, 'group_create', req.user.id);
+    } else emitTo([req.user.id], 'dm_open', { channel: channelView(ch), users: usersFor(ch.recipients) });
+    res.json(channelView(ch));
+  }));
+  function leaveGroup(ch, userId) {
+    ch.recipients = ch.recipients.filter((id) => id !== userId);
+    emitTo([userId], 'dm_close', { channelId: ch.id });
+    if (!ch.recipients.length) { delete db.channels[ch.id]; delete db.messages[ch.id]; }
+    else { if (ch.ownerId === userId) ch.ownerId = ch.recipients[0]; systemMessage(ch.id, 'recipient_remove', userId); emitTo(ch.recipients, 'dm_update', { channel: channelView(ch) }); }
+    save();
+  }
+  r.put('/channels/:id/recipients/:uid', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); if (ch.serverId || !['group', 'dm'].includes(ch.type)) throw bad('Not a group chat');
+    const o = db.users[req.params.uid]; if (!o || o.bot) throw notFound('Unknown user');
+    if (ch.recipients.includes(o.id)) throw bad('Already in this chat');
+    if (ch.recipients.length >= 10) throw bad('Group chats are limited to 10 people');
+    if (req.user.rel?.[o.id] !== 'friend') throw forbidden('You can only add friends');
+    if (ch.type === 'dm') { // upgrade to a new group so the 1:1 history stays untouched
+      const id = newId(); const recipients = [...ch.recipients, o.id];
+      const g = { id, serverId: null, type: 'group', recipients, ownerId: req.user.id, name: null, createdAt: Date.now() };
+      db.channels[id] = g; db.messages[id] = []; save();
+      emitTo(recipients, 'dm_create', { channel: channelView(g), users: usersFor(recipients) });
+      systemMessage(id, 'group_create', req.user.id);
+      return res.json(channelView(g));
+    }
+    ch.recipients.push(o.id); save();
+    emitTo(ch.recipients, 'dm_update', { channel: channelView(ch), users: usersFor(ch.recipients) });
+    emitTo([o.id], 'dm_create', { channel: channelView(ch), users: usersFor(ch.recipients) });
+    systemMessage(ch.id, 'recipient_add', req.user.id, o.id);
+    res.json(channelView(ch));
+  }));
+  r.delete('/channels/:id/recipients/:uid', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); if (ch.type !== 'group') throw bad('Not a group chat');
+    const uid = req.params.uid;
+    if (uid !== req.user.id && ch.ownerId !== req.user.id) throw forbidden('Only the group owner can remove people');
+    if (!ch.recipients.includes(uid)) throw notFound('Not in this chat');
+    leaveGroup(ch, uid); res.json({ ok: true });
+  }));
+
+  /* ---- invites ---- */
+  r.post('/servers/:id/invites', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'CREATE_INVITE');
+    const b = req.body || {};
+    const code = randomCode(8);
+    const maxAge = clampInt(b.maxAge, 0, 604800, 0); const maxUses = clampInt(b.maxUses, 0, 1000, 0);
+    db.invites[code] = { code, serverId: s.id, inviterId: req.user.id, createdAt: Date.now(), uses: 0, maxUses, expiresAt: maxAge ? Date.now() + maxAge * 1000 : null };
+    save(); res.json(db.invites[code]);
+  }));
+  r.get('/servers/:id/invites', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_SERVER');
+    res.json(Object.values(db.invites).filter((i) => i.serverId === s.id && (!i.expiresAt || i.expiresAt > Date.now())));
+  }));
+  r.delete('/invites/:code', h(async (req, res) => {
+    const inv = db.invites[req.params.code]; if (!inv) throw notFound();
+    const s = db.servers[inv.serverId]; if (!s || (inv.inviterId !== req.user.id && !can(s, req.user.id, 'MANAGE_SERVER'))) throw forbidden();
+    delete db.invites[inv.code]; save(); res.json({ ok: true });
+  }));
+
+  /* ---- roles & members ---- */
+  const roleView = (s, id) => s.roles.find((r) => r.id === id);
+  r.post('/servers/:id/roles', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_ROLES');
+    const b = req.body || {};
+    if (s.roles.length >= 50) throw bad('Too many roles');
+    const perms = (Array.isArray(b.permissions) ? b.permissions : []).filter((p) => PERMS.includes(p));
+    const role = { id: newId(), name: str(b.name || 'new role', 1, 100, 'Role name'), color: HEX.test(b.color) ? b.color : null, position: Math.max(...s.roles.map((r) => r.position)) + 1, permissions: perms, hoist: !!b.hoist };
+    if (topRolePos(s, req.user.id) <= role.position && s.ownerId !== req.user.id) role.position = Math.max(1, topRolePos(s, req.user.id) - 1);
+    s.roles.push(role); save(); pushServerUpdate(s); res.json(role);
+  }));
+  r.patch('/servers/:id/roles/:rid', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_ROLES');
+    const role = roleView(s, req.params.rid); if (!role) throw notFound('Unknown role');
+    if (role.id !== s.id && s.ownerId !== req.user.id && role.position >= topRolePos(s, req.user.id)) throw forbidden('That role is above yours');
+    const b = req.body || {};
+    if (b.name !== undefined && role.id !== s.id) role.name = str(b.name, 1, 100, 'Role name');
+    if (b.color !== undefined) role.color = HEX.test(b.color) ? b.color : null;
+    if (b.hoist !== undefined) role.hoist = !!b.hoist;
+    if (b.position !== undefined && role.id !== s.id) role.position = clampInt(b.position, 1, 1000, role.position);
+    if (b.permissions !== undefined) {
+      const wanted = (Array.isArray(b.permissions) ? b.permissions : []).filter((p) => PERMS.includes(p));
+      if (s.ownerId !== req.user.id) { const mine = permsOf(s, req.user.id); if (wanted.some((p) => !mine.has(p))) throw forbidden('You can only grant permissions you have'); }
+      role.permissions = wanted;
+    }
+    save(); pushServerUpdate(s); res.json(role);
+  }));
+  r.delete('/servers/:id/roles/:rid', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_ROLES');
+    const role = roleView(s, req.params.rid); if (!role || role.id === s.id) throw notFound('Unknown role');
+    if (s.ownerId !== req.user.id && role.position >= topRolePos(s, req.user.id)) throw forbidden('That role is above yours');
+    s.roles = s.roles.filter((r) => r.id !== role.id);
+    for (const m of Object.values(s.members)) m.roles = m.roles.filter((x) => x !== role.id);
+    for (const c of channelsOfServer(s.id)) c.allowedRoles = (c.allowedRoles || []).filter((x) => x !== role.id);
+    save(); pushServerUpdate(s); res.json({ ok: true });
+  }));
+  const memberRole = (add) => h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_ROLES');
+    const m = s.members[req.params.uid]; const role = roleView(s, req.params.rid);
+    if (!m || !role || role.id === s.id) throw notFound();
+    if (s.ownerId !== req.user.id && role.position >= topRolePos(s, req.user.id)) throw forbidden('That role is above yours');
+    m.roles = add ? [...new Set([...m.roles, role.id])] : m.roles.filter((x) => x !== role.id);
+    save(); pushServerUpdate(s); res.json({ ok: true });
+  });
+  r.put('/servers/:id/members/:uid/roles/:rid', memberRole(true));
+  r.delete('/servers/:id/members/:uid/roles/:rid', memberRole(false));
+
+  r.patch('/servers/:id/members/:uid', h(async (req, res) => {
+    const s = getServer(req, req.params.id); const m = s.members[req.params.uid]; if (!m) throw notFound('Unknown member');
+    const self = req.params.uid === req.user.id;
+    need(s, req.user.id, self ? 'CHANGE_NICKNAME' : 'MANAGE_NICKNAMES');
+    const nick = String((req.body || {}).nick || '').trim().slice(0, 32);
+    m.nick = nick || null; save();
+    emitTo(serverAudience(s), 'member_update', { serverId: s.id, member: { id: req.params.uid, roles: m.roles, nick: m.nick, joinedAt: m.joinedAt } });
+    res.json({ ok: true });
+  }));
+  const removeMember = (s, uid, ban) => {
+    delete s.members[uid]; if (ban) { s.bans ||= []; if (!s.bans.includes(uid)) s.bans.push(uid); }
+    save();
+    emitTo([uid], 'server_delete', { serverId: s.id });
+    emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: uid });
+    for (const set of [...(conns.get(uid) || [])]) if (set.voice && db.channels[set.voice]?.serverId === s.id) set.leaveVoice?.('kicked');
+  };
+  r.delete('/servers/:id/members/:uid', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'KICK_MEMBERS');
+    const uid = req.params.uid; if (!s.members[uid]) throw notFound('Unknown member');
+    if (uid === s.ownerId || uid === req.user.id) throw forbidden('You can’t kick that member');
+    if (topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
+    removeMember(s, uid, false); res.json({ ok: true });
+  }));
+  r.put('/servers/:id/bans/:uid', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'BAN_MEMBERS');
+    const uid = req.params.uid; if (!db.users[uid]) throw notFound('Unknown user');
+    if (uid === s.ownerId || uid === req.user.id) throw forbidden('You can’t ban that member');
+    if (s.members[uid] && topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
+    removeMember(s, uid, true); res.json({ ok: true });
+  }));
+  r.get('/servers/:id/bans', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'BAN_MEMBERS');
+    res.json(usersFor(s.bans || []));
+  }));
+  r.delete('/servers/:id/bans/:uid', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'BAN_MEMBERS');
+    s.bans = (s.bans || []).filter((id) => id !== req.params.uid); save(); res.json({ ok: true });
+  }));
+
+  /* --------------------------- messages --------------------------- */
+  r.get('/channels/:id/messages', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id);
+    if (ch.type === 'voice' || ch.type === 'category') return res.json({ messages: [], users: [], hasMore: false });
+    const list = db.messages[ch.id] || [];
+    const limitN = clampInt(req.query.limit, 1, 100, 50);
+    let slice; let hasMore = false;
+    const { before, after, around } = req.query;
+    if (around) {
+      const i = Math.max(0, list.findIndex((m) => m.id === String(around)));
+      const start = Math.max(0, i - Math.floor(limitN / 2));
+      slice = list.slice(start, start + limitN); hasMore = start > 0;
+    } else if (after) {
+      const i = list.findIndex((m) => cmpId(m.id, String(after)) > 0);
+      slice = i < 0 ? [] : list.slice(i, i + limitN);
+    } else if (before) {
+      let i = list.findIndex((m) => cmpId(m.id, String(before)) >= 0); if (i < 0) i = list.length;
+      slice = list.slice(Math.max(0, i - limitN), i); hasMore = i - limitN > 0;
+    } else { slice = list.slice(-limitN); hasMore = list.length > limitN; }
+    const ids = new Set();
+    for (const m of slice) { ids.add(m.authorId); for (const u of m.mentions || []) ids.add(u); if (m.type === 'recipient_add' && m.content) ids.add(m.content); }
+    res.json({ messages: slice.map(messageView), users: usersFor([...ids]), hasMore });
+  }));
+
+  r.post('/channels/:id/messages', limit('msg', 12, 6000, (req) => req.user.id), h(async (req, res) => {
+    const ch = getChannel(req, req.params.id);
+    if (ch.type === 'voice' && !ch.serverId) throw bad('Cannot post here');
+    if (ch.type === 'category') throw bad('Cannot post to a category');
+    const server = ch.serverId ? db.servers[ch.serverId] : null;
+    if (server) need(server, req.user.id, 'SEND_MESSAGES');
+    if (!server && ch.type === 'dm') {
+      const other = db.users[ch.recipients.find((id) => id !== req.user.id)];
+      if (other?.rel?.[req.user.id] === 'blocked' || req.user.rel?.[other?.id] === 'blocked') throw forbidden('You can’t send messages to this user');
+    }
+    const b = req.body || {};
+    if (server && ch.slowmode && !can(server, req.user.id, 'MANAGE_MESSAGES')) {
+      const last = [...(db.messages[ch.id] || [])].reverse().find((m) => m.authorId === req.user.id);
+      if (last && Date.now() - last.createdAt < ch.slowmode * 1000) throw new ApiError(429, `Slowmode is on — wait ${Math.ceil((ch.slowmode * 1000 - (Date.now() - last.createdAt)) / 1000)}s`, 'slowmode');
+    }
+    let attachments = sanitizeAttachments(b.attachments, fs, path, UPLOAD_DIR);
+    if (server && attachments.length && !can(server, req.user.id, 'ATTACH_FILES')) attachments = [];
+    const gif = sanitizeMedia(b.gif, 'gif'); const sticker = sanitizeMedia(b.sticker, 'sticker');
+    const content = typeof b.content === 'string' ? b.content : '';
+    if (!content.trim() && !attachments.length && !gif && !sticker) throw bad('Cannot send an empty message');
+    if (content.length > 4000) throw bad('Message is too long (4000 characters max)');
+    const msg = postMessage(ch, req.user.id, { content, attachments, gif, sticker, replyTo: b.replyTo, replyPing: b.replyPing !== false, nonce: b.nonce });
+    res.json(messageView(msg));
+  }));
+
+  const findMsg = (ch, id) => { const m = (db.messages[ch.id] || []).find((x) => x.id === id); if (!m) throw notFound('Unknown message'); return m; };
+  r.patch('/channels/:id/messages/:mid', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid);
+    if (m.authorId !== req.user.id) throw forbidden('You can only edit your own messages');
+    if (m.type !== 'default') throw forbidden();
+    const content = String((req.body || {}).content ?? '');
+    if (!content.trim() && !(m.attachments?.length || m.gif || m.sticker)) throw bad('Message cannot be empty — delete it instead');
+    if (content.length > 4000) throw bad('Message is too long');
+    m.content = content; m.editedAt = Date.now();
+    m.mentions = [...new Set([...content.matchAll(/<@!?(\d{10,20})>/g)].map((x) => x[1]))].filter((id) => db.users[id] && id !== req.user.id);
+    save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
+    res.json(messageView(m));
+  }));
+  r.delete('/channels/:id/messages/:mid', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid);
+    const s = ch.serverId && db.servers[ch.serverId];
+    if (m.authorId !== req.user.id && !(s && can(s, req.user.id, 'MANAGE_MESSAGES'))) throw forbidden();
+    db.messages[ch.id] = db.messages[ch.id].filter((x) => x.id !== m.id); save();
+    emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: m.id });
+    res.json({ ok: true });
+  }));
+  r.post('/channels/:id/messages/bulk-delete', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); const s = ch.serverId && db.servers[ch.serverId];
+    if (!s) throw forbidden(); need(s, req.user.id, 'MANAGE_MESSAGES');
+    const ids = new Set((Array.isArray((req.body || {}).ids) ? req.body.ids : []).slice(0, 100).map(String));
+    db.messages[ch.id] = (db.messages[ch.id] || []).filter((x) => !ids.has(x.id)); save();
+    for (const id of ids) emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: id });
+    res.json({ ok: true });
+  }));
+
+  const reaction = (add) => h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid);
+    const s = ch.serverId && db.servers[ch.serverId]; if (s) need(s, req.user.id, 'ADD_REACTIONS');
+    const emoji = decodeURIComponent(req.params.emoji); if (!emoji || emoji.length > 40 || /[<>]/.test(emoji)) throw bad('Invalid emoji');
+    m.reactions ||= {};
+    const arr = m.reactions[emoji] || [];
+    if (add) {
+      if (!arr.includes(req.user.id)) { if (!m.reactions[emoji] && Object.keys(m.reactions).length >= 20) throw bad('Too many reactions'); m.reactions[emoji] = [...arr, req.user.id]; }
+      else return res.json({ ok: true });
+    } else {
+      if (!arr.includes(req.user.id)) return res.json({ ok: true });
+      m.reactions[emoji] = arr.filter((id) => id !== req.user.id); if (!m.reactions[emoji].length) delete m.reactions[emoji];
+    }
+    save();
+    emitTo(audienceOf(ch), add ? 'reaction_add' : 'reaction_remove', { channelId: ch.id, messageId: m.id, emoji, userId: req.user.id });
+    res.json({ ok: true });
+  });
+  r.put('/channels/:id/messages/:mid/reactions/:emoji/@me', reaction(true));
+  r.delete('/channels/:id/messages/:mid/reactions/:emoji/@me', reaction(false));
+  r.delete('/channels/:id/messages/:mid/reactions', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid); const s = ch.serverId && db.servers[ch.serverId];
+    if (!s) throw forbidden(); need(s, req.user.id, 'MANAGE_MESSAGES');
+    m.reactions = {}; save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) }); res.json({ ok: true });
+  }));
+
+  r.get('/channels/:id/pins', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id);
+    const pins = (db.messages[ch.id] || []).filter((m) => m.pinned).reverse();
+    res.json({ messages: pins.map(messageView), users: usersFor(pins.map((m) => m.authorId)) });
+  }));
+  const pin = (on) => h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid); const s = ch.serverId && db.servers[ch.serverId];
+    if (s) need(s, req.user.id, 'MANAGE_MESSAGES');
+    if (on && (db.messages[ch.id] || []).filter((x) => x.pinned).length >= 50) throw bad('This channel has reached the pin limit (50)');
+    if (!!m.pinned === on) return res.json({ ok: true });
+    m.pinned = on; save();
+    emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
+    if (on) { const sm = systemMessage(ch.id, 'pin', req.user.id, ''); sm.replyTo = m.id; }
+    res.json({ ok: true });
+  });
+  r.put('/channels/:id/pins/:mid', pin(true));
+  r.delete('/channels/:id/pins/:mid', pin(false));
+
+  r.post('/channels/:id/typing', limit('typing', 20, 10_000, (req) => req.user.id), h(async (req, res) => {
+    const ch = getChannel(req, req.params.id);
+    emitTo(audienceOf(ch).filter((id) => id !== req.user.id), 'typing', { channelId: ch.id, userId: req.user.id, timestamp: Date.now() });
+    res.json({ ok: true });
+  }));
+  r.post('/channels/:id/ack', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id);
+    const mid = String((req.body || {}).messageId || lastMessageId(ch.id) || '');
+    req.user.reads ||= {};
+    const cur = req.user.reads[ch.id]?.lastRead;
+    if (mid && (!cur || cmpId(mid, cur) > 0)) { req.user.reads[ch.id] = { lastRead: mid }; save(); }
+    emitTo([req.user.id], 'read_ack', { channelId: ch.id, ...readStateFor(req.user, ch) });
+    res.json({ ok: true });
+  }));
+
+  /* --------------------------- search --------------------------- */
+  r.get('/search', h(async (req, res) => {
+    const q = String(req.query.q || '').toLowerCase().trim();
+    const from = req.query.from ? String(req.query.from) : null; const has = req.query.has ? String(req.query.has) : null;
+    if (!q && !from && !has) return res.json({ results: [], users: [] });
+    let channels;
+    if (req.query.channelId) channels = [getChannel(req, String(req.query.channelId))];
+    else if (req.query.serverId) { const s = getServer(req, String(req.query.serverId)); channels = channelsOfServer(s.id).filter((c) => canView(req.user.id, c) && c.type === 'text'); }
+    else channels = Object.values(db.channels).filter((c) => !c.serverId && c.recipients?.includes(req.user.id));
+    const terms = q.split(/\s+/).filter(Boolean);
+    const out = [];
+    const URL_RE = /https?:\/\//i;
+    for (const ch of channels) {
+      const list = db.messages[ch.id] || [];
+      for (let i = list.length - 1; i >= 0 && out.length < 200; i--) {
+        const m = list[i]; if (m.type !== 'default') continue;
+        if (from && m.authorId !== from) continue;
+        if (has === 'image' && !m.attachments?.some((a) => a.type?.startsWith('image/'))) continue;
+        if (has === 'file' && !m.attachments?.length) continue;
+        if (has === 'link' && !URL_RE.test(m.content)) continue;
+        if (has === 'gif' && !m.gif) continue;
+        if (has === 'pin' && !m.pinned) continue;
+        const text = (m.content || '').toLowerCase();
+        if (terms.some((t) => !text.includes(t) && !(m.attachments || []).some((a) => a.name?.toLowerCase().includes(t)))) continue;
+        out.push(m);
+      }
+    }
+    out.sort((a, b) => cmpId(b.id, a.id));
+    const page = out.slice(clampInt(req.query.offset, 0, 1000, 0), clampInt(req.query.offset, 0, 1000, 0) + 25);
+    res.json({ results: page.map(messageView), total: out.length, users: usersFor(page.map((m) => m.authorId)) });
+  }));
+
+  /* --------------------------- uploads --------------------------- */
+  const MAX_UPLOAD = Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024;
+  r.post('/upload', limit('upload', 30, 60_000, (req) => req.user.id), express.raw({ type: () => true, limit: MAX_UPLOAD }), h(async (req, res) => {
+    if (!Buffer.isBuffer(req.body) || !req.body.length) throw bad('Empty upload');
+    let rawName = String(req.headers['x-filename'] || 'file');
+    try { rawName = decodeURIComponent(rawName); } catch { /* keep the raw header */ }
+    rawName = rawName.replace(/[\\/\0]/g, '_').slice(0, 150) || 'file';
+    let ext = path.extname(rawName).toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 10);
+    const type = String(req.headers['content-type'] || 'application/octet-stream').split(';')[0].slice(0, 100);
+    const id = newId();
+    const file = `${id}${ext}`;
+    fs.writeFileSync(path.join(UPLOAD_DIR, file), req.body);
+    res.json({ id, url: `/uploads/${file}`, name: rawName, size: req.body.length, type });
+  }));
+
+  /* --------------------------- GIFs & stickers (KLIPY) --------------------------- */
+  const gifCache = new Map();
+  const norm = (it, kind) => {
+    const f = it.file || {}; const big = f.md || f.hd || f.sm; const small = f.sm || f.md || f.hd || f.xs;
+    const pickUrl = (set, ...keys) => { for (const k of keys) if (set?.[k]?.url) return set[k]; return null; };
+    const bigMain = pickUrl(big, 'gif', 'webp', 'png', 'jpg') || {};
+    const prevMain = pickUrl(small, 'webp', 'gif', 'png', 'jpg') || bigMain;
+    return {
+      id: String(it.id), title: it.title || '', w: bigMain.width || 220, h: bigMain.height || 220,
+      preview: { url: prevMain.url, w: prevMain.width || 120, h: prevMain.height || 120, mp4: small?.mp4?.url || null, webp: small?.webp?.url || null, gif: small?.gif?.url || null },
+      full: { url: kind === 'stickers' ? (big?.webp?.url || big?.png?.url || big?.gif?.url) : (big?.mp4?.url || big?.gif?.url || big?.webp?.url), gif: big?.gif?.url, webp: big?.webp?.url, mp4: big?.mp4?.url, webm: big?.webm?.url, jpg: big?.jpg?.url, png: big?.png?.url, poster: big?.jpg?.url },
+    };
+  };
+  r.get('/gifs', limit('gifs', 120, 60_000, (req) => req.user.id), h(async (req, res) => {
+    const key = ENV.KLIPY_API_KEY; if (!key) throw new ApiError(503, 'GIFs are not configured on this server', 'no_gif_key');
+    const kind = req.query.type === 'stickers' ? 'stickers' : 'gifs';
+    const mode = ['search', 'categories'].includes(req.query.mode) ? req.query.mode : 'trending';
+    const page = clampInt(req.query.page, 1, 100, 1); const perPage = clampInt(req.query.per_page, 4, 50, 24);
+    const q = String(req.query.q || '').slice(0, 80).trim();
+    if (mode === 'search' && !q) throw bad('Search for something');
+    const qs = new URLSearchParams({ page: String(page), per_page: String(perPage), customer_id: 'orate-' + req.user.id });
+    if (mode === 'search') qs.set('q', q);
+    const url = `https://api.klipy.com/api/v1/${key}/${kind}/${mode}${mode === 'categories' ? '' : '?' + qs}`;
+    const ck = url; const hit = gifCache.get(ck);
+    if (hit && hit.t > Date.now() - 60_000) return res.json(hit.v);
+    const resp = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { accept: 'application/json' } }).catch(() => null);
+    if (!resp || !resp.ok) throw new ApiError(502, 'The GIF service is unavailable right now', 'gif_upstream');
+    const j = await resp.json();
+    let out;
+    if (mode === 'categories') out = { categories: (j.data?.categories || []).map((c) => ({ name: c.category, query: c.query, preview: c.preview_url })) };
+    else out = { items: (j.data?.data || []).filter((it) => it && it.file).map((it) => norm(it, kind)), page, hasNext: !!j.data?.has_next };
+    gifCache.set(ck, { t: Date.now(), v: out });
+    if (gifCache.size > 300) gifCache.delete(gifCache.keys().next().value);
+    res.json(out);
+  }));
+
+  /* --------------------------- fonts --------------------------- */
+  let fontsCache = null;
+  r.get('/fonts', h(async (req, res) => {
+    if (!fontsCache) {
+      const file = path.join(DATA_DIR, 'fonts-cache.json');
+      try { const st = fs.statSync(file); if (Date.now() - st.mtimeMs < 7 * 86400_000) fontsCache = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* none */ }
+      if (!fontsCache) {
+        try {
+          const resp = await fetch('https://fonts.google.com/metadata/fonts', { signal: AbortSignal.timeout(8000) });
+          const txt = (await resp.text()).replace(/^\)\]\}'/, '');
+          const list = JSON.parse(txt).familyMetadataList.filter((f) => f.subsets.includes('latin')).map((f) => {
+            const keys = Object.keys(f.fonts); const wa = f.axes.find((a) => a.tag === 'wght');
+            return [f.family, f.category, f.popularity, keys.filter((k) => !k.endsWith('i')).join(','), keys.some((k) => k.endsWith('i')) ? 1 : 0, wa ? [wa.min, wa.max] : 0];
+          }).sort((a, b) => a[2] - b[2]);
+          fontsCache = list; fs.writeFileSync(file, JSON.stringify(list));
+        } catch { fontsCache = JSON.parse(fs.readFileSync(path.join(ROOT, 'server', 'fonts-fallback.json'), 'utf8')); }
+      }
+    }
+    res.set('Cache-Control', 'public, max-age=3600').json(fontsCache);
+  }));
+
+  /* --------------------------- link previews --------------------------- */
+  const unfurlCache = new Map();
+  const isPrivateIp = (ip) => {
+    if (net.isIPv6(ip)) return ip === '::1' || /^f[cd]/i.test(ip) || /^fe80/i.test(ip) || ip.startsWith('::ffff:127.') || ip.startsWith('::ffff:10.') || ip.startsWith('::ffff:192.168.');
+    const p = ip.split('.').map(Number);
+    return p[0] === 10 || p[0] === 127 || p[0] === 0 || (p[0] === 169 && p[1] === 254) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127);
+  };
+  async function safeFetch(rawUrl, { image = false } = {}) {
+    let u = new URL(rawUrl);
+    for (let hop = 0; hop < 4; hop++) {
+      if (!/^https?:$/.test(u.protocol)) throw bad('Unsupported URL');
+      const addrs = await dns.lookup(u.hostname, { all: true });
+      if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) throw bad('Blocked address');
+      const go = (ua, accept) => fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(image ? 20000 : 5000), headers: { 'user-agent': ua, accept, 'accept-language': 'en' } });
+      let resp = await go(image ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' : 'Mozilla/5.0 (compatible; OrateBot/1.0; +link-preview)', image ? 'image/avif,image/webp,image/*;q=0.8' : 'text/html,application/xhtml+xml,image/*;q=0.8,*/*;q=0.5');
+      // some CDNs (Cloudflare bot rules) reject a full browser UA that lacks matching client hints but accept a bare one
+      if (image && (resp.status === 403 || resp.status === 429)) { resp.body?.cancel().catch(() => {}); resp = await go('Mozilla/5.0', 'image/*,*/*;q=0.8'); }
+      if (resp.status >= 300 && resp.status < 400 && resp.headers.get('location')) { u = new URL(resp.headers.get('location'), u); continue; }
+      return { resp, url: u };
+    }
+    throw bad('Too many redirects');
+  }
+  const decode = (s) => String(s || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&#x([0-9a-f]+);/gi, (_, h2) => String.fromCodePoint(parseInt(h2, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d))).trim();
+  r.get('/unfurl', limit('unfurl', 90, 60_000, (req) => req.user.id), h(async (req, res) => {
+    const url = String(req.query.url || ''); if (!/^https?:\/\//i.test(url) || url.length > 1000) throw bad('Invalid URL');
+    const hit = unfurlCache.get(url); if (hit && hit.t > Date.now() - 3600_000) return res.json(hit.v);
+    let out = { url, type: 'none' };
+    try {
+      const { resp, url: finalUrl } = await safeFetch(url);
+      const ct = (resp.headers.get('content-type') || '').toLowerCase();
+      if (ct.startsWith('image/')) out = { url, type: 'image', image: finalUrl.href };
+      else if (ct.startsWith('video/')) out = { url, type: 'video', video: finalUrl.href };
+      else if (ct.includes('html')) {
+        const reader = resp.body.getReader(); let html = ''; let bytes = 0; const dec = new TextDecoder();
+        while (bytes < 400_000) { const { done, value } = await reader.read(); if (done) break; bytes += value.length; html += dec.decode(value, { stream: true }); if (/<\/head>/i.test(html)) break; }
+        reader.cancel().catch(() => {});
+        const meta = {};
+        for (const m of html.matchAll(/<meta\s+[^>]*>/gi)) {
+          const tag = m[0]; const k = /(?:property|name)\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1]; const v = /content\s*=\s*"([^"]*)"|content\s*=\s*'([^']*)'/i.exec(tag);
+          if (k && v) meta[k.toLowerCase()] = decode(v[1] ?? v[2]);
+        }
+        const title = meta['og:title'] || meta['twitter:title'] || decode(/<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1]);
+        const desc = meta['og:description'] || meta['twitter:description'] || meta.description || '';
+        let image = meta['og:image'] || meta['twitter:image'] || '';
+        try { if (image) image = new URL(image, finalUrl).href; } catch { image = ''; }
+        const yt = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,15})/.exec(finalUrl.href)?.[1];
+        if (title || desc || image) out = { url, type: 'link', title: title.slice(0, 200), description: desc.slice(0, 400), image, siteName: meta['og:site_name'] || finalUrl.hostname.replace(/^www\./, ''), color: HEX.test(meta['theme-color'] || '') ? meta['theme-color'] : null, youtube: yt || null, hostname: finalUrl.hostname };
+      }
+    } catch { /* leave as none */ }
+    unfurlCache.set(url, { t: Date.now(), v: out });
+    if (unfurlCache.size > 500) unfurlCache.delete(unfurlCache.keys().next().value);
+    res.json(out);
+  }));
+
+  r.use((req, res) => res.status(404).json({ error: 'Not found', code: 'not_found' }));
+  // eslint-disable-next-line no-unused-vars
+  r.use((err, req, res, next) => {
+    if (err.type === 'entity.too.large') err = new ApiError(413, 'That file is too large', 'too_large');
+    if (!(err instanceof ApiError)) { if (!err.status) console.error('[api]', err); err = err.status && err.status < 500 ? new ApiError(err.status, err.message) : new ApiError(500, 'Something went wrong on our end', 'server_error'); }
+    res.status(err.status).json({ error: err.message, code: err.code });
+  });
+  return r;
+}

@@ -1,0 +1,123 @@
+/* Orate — base: tokens, reset, wallpaper stack, scrollbars, keyframes */
+:root {
+  --font-ui: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-chat: var(--font-ui);
+  --font-code: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --font-size: 16px; --font-weight: 400; --line-height: 1.45; --letter-spacing: 0em;
+  --m: 1;
+  --ease: cubic-bezier(.2, .8, .2, 1); --ease-spring: cubic-bezier(.34, 1.56, .64, 1); --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --t-fast: calc(140ms * var(--m)); --t-med: calc(260ms * var(--m)); --t-slow: calc(460ms * var(--m));
+
+  --panel-rgb: 21 18 31; --panel-bg: rgb(21 18 31 / .58); --panel-blur: 26px; --panel-sat: 1.15;
+  --surface-rgb: 255 255 255; --text-rgb: 244 242 255; --text: #f4f2ff;
+  --text-2: rgb(var(--text-rgb) / .74); --text-3: rgb(var(--text-rgb) / .5); --text-4: rgb(var(--text-rgb) / .32);
+  --hover: rgb(var(--surface-rgb) / .075); --active: rgb(var(--surface-rgb) / .13); --input-bg: rgb(var(--surface-rgb) / .075);
+  --border: rgb(var(--surface-rgb) / .1); --border-strong: rgb(var(--surface-rgb) / .18);
+  --accent: #8b5cf6; --accent-2: #ec4899; --accent-grad: linear-gradient(135deg, #8b5cf6, #ec4899); --accent-rgb: 139 92 246; --on-accent: #fff;
+  --accent-soft: rgb(var(--accent-rgb) / .18); --link: #b9a2ff;
+  --danger: #f04d6a; --success: #3ba55d; --warn: #f0b232;
+  --radius: 18px; --radius-lg: 22px; --radius-sm: 10px; --gap: 10px;
+  --msg-gap: 16px;
+  --shadow-pop: 0 18px 50px -10px rgb(0 0 0 / .55), 0 2px 8px rgb(0 0 0 / .25);
+  --wp-filter: blur(6px); --wp-dim: .28; --wp-dim-rgb: 0, 0, 0; --wp-pos: 50% 50%; --wp-zoom: 1; --px: 0px; --py: 0px;
+  color-scheme: dark;
+}
+html[data-mode="light"] {
+  color-scheme: light;
+  --shadow-pop: 0 18px 50px -10px rgb(30 20 60 / .35), 0 2px 8px rgb(30 20 60 / .15);
+  --surface-rgb: 0 0 0;
+  --hover: rgb(0 0 0 / .06); --active: rgb(0 0 0 / .1); --input-bg: rgb(0 0 0 / .055);
+  --border: rgb(0 0 0 / .1); --border-strong: rgb(0 0 0 / .2);
+}
+html[data-contrast="high"] { --text-2: rgb(var(--text-rgb) / .92); --text-3: rgb(var(--text-rgb) / .78); --border: rgb(var(--surface-rgb) / .35); }
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; background: #07060d; }
+body {
+  color: var(--text); font-family: var(--font-ui); font-size: 15px; font-weight: var(--font-weight); letter-spacing: var(--letter-spacing);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; line-height: 1.4; -webkit-tap-highlight-color: transparent;
+}
+button, input, textarea, select { font: inherit; color: inherit; letter-spacing: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+button:disabled { cursor: not-allowed; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+html[data-links="underline"] a { text-decoration: underline; }
+h1, h2, h3, h4, p { margin: 0; }
+img, video { display: block; max-width: 100%; }
+::selection { background: rgb(var(--accent-rgb) / .45); }
+:focus-visible { outline: 2px solid rgb(var(--accent-rgb) / .9); outline-offset: 2px; border-radius: 6px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* scrollbars */
+* { scrollbar-width: thin; scrollbar-color: rgb(var(--surface-rgb) / .22) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--surface-rgb) / .2); border-radius: 99px; border: 2.5px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--surface-rgb) / .36); border: 2.5px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ------------------------------------------------ wallpaper */
+#wallpaper { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: #07060d; pointer-events: none; }
+.wp-base, .wp-dim, .wp-vignette { position: absolute; inset: 0; }
+.wp-image {
+  position: absolute; inset: -5%; background-size: cover; background-position: var(--wp-pos); background-repeat: no-repeat;
+  filter: var(--wp-filter); opacity: 0; transition: opacity 1000ms ease; will-change: opacity, transform;
+  transform: translate3d(var(--px), var(--py), 0) scale(var(--wp-zoom));
+}
+.wp-image.on { opacity: 1; }
+#rain { position: absolute; inset: -2%; width: 104%; height: 104%; opacity: 0; transition: opacity 900ms ease; transform: translate3d(var(--px), var(--py), 0); }
+#rain.on { opacity: 1; }
+#wallpaper.rain-on:not(.rain-fallback) .wp-image { opacity: 0 !important; transition-duration: 600ms; }
+.wp-dim { background: rgba(var(--wp-dim-rgb), var(--wp-dim)); transition: background 300ms; }
+.wp-vignette { background: radial-gradient(ellipse at 50% 40%, transparent 55%, rgb(0 0 0 / .32) 100%); }
+html[data-mode="light"] .wp-vignette { background: radial-gradient(ellipse at 50% 40%, transparent 60%, rgb(255 255 255 / .25) 100%); }
+#app, #portals { position: fixed; inset: 0; z-index: 1; }
+#portals { z-index: 100; pointer-events: none; }
+#portals > * { pointer-events: auto; }
+
+/* ------------------------------------------------ logo mark */
+.logo { display: inline-block; flex: none; -webkit-mask: url(/img/logo-mask.png) center / contain no-repeat; mask: url(/img/logo-mask.png) center / contain no-repeat; }
+
+/* ------------------------------------------------ keyframes */
+@keyframes pop-in { from { opacity: 0; transform: scale(.94) translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes slide-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes slide-down { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+@keyframes slide-right { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
+@keyframes slide-left { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes bounce-in { 0% { transform: scale(.3); opacity: 0; } 55% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+@keyframes ring { 0%, 100% { transform: rotate(0); } 10%, 30%, 50% { transform: rotate(-16deg); } 20%, 40% { transform: rotate(16deg); } 60% { transform: rotate(0); } }
+@keyframes glow-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgb(var(--accent-rgb) / .55); } 50% { box-shadow: 0 0 0 10px rgb(var(--accent-rgb) / 0); } }
+@keyframes float { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-12px) rotate(2deg); } }
+.pop-in { animation: pop-in var(--t-med) var(--ease) both; }
+.fade-in { animation: fade-in var(--t-med) ease both; }
+.slide-up { animation: slide-up var(--t-med) var(--ease) both; }
+
+/* ------------------------------------------------ glass buttons (see js/glass.js) */
+/* A lens canvas (WebGL refraction of the wallpaper + specular rim) sits behind each button's content. */
+.glass-lens { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; pointer-events: none; z-index: -1; }
+:is(
+  html[data-glass="liquid"][data-glass-rail="1"] .glass-rail, html[data-glass="frosted"][data-glass-rail="1"] .glass-rail,
+  html[data-glass="liquid"][data-glass-nav="1"] .glass-nav, html[data-glass="frosted"][data-glass-nav="1"] .glass-nav,
+  html[data-glass="liquid"][data-glass-toolbar="1"] .glass-toolbar, html[data-glass="frosted"][data-glass-toolbar="1"] .glass-toolbar,
+  html[data-glass="liquid"][data-glass-buttons="1"] .glass-buttons, html[data-glass="frosted"][data-glass-buttons="1"] .glass-buttons,
+  html[data-glass="liquid"][data-glass-composer="1"] .glass-composer, html[data-glass="frosted"][data-glass-composer="1"] .glass-composer
+) {
+  isolation: isolate;
+  background-color: rgb(255 255 255 / .07);
+  box-shadow: 0 8px 22px -8px rgb(0 0 0 / .5), 0 1px 3px rgb(0 0 0 / .18);
+}
+/* once the lens renders, it is the surface */
+html[data-glass-gl="1"] :is(.glass-rail, .glass-nav, .glass-toolbar, .glass-buttons, .glass-composer) { background-color: transparent; }
+/* no WebGL: tinted glass with a conic specular rim */
+html[data-glass-gl="0"]:is([data-glass="liquid"], [data-glass="frosted"]) :is(.glass-rail, .glass-nav, .glass-toolbar, .glass-buttons, .glass-composer)::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 2;
+  background: conic-gradient(from 215deg at 50% 50%, rgb(255 255 255 / .9), rgb(255 255 255 / 0) 24%, rgb(255 255 255 / 0) 52%, rgb(255 255 255 / .6) 74%, rgb(255 255 255 / 0) 92%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+}
