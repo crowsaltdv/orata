@@ -117,7 +117,7 @@ const ChannelItem = memo(function ChannelItem({ ch, active, serverId }) {
   const click = () => { if (isVoice) { if (!inCall) voice.join(ch.id); } goChannel(serverId, ch.id); };
   return html`<div>
     <div class=${cx('ch-item', active && 'active', unread === '1' && muted === '0' && 'unread', muted === '1' && 'muted', inCall && 'in-call')} role="button" tabindex="0" onClick=${click} onKeyDown=${(e) => e.key === 'Enter' && click()} onContextMenu=${(e) => openContext(e, channelMenu(ch))}>
-      <${Icon} name=${isVoice ? 'volume' : ch.private ? 'hash-lock' : 'hash'} size=${19} class="ch-icon" />
+      <${Icon} name=${isVoice ? 'volume' : ch.type === 'forum' ? 'forum' : ch.private ? 'hash-lock' : 'hash'} size=${19} class="ch-icon" />
       <span class="ch-name">${ch.name}</span>
       ${Number(mentions) ? html`<${Badge} n=${Number(mentions)} />` : null}
       <span class="ch-actions">
@@ -133,6 +133,7 @@ export function ChannelSidebar() {
   const sid = useSel((s) => s.route.serverId); const chId = useSel((s) => s.route.channelId);
   const server = useSel((s) => s.servers[sid]);
   const collapsed = useSel((s) => s.settings.collapsed);
+  const activeForum = useSel((s) => s.channelIndex[s.route.channelId]?.forumId);   // while a post is open its forum stays highlighted
   const [menuOpen, setMenuOpen] = useState(false); const hdr = useRef(null);
   const groups = useMemo(() => {
     if (!server) return [];
@@ -155,7 +156,7 @@ export function ChannelSidebar() {
         ${cat ? html`<div class=${cx('cat-head', collapsed[cat.id] && 'collapsed')} role="button" tabindex="0" onClick=${() => updateSettings({ collapsed: { [cat.id]: !collapsed[cat.id] } }, { sync: false })} onContextMenu=${(e) => openContext(e, channelMenu(cat))}>
           <${Icon} name="chevron-down" size=${13} sw=${3} /><span>${cat.name}</span>
           ${hasChannelPerm(cat, 'MANAGE_CHANNELS') ? html`<span class="cat-add" data-tip="Create Channel" onClick=${(e) => { e.stopPropagation(); openModal('create-channel', { serverId: server.id, parentId: cat.id }); }}><${Icon} name="plus" size=${16} sw=${2.4} /></span>` : null}</div>` : null}
-        <div class=${cx('ch-list', cat && collapsed[cat.id] && 'collapsed')}><div>${items.map((c) => html`<${ChannelItem} key=${c.id} ch=${c} active=${chId === c.id} serverId=${server.id} />`)}</div></div>
+        <div class=${cx('ch-list', cat && collapsed[cat.id] && 'collapsed')}><div>${items.map((c) => html`<${ChannelItem} key=${c.id} ch=${c} active=${chId === c.id || activeForum === c.id} serverId=${server.id} />`)}</div></div>
       </div>`)}
       ${!server.channels.length ? html`<div class="empty small"><p>No channels yet.</p></div>` : null}
     </div>

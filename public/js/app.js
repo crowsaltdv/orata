@@ -19,15 +19,18 @@ import '/js/voice.js';
 import { markAllRead, ackChannel } from '/js/actions.js';
 import { VerifyScreen, VerifyGate, VerifyBanner } from '/js/verify.js';
 import { MusicPanel } from '/js/music.js';
+import { ForumView } from '/js/forum.js';
+import '/js/polls.js';
 
 function MainView() {
   const view = useSel((s) => s.route.view);
   const chId = useSel((s) => s.route.channelId);
-  const isVoice = useSel((s) => getChannel(s.route.channelId)?.type === 'voice');
+  const chType = useSel((s) => getChannel(s.route.channelId)?.type);
+  const isVoice = chType === 'voice';
   switch (view) {
     case 'friends': return html`<${FriendsView} />`;
     case 'dm': return html`<${ChatView} key=${chId} />`;
-    case 'channel': return chId ? (isVoice ? html`<${VoiceChannelView} key=${chId} />` : html`<${ChatView} key=${chId} />`) : html`<main class="main panel"></main>`;
+    case 'channel': return chId ? (isVoice ? html`<${VoiceChannelView} key=${chId} />` : chType === 'forum' ? html`<${ForumView} key=${chId} />` : html`<${ChatView} key=${chId} />`) : html`<main class="main panel"></main>`;
     default: return html`<${FriendsView} />`;
   }
 }
@@ -40,7 +43,7 @@ function Shell() {
     let n = 0; for (const id of Object.keys(s.reads)) n += s.reads[id].mentions || 0; return n;
   });
   const anyUnread = useSel((s) => Object.keys(s.lastMsg).some((id) => { const c = s.channelIndex[id]; return c && (c.type === 'text' || c.type === 'dm' || c.type === 'group') && unreadInfo(id).unread && !s.settings.mutedChannels[id] && !(s.settings.mutedServers[c.serverId]); }));
-  const chName = useSel((s) => { const c = getChannel(s.route.channelId); return c ? (c.serverId ? `#${c.name}` : dmName(c)) : view === 'friends' ? 'Friends' : ''; });
+  const chName = useSel((s) => { const c = getChannel(s.route.channelId); return c ? (c.serverId ? (c.type === 'post' ? c.name : `#${c.name}`) : dmName(c)) : view === 'friends' ? 'Friends' : ''; });
   useEffect(() => { document.title = `${totalUnread ? `(${totalUnread}) ` : anyUnread ? '• ' : ''}${chName ? chName + ' | ' : ''}Orate`; }, [totalUnread, anyUnread, chName]);
 
   // pending invite after login

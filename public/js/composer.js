@@ -1,6 +1,6 @@
 // Orate — message composer: attachments, drag & drop, paste, autocomplete (@ # :), slash commands, replies, pickers.
 import { html, useState, useEffect, useRef, useLayoutEffect, useMemo, cx, fileSize, uid, isImageType, throttle } from '/js/lib.js';
-import { state, set, useSel, getChannel, dmName, dmUserId, toast, hasChannelPerm, openContext, closePopover, openPopover, getUser } from '/js/store.js';
+import { state, set, useSel, getChannel, dmName, dmUserId, toast, hasChannelPerm, allCustomEmojis, customToken, openContext, openModal, closePopover, openPopover, getUser } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, IconBtn, Spinner } from '/js/ui.js';
 import { sendMessage, sendTyping, act, getEntry } from '/js/actions.js';
@@ -10,8 +10,11 @@ import { searchEmoji, shortcodeEmoji, loadEmoji, noteEmojiUse } from '/js/emoji.
 import { openPicker } from '/js/pickers.js';
 import { t } from '/js/i18n.js';
 import { fx } from '/js/fx.js';
+import { shareTheme } from '/js/theme-card.js';
 
 const drafts = new Map(); // channelId -> text
+/** How a custom emoji reads in the message box: `:name:` (turned into the real token when sent) unless another server has one with the same name. */
+const emojiText = (e, serverId) => { const tok = `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`; return customToken(e.name, serverId) === tok ? `:${e.name}:` : tok; };
 export const composerApi = { insert: () => {}, focus: () => {}, setText: () => {} };
 
 const COMMANDS = [
@@ -21,6 +24,8 @@ const COMMANDS = [
   { name: 'me', desc: 'Show action text in italics', arg: 'action' },
   { name: 'spoiler', desc: 'Hide your message behind a spoiler', arg: 'message' },
   { name: 'gif', desc: 'Search for a GIF', arg: 'query' },
+  { name: 'poll', desc: 'Ask everybody a question', arg: 'question' },
+  { name: 'theme', desc: 'Share your theme so others can try it', arg: 'name (optional)' },
   { name: 'nick', desc: 'Change your nickname in this server', arg: 'name', server: true },
 ];
 
@@ -60,7 +65,10 @@ export function Composer({ chId }) {
   const [ping, setPing] = useState(true);
   const ta = useRef(null); const file = useRef(null); const dragDepth = useRef(0);
   const server = ch?.serverId ? state.servers[ch.serverId] : null;
-  const canSend = !server || hasChannelPerm(ch, 'SEND_MESSAGES');
+  const lockedPost = ch?.type === 'post' && ch.locked && !hasChannelPerm(ch, 'MANAGE_MESSAGES') && ch.ownerId !== state.me.id;
+  const timeoutUntil = server?.members.find((m) => m.id === state.me.id)?.timeoutUntil || 0;
+  const timedOut = timeoutUntil > Date.now() && !server?.perms.includes('ADMINISTRATOR') && server?.ownerId !== state.me.id;
+  const canSend = (!server || hasChannelPerm(ch, 'SEND_MESSAGES')) && !lockedPost;
   const canAttach = !server || hasChannelPerm(ch, 'ATTACH_FILES');
 
   // swap drafts when the channel changes
@@ -117,10 +125,12 @@ export function Composer({ chId }) {
       else if (cmd === 'unflip') v = `${arg} ┬─┬ ノ( ゜-゜ノ)`.trim();
       else if (cmd === 'me') { if (!arg) return; v = `_${arg}_`; }
       else if (cmd === 'spoiler') { if (!arg) return; v = `||${arg}||`; }
+      else if (cmd === 'poll') { setText(''); openModal('create-poll', { channelId: chId }); return; }
+      else if (cmd === 'theme') { setText(''); await shareTheme(chId, arg); return; }
       else if (cmd === 'gif') { setText(''); const el = document.querySelector('.emoji-btn'); openPickerFor(el, 'gif', arg); return; }
       else if (cmd === 'nick') { if (!server) { toast('Nicknames only work in servers', 'error'); return; } setText(''); await act(api.patch(`/servers/${server.id}/members/${state.me.id}`, { nick: arg }), { success: arg ? 'Nickname updated' : 'Nickname cleared' }); return; }
     }
-    v = encodeMentions(v.replace(/:([a-z0-9_+-]+):/gi, (all, code) => shortcodeEmoji(code.toLowerCase()) || all), ch);
+    v = encodeMentions(v.replace(/:([a-z0-9_+-]+):/gi, (all, code) => (customToken(code, server?.id) ? all : shortcodeEmoji(code.toLowerCase()) || all)), ch);
     const pending = ready.filter((a) => a.status === 'uploading');
     const attachments = ready.map((a) => ({ id: a.id, url: a.preview || a.result?.url, name: a.name, size: a.size, type: a.type, width: a.width, height: a.height, spoiler: a.spoiler }));
     const wait = pending.length || ready.length ? async () => {
@@ -151,7 +161,8 @@ export function Composer({ chId }) {
     } else if (trig.kind === '#' && server) {
       items = server.channels.filter((c) => c.type !== 'category' && c.name.toLowerCase().includes(q)).slice(0, 8).map((c) => ({ type: 'channel', id: c.id, label: c.name, sub: c.type === 'voice' ? 'Voice' : server.name, insert: '#' + c.name + ' ', icon: c.type === 'voice' ? 'volume' : 'hash' }));
     } else if (trig.kind === ':') {
-      items = searchEmoji(q, 8).map((e) => ({ type: 'emoji', id: e.char, label: `:${e.code || e.label}:`, sub: '', insert: e.char + ' ', char: e.char }));
+      const cust = allCustomEmojis().filter((e) => e.name.toLowerCase().includes(q)).sort((a, b) => (b.serverId === server?.id) - (a.serverId === server?.id)).slice(0, 5).map((e) => ({ type: 'cemoji', id: e.id, label: `:${e.name}:`, sub: e.serverName, insert: emojiText(e, server?.id) + ' ', emoji: e }));
+      items = [...cust, ...searchEmoji(q, 8).map((e) => ({ type: 'emoji', id: e.char, label: `:${e.code || e.label}:`, sub: '', insert: e.char + ' ', char: e.char }))].slice(0, 8);
     } else if (trig.kind === '/') {
       items = COMMANDS.filter((c) => c.name.startsWith(q) && (!c.server || server)).map((c) => ({ type: 'cmd', id: c.name, label: '/' + c.name, sub: c.desc, insert: '/' + c.name + ' ' }));
     }
@@ -168,9 +179,9 @@ export function Composer({ chId }) {
   const typingPing = useRef(throttle(() => sendTyping(chId), 3000)).current;
   const onInput = (e) => {
     let v = e.target.value; const caret = e.target.selectionStart;
-    // finished :shortcode: → emoji
+    // finished :shortcode: → emoji (a server's own emoji keeps reading :name: until the message is sent)
     const sm = /(^|[\s(]):([a-z0-9_+-]{2,32}):$/i.exec(v.slice(0, caret));
-    if (sm) { const ch2 = shortcodeEmoji(sm[2].toLowerCase()); if (ch2) { const start = caret - sm[2].length - 2; v = v.slice(0, start) + ch2 + v.slice(caret); setText(v); noteEmojiUse(ch2); requestAnimationFrame(() => ta.current?.setSelectionRange(start + ch2.length, start + ch2.length)); setAc(null); return; } }
+    if (sm) { const ch2 = customToken(sm[2], server?.id) ? null : shortcodeEmoji(sm[2].toLowerCase()); if (ch2) { const start = caret - sm[2].length - 2; v = v.slice(0, start) + ch2 + v.slice(caret); setText(v); noteEmojiUse(ch2); requestAnimationFrame(() => ta.current?.setSelectionRange(start + ch2.length, start + ch2.length)); setAc(null); return; } }
     setText(v); computeAc(v, caret);
     if (v.trim() && !v.startsWith('/')) typingPing();
   };
@@ -215,23 +226,23 @@ export function Composer({ chId }) {
   }, [chId, atts.length, canAttach]);
 
   if (!ch) return null;
-  const placeholder = ch.serverId ? `${t('Message')} #${ch.name}` : `${t('Message')} ${ch.type === 'group' ? dmName(ch) : '@' + (getUser(dmUserId(ch))?.displayName || '')}`;
+  const placeholder = ch.type === 'post' ? `${t('Reply to')} “${ch.name}”` : ch.serverId ? `${t('Message')} #${ch.name}` : `${t('Message')} ${ch.type === 'group' ? dmName(ch) : '@' + (getUser(dmUserId(ch))?.displayName || '')}`;
   const hasContent = text.trim() || atts.length || media;
   // picking a GIF or sticker only stages it in the message box (like an upload); the person presses send
   const stageGif = (item) => setMedia({ kind: 'gif', title: item.title || 'GIF', preview: item.preview, data: { id: item.id, title: item.title, url: item.full.mp4 || item.full.gif || item.full.webp, mp4: item.full.mp4, gif: item.full.gif, poster: item.full.poster, w: item.w, h: item.h } });
-  const stageSticker = (item) => setMedia({ kind: 'sticker', title: item.title || 'Sticker', preview: item.preview, data: { id: item.id, title: item.title, url: item.full.url, webp: item.full.webp, gif: item.full.gif, png: item.full.png, w: item.w, h: item.h } });
-  const handlers = { onEmoji: (c, e) => { composerApi.insert(c); noteEmojiUse(c); if (!e?.shiftKey) closePopover(); }, onGif: (i) => { closePopover(); stageGif(i); ta.current?.focus(); }, onSticker: (i) => { closePopover(); stageSticker(i); ta.current?.focus(); } };
+  const stageSticker = (item) => item.custom ? setMedia({ kind: 'sticker', title: item.title, preview: item.preview, data: { custom: item.custom } }) : setMedia({ kind: 'sticker', title: item.title || 'Sticker', preview: item.preview, data: { id: item.id, title: item.title, url: item.full.url, webp: item.full.webp, gif: item.full.gif, png: item.full.png, w: item.w, h: item.h } });
+  const handlers = { onEmoji: (c, e) => { const tok = c.startsWith('<'); const nm = tok && /^<a?:(\w+):\d+>$/.exec(c); composerApi.insert(tok ? (nm && customToken(nm[1], server?.id) === c ? `:${nm[1]}:` : c) + ' ' : c); if (!tok) noteEmojiUse(c); if (!e?.shiftKey) closePopover(); }, onGif: (i) => { closePopover(); stageGif(i); ta.current?.focus(); }, onSticker: (i) => { closePopover(); stageSticker(i); ta.current?.focus(); } };
   const openPickerFor = (anchor, tab, query) => openPicker(anchor || ta.current, handlers, { tab, query, placement: 'top-end' });
 
   if (blockedBy) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="ban" size=${18} /> You have blocked this user. <button type="button" class="link-btn" onClick=${() => act(api.del(`/relationships/${dmUserId(ch)}`))}>Unblock</button></div></div>`;
-  if (!canSend) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="lock" size=${18} /> ${t('You do not have permission to send messages in this channel.')}</div></div>`;
+  if (!canSend) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name=${timedOut ? 'clock' : 'lock'} size=${18} /> ${lockedPost ? t('This post is locked.') : timedOut ? `${t('You are timed out until')} ${new Date(timeoutUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : t('You do not have permission to send messages in this channel.')}</div></div>`;
 
   return html`<div class="composer-wrap" ref=${dropdownRef}>
     ${drag ? html`<div class="drop-overlay"><div class="drop-card"><${Icon} name="upload" size=${48} sw=${1.6} /><h3>${t('Upload to')} ${ch.serverId ? '#' + ch.name : dmName(ch)}</h3><p>${t('You can add comments before uploading.')}</p></div></div>` : null}
     ${ac ? html`<div class="autocomplete pop-in" role="listbox">
       <div class="ac-head">${ac.trig.kind === '@' ? t('Members') : ac.trig.kind === '#' ? t('Channels') : ac.trig.kind === ':' ? t('Emoji matching') + ' :' + ac.trig.query : t('Commands')}</div>
       ${ac.items.map((it, i) => html`<button type="button" class=${cx('ac-item', i === acIdx && 'sel')} onMouseEnter=${() => setAcIdx(i)} onMouseDown=${(e) => { e.preventDefault(); pick(it); }} role="option">
-        ${it.type === 'user' ? html`<${Avatar} user=${it.user} size=${24} />` : it.type === 'emoji' ? html`<span class="ac-emoji">${it.char}</span>` : it.type === 'role' ? html`<span class="ac-role" style=${{ background: it.color || 'var(--accent)' }}></span>` : html`<${Icon} name=${it.icon || (it.type === 'cmd' ? 'bolt' : 'at')} size=${18} />`}
+        ${it.type === 'user' ? html`<${Avatar} user=${it.user} size=${24} />` : it.type === 'cemoji' ? html`<img class="ac-cemoji" src=${it.emoji.url} alt="" />` : it.type === 'emoji' ? html`<span class="ac-emoji">${it.char}</span>` : it.type === 'role' ? html`<span class="ac-role" style=${{ background: it.color || 'var(--accent)' }}></span>` : html`<${Icon} name=${it.icon || (it.type === 'cmd' ? 'bolt' : 'at')} size=${18} />`}
         <span class="ac-label" style=${it.color ? { color: it.color } : null}>${it.label}</span><span class="ac-sub">${it.sub}</span></button>`)}
     </div>` : null}
     ${replyTo ? html`<div class="reply-bar slide-up"><span>${t('Replying to')} <b>${replyName || '…'}</b></span><span class="reply-ctl"><button type="button" class=${cx('ping-toggle', ping && 'on')} onClick=${() => setPing(!ping)} data-tip=${ping ? 'Mention on' : 'Mention off'}><${Icon} name="at" size=${14} sw=${2.4} />${ping ? 'ON' : 'OFF'}</button><button type="button" class="icon-btn" onClick=${() => set({ replyTo: null })} aria-label="Cancel reply"><${Icon} name="x" size=${15} /></button></span></div>` : null}
@@ -247,7 +258,7 @@ export function Composer({ chId }) {
         <div class="att-meta" title=${a.name}>${a.name}</div>
         <div class="att-acts"><button type="button" data-tip=${a.spoiler ? 'Unmark spoiler' : 'Mark as spoiler'} onClick=${() => setAtts((cur) => cur.map((x) => (x.id === a.id ? { ...x, spoiler: !x.spoiler } : x)))} class=${a.spoiler ? 'on' : ''}><${Icon} name="eye-off" size=${15} /></button><button type="button" class="del" data-tip="Remove" onClick=${() => removeAtt(a)}><${Icon} name="trash" size=${15} /></button></div></div>`)}</div>` : null}
       <div class="composer-row">
-        <button type="button" class="comp-btn plus" data-tip=${t('Upload a File')} data-tip-pos="top" aria-label="Upload a file" onClick=${() => file.current?.click()}><${Icon} name="plus" size=${22} sw=${2.4} /></button>
+        <button type="button" class="comp-btn plus" data-tip=${t('Upload a File')} data-tip-pos="top" aria-label="Upload a file" onClick=${(e) => { const r = e.currentTarget.getBoundingClientRect(); openContext({ clientX: r.left, clientY: r.top - 4 }, [{ label: t('Upload a File'), icon: 'upload', onClick: () => file.current?.click(), disabled: !canAttach }, { label: t('Create Poll'), icon: 'bar-chart', onClick: () => openModal('create-poll', { channelId: chId }) }]); }}><${Icon} name="plus" size=${22} sw=${2.4} /></button>
         <input type="file" multiple hidden ref=${file} onChange=${(e) => { addFiles(e.target.files); e.target.value = ''; }} />
         <textarea ref=${ta} class="composer-input" rows="1" value=${text} placeholder=${placeholder} maxlength="4000" spellcheck="true" aria-label=${placeholder} onInput=${onInput} onKeyDown=${onKeyDown} onPaste=${onPaste} onBlur=${() => setTimeout(() => setAc(null), 120)} onClick=${(e) => computeAc(text, e.target.selectionStart)}></textarea>
         <div class="comp-right">

@@ -1,6 +1,6 @@
 // Orate — a single chat message (header, markdown body, attachments, GIFs, embeds, reactions, toolbar).
 import { html, useState, useEffect, useRef, memo, cx, formatStamp, formatClock, formatFull, fileSize, copyText, isImageType, shallowEq } from '/js/lib.js';
-import { state, set, useSel, nameOf, roleColor, openContext, openPopover, openModal, toast, getChannel, hasPerm, hasChannelPerm, dmName, goChannel, goDm, go } from '/js/store.js';
+import { state, set, useSel, nameOf, roleColor, openContext, openPopover, openModal, toast, getChannel, hasPerm, hasChannelPerm, dmName, goChannel, goDm, go, emojiById } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, IconBtn } from '/js/ui.js';
 import { renderMarkdown, emojiOnlyCount, plainPreview, decodeMentions } from '/js/markdown.js';
@@ -10,6 +10,8 @@ import { frequentEmoji } from '/js/emoji.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
 import { InviteCard, inviteCodeOf } from '/js/invite-card.js';
+import { PollView } from '/js/polls.js';
+import { ThemeCard } from '/js/theme-card.js';
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -72,12 +74,19 @@ function GifMedia({ g, onImage }) {
 }
 
 /* ------------------------------------------------------------------ reactions */
+const CUSTOM_KEY = /^<(a?):([A-Za-z0-9_]{2,32}):(\d{6,20})>$/;
+/** A reaction's emoji: a character, or the picture of a server's custom emoji. */
+function ReactionEmoji({ emoji, m }) {
+  const c = CUSTOM_KEY.exec(emoji); if (!c) return html`<span class="r-emoji">${emoji}</span>`;
+  const e = (m.emojis || []).find((x) => x.id === c[3]) || emojiById(c[3]);
+  return e ? html`<img class="r-emoji emoji custom" src=${e.url} alt=${`:${c[2]}:`} draggable="false" />` : html`<span class="r-emoji">:${c[2]}:</span>`;
+}
 function Reactions({ m, ch }) {
   const entries = Object.entries(m.reactions || {}); const me = state.me.id;
   if (!entries.length) return null;
   const names = (ids) => { const s = ids.slice(0, 10).map((id) => nameOf(id, ch.serverId)); return s.join(', ') + (ids.length > 10 ? ` and ${ids.length - 10} more` : ''); };
   return html`<div class="reactions">
-    ${entries.map(([emoji, ids]) => html`<button type="button" key=${emoji} class=${cx('reaction', ids.includes(me) && 'mine')} data-tip=${`${names(ids)} reacted with ${emoji}`} onClick=${() => toggleReaction(ch, m, emoji)}><span class="r-emoji">${emoji}</span><span class="r-count">${ids.length}</span></button>`)}
+    ${entries.map(([emoji, ids]) => html`<button type="button" key=${emoji} class=${cx('reaction', ids.includes(me) && 'mine')} data-tip=${`${names(ids)} reacted with ${emoji.replace(CUSTOM_KEY, ':$2:')}`} onClick=${() => toggleReaction(ch, m, emoji)}><${ReactionEmoji} emoji=${emoji} m=${m} /><span class="r-count">${ids.length}</span></button>`)}
     <button type="button" class="reaction add" data-tip=${t('Add Reaction')} onClick=${(e) => openPicker(e.currentTarget, (emoji) => toggleReaction(ch, m, emoji), { emojiOnly: true })}><${Icon} name="smile-plus" size=${16} /></button>
   </div>`;
 }
@@ -162,7 +171,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
   const me = state.me.id;
   const mentioned = m.mentions?.includes(me) || m.mentionEveryone || (m.reply?.authorId === me && m.authorId !== me && m.mentions?.includes(me));
   const jumbo = state.settings.chat.jumbo && !m.attachments?.length && emojiOnlyCount(m.content);
-  const htmlContent = m.content ? renderMarkdown(m.content, { serverId: ch.serverId }) : '';
+  const htmlContent = m.content ? renderMarkdown(m.content, { serverId: ch.serverId, emojis: m.emojis }) : '';
   const links = m.content && !m.pending ? [...new Set((m.content.replace(/```[\s\S]*?```|`[^`]*`/g, '').match(URL_RE) || []).map((u) => u.replace(/[.,;:!?)]+$/, '')))] : [];
   const invites = [...new Set(links.map(inviteCodeOf).filter(Boolean))].slice(0, 2);   // invite links become join cards, whatever the link-preview setting says
   const urls = showEmbeds ? links.filter((u) => !inviteCodeOf(u)).slice(0, 2) : [];
@@ -193,6 +202,8 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
         ${m.editedAt && !editing ? html`<span class="edited" data-tip=${formatFull(m.editedAt)}>(${t('edited')})</span>` : null}
         ${m.gif ? html`<${GifMedia} g=${m.gif} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />` : null}
         ${m.sticker ? html`<img class="msg-sticker" src=${m.sticker.url} alt=${m.sticker.title || 'sticker'} title=${m.sticker.title} loading="lazy" />` : null}
+        ${m.poll ? html`<${PollView} m=${m} ch=${ch} />` : null}
+        ${m.theme ? html`<${ThemeCard} m=${m} />` : null}
         ${m.attachments?.length ? html`<div class="attachments">${m.attachments.map((a) => html`<${Attachment} key=${a.id || a.url} a=${a} onImage=${onImage} />`)}</div>` : null}
         ${invites.map((c) => html`<${InviteCard} key=${c} code=${c} mine=${m.authorId === me} />`)}
         ${urls.map((u) => html`<${LinkEmbed} key=${u} url=${u} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />`)}

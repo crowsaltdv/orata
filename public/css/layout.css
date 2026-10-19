@@ -86,9 +86,9 @@
 .sb-header .sbh-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: relative; z-index: 1; }
 .sb-header .icon { transition: transform var(--t-med) var(--ease); flex: none; position: relative; z-index: 1; }
 .sb-header.open .icon { transform: rotate(180deg); }
-.sb-header.has-banner { min-height: 108px; align-items: flex-end; padding-bottom: 12px; color: #fff; text-shadow: 0 1px 8px rgb(0 0 0 / .6); }
+.sb-header.has-banner { min-height: 160px; align-items: flex-end; padding-bottom: 14px; color: #fff; text-shadow: 0 1px 8px rgb(0 0 0 / .6); border-radius: var(--radius-lg) var(--radius-lg) 0 0; overflow: hidden; }
 .sb-header .banner { position: absolute; inset: 0; background-size: cover; background-position: center; z-index: 0; }
-.sb-header .banner::after { content: ""; position: absolute; inset: 0; background: linear-gradient(transparent 20%, rgb(0 0 0 / .65)); }
+.sb-header .banner::after { content: ""; position: absolute; inset: 0; background: linear-gradient(transparent 45%, rgb(0 0 0 / .7)); }
 .cat-head { display: flex; align-items: center; gap: 4px; padding: 16px 6px 5px 6px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); width: 100%; text-align: left; cursor: pointer; transition: color var(--t-fast); position: relative; }
 .cat-head:hover { color: var(--text); }
 .cat-head .icon { transition: transform var(--t-med) var(--ease); }

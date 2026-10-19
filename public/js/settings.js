@@ -18,7 +18,7 @@ import { DEFAULT_SETTINGS } from '/js/defaults.js';
 
 /* ------------------------------------------------------------------ account */
 MODALS['account-edit'] = function AccountEdit({ id, field }) {
-  const me = state.me; const [v, setV] = useState(field === 'username' ? me.username : field === 'email' ? me.email : '');
+  const me = state.me; const [v, setV] = useState(field === 'username' ? me.username : field === 'email' ? (me.email || '') : '');
   const [pw, setPw] = useState(''); const [pw2, setPw2] = useState(''); const [cur, setCur] = useState(''); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true); setErr(null);
@@ -28,8 +28,8 @@ MODALS['account-edit'] = function AccountEdit({ id, field }) {
       closeModal(id);
     } catch (e) { setErr(errMsg(e)); setBusy(false); }
   };
-  const title = { username: 'Change your username', email: 'Change your email', password: 'Update your password' }[field];
-  return html`<${Modal} title=${title} subtitle=${field === 'password' ? 'Enter your current password and a new one.' : 'Enter a new value and your current password.'} width=${440} onClose=${() => closeModal(id)} footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>Cancel<//><${Btn} variant="primary" loading=${busy} disabled=${!cur || (field !== 'password' && !v) || (field === 'password' && (!pw || !pw2))} onClick=${save}>Done<//>`}>
+  const title = { username: 'Change your username', email: me.email ? 'Change your email' : 'Add an email', password: 'Update your password' }[field];
+  return html`<${Modal} title=${title} subtitle=${field === 'password' ? 'Enter your current password and a new one.' : 'Enter a new value and your current password.'} width=${440} onClose=${() => closeModal(id)} footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>Cancel<//><${Btn} variant="primary" loading=${busy} disabled=${!cur || (field === 'username' && !v) || (field === 'password' && (!pw || !pw2))} onClick=${save}>Done<//>`}>
     ${field !== 'password' ? html`<${Field} label=${field === 'email' ? 'Email' : 'Username'}><${TextInput} value=${v} onInput=${setV} autofocus type=${field === 'email' ? 'email' : 'text'} onKeyDown=${(e) => e.key === 'Enter' && save()} /><//>` : html`<${Field} label="New password"><${TextInput} type="password" value=${pw} onInput=${setPw} autofocus /><//><${Field} label="Confirm new password"><${TextInput} type="password" value=${pw2} onInput=${setPw2} /><//>`}
     <${Field} label="Current password" error=${err}><${TextInput} type="password" value=${cur} onInput=${setCur} onKeyDown=${(e) => e.key === 'Enter' && save()} /><//>
   <//>`;
@@ -51,11 +51,11 @@ function Sessions() {
 }
 function AccountPage() {
   const me = useSel((s) => s.me); const [reveal, setReveal] = useState(false);
-  const masked = me.email.replace(/^(.).*(@.*)$/, (_, a, b) => a + '•'.repeat(7) + b);
+  const masked = me.email ? me.email.replace(/^(.).*(@.*)$/, (_, a, b) => a + '•'.repeat(7) + b) : t('Not set');
   const row = (label, val, action, btn) => html`<div class="acct-row"><div><small>${label}</small><b>${val}</b></div>${action ? html`<${Btn} size="sm" onClick=${action}>${btn || t('Edit')}<//>` : null}</div>`;
   return html`<div class="s-page">
     <div class="acct-card panel"><${Banner} user=${me} height=${100} /><div class="acct-head"><${Avatar} user=${me} size=${84} status=${me.status} class="acct-av" /><div class="acct-name"><b>${me.displayName}</b><span>@${me.username}</span></div><${Btn} variant="primary" icon="edit" onClick=${() => openSettings('profile')}>${t('Edit User Profile')}<//></div>
-      <div class="acct-rows">${row(t('Display name'), me.displayName, () => openSettings('profile'))}${row(t('Username'), me.username, () => openModal('account-edit', { field: 'username' }))}${row(t('Email'), reveal ? me.email : masked, () => openModal('account-edit', { field: 'email' }))}<button type="button" class="link-btn reveal" onClick=${() => setReveal(!reveal)}>${reveal ? t('Hide') : t('Reveal')} ${t('email')}</button>${me.emailVerified === false && state.emailVerif.enabled ? html`<div class="note-chip"><${Icon} name="alert-circle" size=${14} /> ${t('Your email isn’t verified yet.')} <button type="button" class="link-btn" onClick=${() => resendVerification()}>${t('Resend link')}</button></div>` : me.emailVerified === true && state.emailVerif.enabled ? html`<div class="note-chip ok"><${Icon} name="check" size=${14} /> ${t('Email verified')}</div>` : null}</div></div>
+      <div class="acct-rows">${row(t('Display name'), me.displayName, () => openSettings('profile'))}${row(t('Username'), me.username, () => openModal('account-edit', { field: 'username' }))}${row(t('Email'), reveal ? (me.email || t('Not set')) : masked, () => openModal('account-edit', { field: 'email' }), me.email ? t('Edit') : t('Add'))}${me.email ? html`<button type="button" class="link-btn reveal" onClick=${() => setReveal(!reveal)}>${reveal ? t('Hide') : t('Reveal')} ${t('email')}</button>` : null}${me.email && me.emailVerified === false && state.emailVerif.enabled ? html`<div class="note-chip"><${Icon} name="alert-circle" size=${14} /> ${t('Your email isn’t verified yet.')} <button type="button" class="link-btn" onClick=${() => resendVerification()}>${t('Resend link')}</button></div>` : me.email && me.emailVerified === true && state.emailVerif.enabled ? html`<div class="note-chip ok"><${Icon} name="check" size=${14} /> ${t('Email verified')}</div>` : null}</div></div>
     <${Section} title=${t('Password & devices')}>
       <${SettingRow} title=${t('Password')} desc=${t('Changing your password signs you out of every other device.')}><${Btn} onClick=${() => openModal('account-edit', { field: 'password' })}>${t('Change Password')}<//><//>
       <h4 class="s-sub">${t('Where you’re signed in')}</h4><${Sessions} />

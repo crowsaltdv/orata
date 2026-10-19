@@ -1,6 +1,7 @@
 // Orate — chat view (channel / DM header + message list + composer) and right-panel routing.
 import { html, useEffect, useState, cx, copyText } from '/js/lib.js';
-import { state, set, useSel, getChannel, dmName, dmUserId, openModal, updateSettings, updateLocal, hasPerm, isMuted, toast, go } from '/js/store.js';
+import { state, set, useSel, getChannel, dmName, dmUserId, openModal, updateSettings, updateLocal, hasPerm, isMuted, toast, go, goChannel, openContext } from '/js/store.js';
+import { postMenu, TagChip } from '/js/forum.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, IconBtn, Modal, MODALS } from '/js/ui.js';
 import { MessageList } from '/js/messagelist.js';
@@ -26,7 +27,7 @@ export function RightPanel() {
   const panel = useSel((s) => s.panel);
   const width = useSel((s) => s.width);
   const p = effectivePanel(view, ch, panel);
-  if (!p || (view !== 'dm' && view !== 'channel') || !ch || ch.type === 'voice' && p === 'members') return null;
+  if (!p || (view !== 'dm' && view !== 'channel') || !ch || ch.type === 'forum' || ch.type === 'voice' && p === 'members') return null;
   if (width < 1100) return null;
   return html`<aside class=${cx('right panel right-enter', p === 'profile' && 'wide')} key=${p + chId}>
     ${p === 'members' ? html`<${MembersPanel} chId=${chId} />` : p === 'profile' ? html`<${DmProfilePanel} chId=${chId} />` : p === 'pins' ? html`<${PinsPanel} chId=${chId} />` : html`<${SearchPanel} chId=${chId} />`}
@@ -63,6 +64,8 @@ export function ChatView() {
   }, []);
   if (!ch) return html`<main class="main panel"></main>`;
   const isDm = !ch.serverId; const isGroup = ch.type === 'group';
+  const isPost = ch.type === 'post'; const forumOfPost = isPost ? getChannel(ch.forumId) : null;
+  const postTags = isPost ? (ch.tagIds || []).map((id) => forumOfPost?.tags?.find((x) => x.id === id)).filter(Boolean) : [];
   const inRoom = roomCount > 0;
   const showStage = isDm && (connected || inRoom) && Stage;
   const startCall = (video) => { voice.join(ch.id); if (video) setTimeout(() => voice.toggleCamera(), 600); };
@@ -73,14 +76,17 @@ export function ChatView() {
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label="Menu"><${Icon} name="menu" size=${22} /></button>
       <div class="m-title">
-        ${isDm ? (isGroup ? html`<span class="group-av sm"><${Icon} name="users" size=${15} /></span>` : html`<${Avatar} user=${other} size=${28} status=${other?.status || 'offline'} />`) : html`<${Icon} name=${ch.private ? 'hash-lock' : 'hash'} size=${23} />`}
+        ${isPost ? html`<button type="button" class="icon-btn" data-tip=${t('Back to forum')} aria-label=${t('Back to forum')} onClick=${() => goChannel(ch.serverId, ch.forumId)}><${Icon} name="arrow-left" size=${20} /></button>` : isDm ? (isGroup ? html`<span class="group-av sm"><${Icon} name="users" size=${15} /></span>` : html`<${Avatar} user=${other} size=${28} status=${other?.status || 'offline'} />`) : html`<${Icon} name=${ch.private ? 'hash-lock' : 'hash'} size=${23} />`}
         <span class="name">${isDm ? dmName(ch, 5) : ch.name}</span>
+        ${isPost && ch.locked ? html`<span class="post-lock" data-tip=${t('This post is locked')}><${Icon} name="lock" size=${15} /></span>` : null}
+        ${postTags.length ? html`<span class="post-hdr-tags">${postTags.map((tg) => html`<${TagChip} key=${tg.id} tag=${tg} small=${true} />`)}</span>` : null}
         ${isDm && !isGroup && other?.customStatus ? html`<span class="m-topic" style="border:0;padding:0">${other.customStatus.emoji} ${other.customStatus.text}</span>` : null}
       </div>
       ${!isDm && ch.topic ? html`<div class="m-topic" onClick=${() => openModal('topic', { channelId: ch.id })} title=${ch.topic}>${ch.topic}</div>` : null}
       <div class="m-actions">
         ${isDm ? html`<${IconBtn} icon="phone" label=${connected ? t('In call') : t('Start Voice Call')} active=${connected} onClick=${() => (connected ? null : startCall(false))} />
           <${IconBtn} icon="video" label=${t('Start Video Call')} onClick=${() => startCall(true)} />` : null}
+        ${isPost ? html`<${IconBtn} icon="more-h" label=${t('Post options')} onClick=${(e) => { const r = e.currentTarget.getBoundingClientRect(); openContext({ clientX: r.left, clientY: r.bottom + 4 }, postMenu(ch)); }} />` : null}
         ${!isDm ? html`<${IconBtn} icon=${muted ? 'bell-off' : 'bell'} label=${muted ? t('Unmute Channel') : t('Mute Channel')} active=${muted} onClick=${() => updateSettings({ mutedChannels: { [ch.id]: !muted } })} />` : null}
         <${IconBtn} icon="pin" class="hide-sm hide-narrow" label=${t('Pinned Messages')} active=${pinsOn} onClick=${() => set({ panel: pinsOn ? state.local.panel : 'pins' })} />
         ${isDm ? html`<${IconBtn} icon="user-plus" class="hide-sm hide-narrow" label=${isGroup ? t('Add Friends to DM') : t('Create Group DM')} onClick=${() => openModal('create-dm', { fromChannel: ch.id })} />` : null}

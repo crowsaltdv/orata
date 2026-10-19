@@ -1,5 +1,5 @@
 // Orate — message creation shared by the REST API and the built-in bot.
-import { db, newId, save, emitTo, audienceOf, messageView, publicUser, canIn, channelView } from './core.js';
+import { db, newId, save, emitTo, audienceOf, messageView, publicUser, canIn, channelView, customEmojisIn, postView } from './core.js';
 
 export const hooks = { onMessage: [] };
 
@@ -33,7 +33,7 @@ export function sanitizeAttachments(list, fs, path, uploadDir) {
   return out;
 }
 
-export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce } = {}) {
+export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce, poll = null, theme = null } = {}) {
   content = String(content).replace(/\r\n/g, '\n').slice(0, 4000);
   const server = ch.serverId ? db.servers[ch.serverId] : null;
   const author = db.users[authorId];
@@ -61,7 +61,11 @@ export function postMessage(ch, authorId, { content = '', attachments = [], gif 
     id: newId(), channelId: ch.id, authorId, content, createdAt: Date.now(), editedAt: null,
     attachments, gif, sticker, reactions: {}, replyTo: replyId, mentions: [...mentionSet], mentionRoles, mentionEveryone, pinned: false, type,
   };
+  const emojis = customEmojisIn(content, authorId); if (emojis) msg.emojis = emojis;
+  if (poll) msg.poll = poll;
+  if (theme) msg.theme = theme;
   (db.messages[ch.id] ||= []).push(msg);
+  if (ch.type === 'post') { ch.lastActivity = msg.createdAt; emitTo(audienceOf(ch), 'post_update', { post: postView(ch) }); }   // keeps the forum list's "last activity" and reply counts live
   // keep memory bounded per channel (oldest are dropped from the live window; they remain on disk until next save)
   if (db.messages[ch.id].length > 20000) db.messages[ch.id].splice(0, db.messages[ch.id].length - 20000);
 

@@ -5,11 +5,53 @@ import crypto from 'node:crypto';
 
 import { ROOT, ENV, loadEnv } from './env.js';
 import { PgStore, ConflictError, isSafeFileName } from './storage.js';
+import net from 'node:net';
 export { ROOT, ENV, loadEnv };
 export const DATA_DIR = process.env.ORATE_DATA || path.join(ROOT, 'data');
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+
+/* ---------------------------------------------------------------- hashed IP addresses
+ * Orate never keeps a readable IP address. For ban evasion checks only, each account remembers a few keyed hashes (HMAC) of the networks it has
+ * signed in from; they are never sent to clients. Loopback / private / link-local addresses are ignored (so a laptop or a LAN never bans itself),
+ * and IPv6 is reduced to its /64 prefix, which is what one connection controls. */
+const expandV6 = (a) => {
+  const [h, t] = String(a).split('%')[0].split('::');
+  const hs = h ? h.split(':') : []; const ts = t === undefined ? null : (t ? t.split(':') : []);
+  const parts = ts === null ? hs : [...hs, ...Array(Math.max(0, 8 - hs.length - ts.length)).fill('0'), ...ts];
+  return parts.map((x) => x.padStart(4, '0'));
+};
+/** The visitor's address: the header named by CLIENT_IP_HEADER when the host sets one that can't be forged (e.g. CF-Connecting-IP), else what Express resolved. */
+const IP_HEADER = String(ENV.CLIENT_IP_HEADER || '').trim().toLowerCase();
+export const clientIp = (req) => (IP_HEADER && String(req?.headers?.[IP_HEADER] || '').split(',')[0].trim()) || req?.ip;
+export function ipHash(ip) {
+  let a = String(ip || '').trim(); if (a.startsWith('::ffff:')) a = a.slice(7);
+  let key;
+  if (net.isIPv4(a)) {
+    const p = a.split('.').map(Number);
+    if (p[0] === 10 || p[0] === 127 || p[0] === 0 || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 169 && p[1] === 254) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127)) return null;
+    key = a;
+  } else if (net.isIPv6(a)) {
+    const g = expandV6(a);
+    if (g.join('') === '0'.repeat(32) || g.join('') === '0'.repeat(31) + '1' || /^f[cd]/i.test(g[0]) || /^fe[89ab]/i.test(g[0])) return null;
+    key = 'v6:' + g.slice(0, 4).join(':');
+  } else return null;
+  if (!db.ipSecret) { db.ipSecret = crypto.randomBytes(24).toString('hex'); save(); }
+  return crypto.createHmac('sha256', db.ipSecret).update(key).digest('hex').slice(0, 24);
+}
+/** Remembers (as hashes) the network this account just used; at most 8, refreshed at most every 6 hours. */
+export function noteIp(user, req) {
+  const h = ipHash(clientIp(req)); if (!h || !user) return;
+  const now = Date.now(); const list = (user.ips ||= []); const hit = list.find((x) => x.h === h);
+  if (hit) { if (now - hit.at > 6 * 3600_000) { hit.at = now; save(); } return; }
+  list.unshift({ h, at: now }); if (list.length > 8) list.length = 8; save();
+}
+export const userIpHashes = (user, extra = null) => {
+  const now = Date.now(); const out = new Set((user?.ips || []).filter((x) => now - x.at < 180 * 86400_000).map((x) => x.h));
+  if (extra) out.add(extra);
+  return out;
+};
 
 /* ---------------------------------------------------------------- db: files in data/ (default) or PostgreSQL (DATABASE_URL) */
 export const pg = ENV.DATABASE_URL ? new PgStore(ENV.DATABASE_URL, ENV) : null;
@@ -149,7 +191,7 @@ export function emitTo(userIds, op, d, exceptConn) {
 }
 
 /* -------------------------------------------------------- permissions */
-export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES', 'VIEW_CHANNEL'];
+export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES', 'VIEW_CHANNEL', 'MODERATE_MEMBERS', 'MANAGE_EXPRESSIONS'];
 export const DEFAULT_PERMS = ['VIEW_CHANNEL', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
 /** The permissions a channel (or category) can override per role / member — MANAGE_ROLES doubles as "Manage Permissions" there. */
 export const CHANNEL_PERMS = ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK'];
@@ -164,8 +206,10 @@ export function permsOf(server, userId) {
   const set = new Set(server.roles.find((r) => r.id === server.id)?.permissions || []);
   for (const rid of m.roles) for (const p of server.roles.find((r) => r.id === rid)?.permissions || []) set.add(p);
   if (set.has('ADMINISTRATOR')) return new Set(PERMS);
+  if (m.timeoutUntil > Date.now()) return new Set(['VIEW_CHANNEL']);   // timed out: you can read, nothing else
   return set;
 }
+export const isTimedOut = (server, userId) => (server?.members?.[userId]?.timeoutUntil || 0) > Date.now();
 export const can = (server, userId, perm) => permsOf(server, userId).has(perm);
 export function need(server, userId, perm) { if (!can(server, userId, perm)) throw forbidden(); }
 export function topRolePos(server, userId) {
@@ -181,6 +225,7 @@ export function topRolePos(server, userId) {
 export const isSynced = (ch) => !!ch && ch.type !== 'category' && !!ch.parentId && ch.synced !== false && !!db.channels[ch.parentId];
 export function overwritesOf(ch) {
   if (!ch) return [];
+  if (ch.type === 'post') return overwritesOf(db.channels[ch.forumId]);   // a forum post follows its forum
   if (isSynced(ch)) return db.channels[ch.parentId].overwrites || [];
   return ch.overwrites || [];
 }
@@ -198,6 +243,7 @@ export function permsIn(server, userId, ch) {
     apply(allow, deny);
     const mo = ows.find((o) => o.type === 'member' && o.id === userId); if (mo) apply(mo.allow, mo.deny);
   }
+  if (isTimedOut(server, userId)) return out.has('VIEW_CHANNEL') ? new Set(['VIEW_CHANNEL']) : new Set();   // overwrites cannot lift a timeout
   return out.has('VIEW_CHANNEL') ? out : new Set();   // a channel you cannot see grants nothing
 }
 export function canIn(userId, ch, perm) {
@@ -304,18 +350,20 @@ export function selfUser(u) {
 }
 
 export function serverView(server, userId) {
-  const chans = channelsOfServer(server.id).filter((c) => listedFor(userId, c)).map((c) => channelView(c, userId)).sort((a, b) => a.position - b.position);
+  const chans = channelsOfServer(server.id).filter((c) => c.type !== 'post' && listedFor(userId, c)).map((c) => channelView(c, userId)).sort((a, b) => a.position - b.position);   // posts live inside their forum, not in the channel list
   return {
     id: server.id, name: server.name, icon: server.icon || null, banner: server.banner || null,
     description: server.description || '', ownerId: server.ownerId, createdAt: server.createdAt,
     accent: server.accent || null, roles: server.roles, channels: chans,
-    members: Object.entries(server.members).map(([id, m]) => ({ id, roles: m.roles, nick: m.nick || null, joinedAt: m.joinedAt })),
+    members: Object.entries(server.members).map(([id, m]) => memberView(id, m)),
     perms: [...permsOf(server, userId)], systemChannelId: server.systemChannelId || null,
+    emojis: server.emojis || [], stickers: server.stickers || [],
   };
 }
 /** `userId` adds what that member may do here (`cperms`, only when overwrites make it differ from their server-wide permissions) and, for people who can manage permissions, the overwrites themselves. */
+export const memberView = (id, m) => ({ id, roles: m.roles, nick: m.nick || null, joinedAt: m.joinedAt, timeoutUntil: m.timeoutUntil > Date.now() ? m.timeoutUntil : null });
 export function channelView(c, userId) {
-  const v = {
+  const v = c.type === 'post' ? { ...postView(c), position: 0, topic: '' } : {
     id: c.id, serverId: c.serverId || null, type: c.type, name: c.name || null, topic: c.topic || '',
     parentId: c.parentId || null, position: c.position || 0,
     recipients: c.recipients || undefined, ownerId: c.ownerId || undefined,
@@ -323,6 +371,7 @@ export function channelView(c, userId) {
   };
   if (c.serverId) {
     const ows = overwritesOf(c);
+    if (c.type === 'forum') { v.tags = c.tags || []; v.requireTag = !!c.requireTag; }
     v.private = ows.some((o) => o.type === 'role' && o.id === c.serverId && o.deny.includes('VIEW_CHANNEL'));
     if (c.type !== 'category' && c.parentId) v.synced = isSynced(c);
     const server = db.servers[c.serverId];
@@ -333,6 +382,41 @@ export function channelView(c, userId) {
     }
   }
   return v;
+}
+/* ---- custom emoji ---- */
+export const CUSTOM_EMOJI = /<(a?):([A-Za-z0-9_]{2,32}):(\d{6,20})>/g;
+/** The custom emoji with this id in a server the person belongs to (anyone in a server may use its emoji everywhere). */
+export function findEmoji(id, userId) {
+  for (const s of Object.values(db.servers)) if (s.members[userId]) { const e = s.emojis?.find((x) => x.id === id); if (e) return { ...e, serverId: s.id }; }
+  return null;
+}
+/** The emoji used in a message, with their pictures, so people who aren't in that server can still see them. */
+export function customEmojisIn(content, userId, existing = []) {
+  const out = new Map(existing.map((e) => [e.id, e]));
+  for (const m of String(content || '').matchAll(CUSTOM_EMOJI)) {
+    if (out.size >= 25 && !out.has(m[3])) break;
+    const e = out.get(m[3]) || findEmoji(m[3], userId); if (e) out.set(m[3], { id: e.id, name: e.name, url: e.url, animated: !!e.animated });
+  }
+  return out.size ? [...out.values()] : undefined;
+}
+/* ---- polls ---- */
+/** A poll as clients see it: who voted for what is public (like Discord's polls), `closed` once it ended. */
+export function pollView(p) {
+  const votes = p.votes || {};
+  return {
+    question: p.question, multi: !!p.multi, expiresAt: p.expiresAt || null, closed: !!p.closed || !!(p.expiresAt && p.expiresAt <= Date.now()), total: Object.keys(votes).length,
+    answers: p.answers.map((a) => ({ id: a.id, text: a.text, emoji: a.emoji || null, voters: Object.entries(votes).filter(([, v]) => v.includes(a.id)).map(([uid]) => uid).slice(0, 200) })),
+  };
+}
+/** A forum post as the forum list shows it. */
+export function postView(p) {
+  const list = db.messages[p.id] || []; const first = list[0];
+  const img = first?.attachments?.find((a) => /^image\//.test(a.type || ''));
+  return {
+    id: p.id, serverId: p.serverId, type: 'post', forumId: p.forumId, name: p.name, ownerId: p.ownerId, createdAt: p.createdAt, lastActivity: p.lastActivity || p.createdAt,
+    messageCount: Math.max(0, list.length - 1), tagIds: p.tagIds || [], locked: !!p.locked, pinned: !!p.pinned,
+    preview: first ? String(first.content || '').slice(0, 300) : '', image: img?.url || null, lastMessageId: lastMessageId(p.id),
+  };
 }
 export function lastMessageId(channelId) { const a = db.messages[channelId]; return a?.length ? a[a.length - 1].id : null; }
 
@@ -347,7 +431,7 @@ export function messageView(m) {
     id: m.id, channelId: m.channelId, authorId: m.authorId, content: m.content, createdAt: m.createdAt, editedAt: m.editedAt || null,
     attachments: m.attachments || [], gif: m.gif || null, sticker: m.sticker || null, reactions: m.reactions || {},
     replyTo: m.replyTo || null, reply, mentions: m.mentions || [], mentionRoles: m.mentionRoles || [],
-    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined,
+    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
   };
 }
 

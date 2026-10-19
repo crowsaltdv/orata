@@ -1,5 +1,5 @@
 // Orate — chat markdown → sanitized HTML (own parser; every user string is escaped before it is emitted).
-import { state, getChannel, nameOf, memberOf } from '/js/store.js';
+import { state, getChannel, nameOf, memberOf, emojiById, allCustomEmojis, customToken } from '/js/store.js';
 import { formatClock, relTime, formatFull } from '/js/lib.js';
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -28,8 +28,11 @@ export function highlight(code, lang = '') {
 }
 
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|[\u{1F3FB}-\u{1F3FF}]|‍|️|⃣|\s)+$/u;
+const CUSTOM_ONLY = /^(?:\s*<a?:[A-Za-z0-9_]{2,32}:\d{6,20}>\s*)+$/;
 export function emojiOnlyCount(text) {
-  const t = String(text || '').trim(); if (!t || t.length > 120 || !EMOJI_ONLY.test(t)) return 0;
+  const t = String(text || '').trim();
+  if (t && t.length < 700 && CUSTOM_ONLY.test(t)) { const n = (t.match(/<a?:/g) || []).length; return n <= 12 ? n : 0; }   // only custom emoji: shown big
+  if (!t || t.length > 120 || !EMOJI_ONLY.test(t)) return 0;
   return [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(t.replace(/\s+/g, ''))].length;
 }
 
@@ -72,6 +75,11 @@ export function renderMarkdown(src, opts = {}) {
       const c = role?.color; return put(`<span class="mention role" ${c ? `style="--mc:${c}"` : ''}>@${esc(role?.name || 'deleted-role')}</span>`);
     });
     t = t.replace(/&lt;#(\d{6,20})&gt;/g, (_, id) => { const ch = getChannel(id); return put(ch ? `<span class="mention channel" data-channel="${id}" data-server="${ch.serverId || ''}" role="button" tabindex="0">${ch.type === 'voice' ? '🔊' : '#'}${esc(ch.name)}</span>` : '<span class="mention">#deleted-channel</span>'); });
+    // custom emoji: the message carries their pictures (so people outside the server see them too)
+    t = t.replace(/&lt;(a?):([A-Za-z0-9_]{2,32}):(\d{6,20})&gt;/g, (_, a, name, id) => {
+      const e = (opts.emojis || []).find((x) => x.id === id) || emojiById(id);
+      return put(e ? `<img class="emoji custom${e.animated ? ' animated' : ''}" src="${esc(e.url)}" alt=":${esc(name)}:" title=":${esc(name)}:" draggable="false">` : `<span class="emoji-missing">:${esc(name)}:</span>`);
+    });
     t = t.replace(/(^|[\s(])@(everyone|here)\b/g, (_, pre, w) => `${pre}${put(`<span class="mention everyone">@${w}</span>`)}`);
     t = t.replace(/&lt;t:(\d{1,12})(?::([tTdDfFR]))?&gt;/g, (_, unix, st) => put(`<time class="timestamp" datetime="${new Date(unix * 1000).toISOString()}" title="${esc(formatFull(unix * 1000))}">${esc(fmtTimestamp(unix, st || 'f'))}</time>`));
     // spoilers, then emphasis
@@ -111,7 +119,7 @@ export function renderMarkdown(src, opts = {}) {
 export function plainPreview(text, serverId, max = 140) {
   return String(text || '')
     .replace(/```[\s\S]*?```/g, ' [code] ').replace(/<@!?(\d+)>/g, (_, id) => '@' + nameOf(id, serverId)).replace(/<@&(\d+)>/g, (_, id) => '@' + (state.servers[serverId]?.roles.find((r) => r.id === id)?.name || 'role'))
-    .replace(/<#(\d+)>/g, (_, id) => '#' + (getChannel(id)?.name || 'channel')).replace(/\|\|([\s\S]*?)\|\|/g, '▮▮▮').replace(/[*_~`>#]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+    .replace(/<#(\d+)>/g, (_, id) => '#' + (getChannel(id)?.name || 'channel')).replace(/<a?:([A-Za-z0-9_]{2,32}):\d{6,20}>/g, ':$1:').replace(/\|\|([\s\S]*?)\|\|/g, '▮▮▮').replace(/[*_~`>#]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
 /** Turn @username / @Role / #channel typed in the composer into wire-format tokens. */
@@ -129,6 +137,7 @@ export function encodeMentions(text, ch) {
     let t = p;
     for (const r of roles) { const re = new RegExp(`@${r.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'giu'); t = t.replace(re, `<@&${r.id}>`); }
     t = t.replace(/(^|[\s(])@([a-z0-9_.]{2,32})(?![a-z0-9_])/gi, (all, pre, name) => { const id = userByName.get(name.toLowerCase().replace(/\.+$/, '')); return id ? `${pre}<@${id}>${name.endsWith('.') ? '.' : ''}` : all; });
+    if (allCustomEmojis().length) t = t.replace(/(^|[^<\w]):([A-Za-z0-9_]{2,32}):/g, (all, pre, name) => { const tok = customToken(name, ch.serverId); return tok ? pre + tok : all; });   // typed :name: → the custom emoji
     if (chans.length) t = t.replace(/(^|[\s(])#([\p{L}\p{N}_-]+)/gu, (all, pre, name) => { const c = chans.find((x) => x.name.toLowerCase() === name.toLowerCase()); return c ? `${pre}<#${c.id}>` : all; });
     return t;
   }).join('');
@@ -138,6 +147,7 @@ export function decodeMentions(text, ch) {
   const serverId = ch?.serverId;
   return String(text || '').replace(/<@!?(\d+)>/g, (all, id) => (state.users[id] ? '@' + state.users[id].username : all))
     .replace(/<@&(\d+)>/g, (all, id) => { const r = state.servers[serverId]?.roles.find((x) => x.id === id); return r ? '@' + r.name : all; })
-    .replace(/<#(\d+)>/g, (all, id) => { const c = getChannel(id); return c ? '#' + c.name : all; });
+    .replace(/<#(\d+)>/g, (all, id) => { const c = getChannel(id); return c ? '#' + c.name : all; })
+    .replace(/<a?:([A-Za-z0-9_]{2,32}):\d{6,20}>/g, ':$1:');
 }
 void formatClock; void memberOf;

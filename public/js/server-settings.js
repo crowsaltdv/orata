@@ -1,11 +1,12 @@
 // Orate — server settings overlay (overview, roles, channels, members, invites, bans).
 import { html, useState, useEffect, useRef, cx, formatMemberSince, relTime, copyText } from '/js/lib.js';
-import { state, set, useSel, openModal, closeModal, toast, hasPerm, go, memberOf, addUsers } from '/js/store.js';
+import { state, set, useSel, openModal, closeModal, closePopover, toast, hasPerm, go, memberOf, addUsers } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Btn, Field, TextInput, Toggle, SettingRow, Section, Modal, MODALS, Avatar, ServerIcon, ColorSwatch, Dropdown, Empty, confirmDialog, useEscape, Spinner } from '/js/ui.js';
-import { api } from '/js/api.js';
+import { api, upload } from '/js/api.js';
 import { act, errMsg } from '/js/actions.js';
-import { chooseAndUploadImage } from '/js/imageutil.js';
+import { chooseAndUploadImage, uploadGifFrom, pickFile, cropImage } from '/js/imageutil.js';
+import { openPicker } from '/js/pickers.js';
 import { inviteUrl } from '/js/modals.js';
 import { deleteServer } from '/js/rail.js';
 import { deleteChannel } from '/js/sidebar.js';
@@ -23,18 +24,26 @@ function Overview({ server }) {
   const dirty = JSON.stringify(d) !== JSON.stringify(orig);
   const can = hasPerm(server.id, 'MANAGE_SERVER');
   const img = async (key, opts) => { setUp(key); try { const u = await chooseAndUploadImage(opts); if (u) setD((p) => ({ ...p, [key]: u })); } catch (e) { toast(errMsg(e), 'error'); } setUp(null); };
+  // a GIF from KLIPY becomes the icon / banner: fetched through the image proxy and stored on this server like any upload
+  const gifPick = (key, anchor) => openPicker(anchor, {
+    onGif: async (item) => {
+      closePopover(); setUp(key);
+      try { const u = await uploadGifFrom(key === 'banner' ? (item.full?.gif || item.preview?.gif || item.preview?.url) : (item.preview?.gif || item.full?.gif || item.preview?.url), `${key}.gif`); setD((p) => ({ ...p, [key]: u })); } catch (e) { toast(errMsg(e), 'error'); }
+      setUp(null);
+    },
+  }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });
   const save = async () => { setBusy(true); await act(api.patch(`/servers/${server.id}`, d), { success: 'Server updated' }); setBusy(false); };
   const texts = server.channels.filter((c) => c.type === 'text');
   return html`<div class="s-page">
     <${Section} title=${t('Server overview')}>
       <div class="so-top"><div class="so-icon"><${ServerIcon} server=${{ ...server, ...d }} size=${96} class="so-ic" />
-        ${can ? html`<div class="pe-btns"><${Btn} icon="upload" size="sm" variant="primary" loading=${up === 'icon'} onClick=${() => img('icon', { aspect: 1, out: 256, round: true, title: 'Server Icon' })}>${t('Upload icon')}<//>${d.icon ? html`<${Btn} size="sm" variant="ghost" onClick=${() => setD({ ...d, icon: null })}>${t('Remove')}<//>` : null}</div>` : null}</div>
+        ${can ? html`<div class="pe-btns"><${Btn} icon="upload" size="sm" variant="primary" loading=${up === 'icon'} onClick=${() => img('icon', { aspect: 1, out: 256, round: true, title: 'Server Icon', allowGif: true })}>${t('Upload icon')}<//>${state.gifOk !== false ? html`<${Btn} icon="sticker" size="sm" disabled=${!!up} onClick=${(e) => gifPick('icon', e.currentTarget)}>${t('Choose a GIF')}<//>` : null}${d.icon ? html`<${Btn} size="sm" variant="ghost" onClick=${() => setD({ ...d, icon: null })}>${t('Remove')}<//>` : null}</div>` : null}</div>
         <div class="so-fields"><${Field} label=${t('Server name')}><${TextInput} value=${d.name} onInput=${(v) => setD({ ...d, name: v })} maxlength="100" disabled=${!can} /><//>
           <${Field} label=${t('Description')}><textarea class="textarea" rows="3" maxlength="300" value=${d.description} onInput=${(e) => setD({ ...d, description: e.target.value })} disabled=${!can}></textarea><//></div></div>
     <//>
-    <${Section} title=${t('Banner')} desc=${t('Shown at the top of the channel list.')}>
+    <${Section} title=${t('Banner')} desc=${t('Shown big at the top of the channel list. Upload a picture or a GIF, or pick one from KLIPY — animated banners and icons play everywhere.')}>
       <div class="so-banner" style=${d.banner ? { backgroundImage: `url("${d.banner}")` } : null}>${!d.banner ? html`<span>${t('No banner')}</span>` : null}</div>
-      ${can ? html`<div class="pe-btns"><${Btn} icon="image" size="sm" variant="primary" loading=${up === 'banner'} onClick=${() => img('banner', { aspect: 3, out: 960, title: 'Server Banner' })}>${t('Upload banner')}<//>${d.banner ? html`<${Btn} size="sm" variant="ghost" onClick=${() => setD({ ...d, banner: null })}>${t('Remove')}<//>` : null}</div>` : null}
+      ${can ? html`<div class="pe-btns"><${Btn} icon="image" size="sm" variant="primary" loading=${up === 'banner'} onClick=${() => img('banner', { aspect: 16 / 9, out: 1280, title: 'Server Banner', allowGif: true })}>${t('Upload banner')}<//>${state.gifOk !== false ? html`<${Btn} icon="sticker" size="sm" disabled=${!!up} onClick=${(e) => gifPick('banner', e.currentTarget)}>${t('Choose a GIF')}<//>` : null}${d.banner ? html`<${Btn} size="sm" variant="ghost" onClick=${() => setD({ ...d, banner: null })}>${t('Remove')}<//>` : null}</div>` : null}
     <//>
     <${Section} title=${t('System messages')}>
       <${SettingRow} title=${t('Join messages channel')} desc=${t('Where “member joined” notices appear.')}><${Dropdown} width=${200} value=${d.systemChannelId} options=${texts.map((c) => ({ value: c.id, label: '# ' + c.name }))} onChange=${(v) => setD({ ...d, systemChannelId: v })} /><//>
@@ -111,9 +120,50 @@ function Members({ server }) {
           ${canRoles && roles.length > mine.length ? html`<button type="button" class="role-add" onClick=${(e) => { const r = e.currentTarget.getBoundingClientRect(); import('/js/store.js').then(({ openContext }) => openContext({ clientX: r.left, clientY: r.bottom + 4 }, roles.filter((x) => !m.roles.includes(x.id)).map((x) => ({ label: x.name, onClick: () => act(api.put(`/servers/${server.id}/members/${m.id}/roles/${x.id}`)) })))); }} data-tip="Add role"><${Icon} name="plus" size=${13} sw=${3} /></button>` : null}</div>
         <small class="mem-join">${formatMemberSince(m.joinedAt)}</small>
         <span class="chs-acts">${hasPerm(server.id, 'KICK_MEMBERS') && m.id !== server.ownerId && m.id !== state.me.id ? html`<button type="button" data-tip="Kick" onClick=${async () => { if (await confirmDialog({ title: `Kick ${u.displayName}`, body: 'They can rejoin with a new invite.', confirmLabel: 'Kick', danger: true })) act(api.del(`/servers/${server.id}/members/${m.id}`)); }}><${Icon} name="log-out" size=${16} /></button>` : null}
-          ${hasPerm(server.id, 'BAN_MEMBERS') && m.id !== server.ownerId && m.id !== state.me.id ? html`<button type="button" class="danger" data-tip="Ban" onClick=${async () => { if (await confirmDialog({ title: `Ban ${u.displayName}`, body: 'They will be removed and cannot rejoin until unbanned.', confirmLabel: 'Ban', danger: true })) act(api.put(`/servers/${server.id}/bans/${m.id}`)); }}><${Icon} name="ban" size=${16} /></button>` : null}</span></div>`; })}</div>
+          ${hasPerm(server.id, 'BAN_MEMBERS') && m.id !== server.ownerId && m.id !== state.me.id ? html`<button type="button" class="danger" data-tip="Ban" onClick=${() => openModal('ban', { serverId: server.id, userId: m.id })}><${Icon} name="ban" size=${16} /></button>` : null}</span></div>`; })}</div>
     <//></div>`;
 }
+
+/* ------------------------------------------------------------------ custom emoji + stickers */
+const EXPR = { emojis: { max: 50, title: 'Emoji', one: 'emoji', size: 128, desc: 'Custom emoji anyone in the server can use in messages and reactions — type :name: or pick them from the emoji picker. PNG, JPEG, GIF or WebP under 512 KB.' },
+  stickers: { max: 30, title: 'Stickers', one: 'sticker', size: 320, desc: 'Stickers anyone in the server can send from the sticker picker. PNG, JPEG, GIF or WebP under 512 KB.' } };
+/** Picks a picture, squares it up (GIFs stay as they are so they keep moving) and uploads it. Resolves { url, name } or null. */
+async function pickExpressionImage(kind) {
+  const file = await pickFile('image/png,image/jpeg,image/webp,image/gif'); if (!file) return null;
+  const base = file.name.replace(/\.[^.]+$/, '');
+  let up;
+  if (file.type === 'image/gif') { if (file.size > 512 * 1024) throw new Error('Animated pictures must be under 512 KB'); up = await upload(file); }
+  else { const blob = await cropImage(file, { aspect: 1, out: EXPR[kind].size, title: kind === 'emojis' ? 'Custom Emoji' : 'Sticker' }); if (!blob) return null; if (blob.size > 512 * 1024) throw new Error('That picture is too big even after resizing'); up = await upload(new File([blob], 'image.webp', { type: 'image/webp' })); }
+  return { url: up.url, name: base };
+}
+const uniqueName = (base, list, kind) => {
+  let n = kind === 'emojis' ? base.replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 28) : base.replace(/[_-]+/g, ' ').trim().slice(0, 26);
+  if (n.length < 2) n = kind === 'emojis' ? 'emoji' : 'sticker';
+  let out = n; let i = 2; while (list.some((x) => x.name.toLowerCase() === out.toLowerCase())) out = n + (kind === 'emojis' ? '_' : ' ') + i++;
+  return out;
+};
+function ExprRow({ server, kind, item, can }) {
+  const [name, setName] = useState(item.name); const users = useSel((s) => s.users);
+  useEffect(() => setName(item.name), [item.name]);
+  const commit = async () => { const v = name.trim(); if (v === item.name) return; const r = await act(api.patch(`/servers/${server.id}/${kind}/${item.id}`, { name: v })); if (!r) setName(item.name); };
+  return html`<div class=${cx('expr-item', kind)}><div class="expr-img"><img src=${item.url} alt=${item.name} draggable="false" /></div>
+    <div class="expr-meta">${can ? html`<input class="input expr-name" value=${name} maxlength="32" onInput=${(e) => setName(e.target.value)} onBlur=${commit} onKeyDown=${(e) => e.key === 'Enter' && e.currentTarget.blur()} aria-label=${t('Name')} />` : html`<b>${kind === 'emojis' ? ':' + item.name + ':' : item.name}</b>`}
+      <small>${item.animated ? `${t('Animated')} · ` : ''}${users[item.by]?.displayName || ''}</small></div>
+    ${can ? html`<button type="button" class="expr-del danger" data-tip=${t('Delete')} aria-label=${t('Delete')} onClick=${async () => { if (await confirmDialog({ title: `${t('Delete')} ${item.name}?`, body: t('Messages that already used it keep showing it.'), confirmLabel: t('Delete'), danger: true })) act(api.del(`/servers/${server.id}/${kind}/${item.id}`)); }}><${Icon} name="trash" size=${16} /></button>` : null}</div>`;
+}
+function Expressions({ server, kind }) {
+  const cfg = EXPR[kind]; const list = server[kind] || []; const can = hasPerm(server.id, 'MANAGE_EXPRESSIONS'); const [busy, setBusy] = useState(false);
+  const add = async () => {
+    setBusy(true);
+    try { const f = await pickExpressionImage(kind); if (f) { await api.post(`/servers/${server.id}/${kind}`, { name: uniqueName(f.name, list, kind), url: f.url }); toast(`${t('Added')} ${cfg.one}`, 'success', 1800); } } catch (e) { toast(errMsg(e), 'error'); }
+    setBusy(false);
+  };
+  return html`<div class="s-page"><${Section} title=${`${t(cfg.title)} — ${list.length} / ${cfg.max}`} desc=${t(cfg.desc)} action=${can ? html`<${Btn} size="sm" variant="primary" icon="upload" loading=${busy} disabled=${list.length >= cfg.max} onClick=${add}>${t('Upload')} ${t(cfg.one)}<//>` : null}>
+    ${list.length ? html`<div class=${cx('expr-grid', kind)}>${list.map((it) => html`<${ExprRow} key=${it.id} server=${server} kind=${kind} item=${it} can=${can} />`)}</div>` : html`<${Empty} icon=${kind === 'emojis' ? 'smile' : 'sticker'} title=${`${t('No')} ${t(cfg.title).toLowerCase()} ${t('yet')}`}>${can ? t('Upload one to get started.') : t('Ask someone with Manage Expressions to add some.')}<//>`}
+  <//></div>`;
+}
+const EmojiPage = ({ server }) => html`<${Expressions} server=${server} kind="emojis" />`;
+const StickerPage = ({ server }) => html`<${Expressions} server=${server} kind="stickers" />`;
 
 /* ------------------------------------------------------------------ invites + bans */
 function Invites({ server }) {
@@ -129,14 +179,17 @@ function Bans({ server }) {
   const [list, setList] = useState(null);
   const load = () => api.get(`/servers/${server.id}/bans`).then((l) => { addUsers(l); setList(l); }).catch(() => setList([]));
   useEffect(() => { load(); }, [server.id]);
-  return html`<div class="s-page"><${Section} title=${t('Bans')}>
-    ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : list.length ? html`<div class="mem-table">${list.map((u) => html`<div class="mem-row" key=${u.id}><${Avatar} user=${u} size=${36} /><div class="mem-name"><b>${u.displayName}</b><small>${u.username}</small></div><span class="chs-acts" style="opacity:1"><${Btn} size="sm" onClick=${async () => { await act(api.del(`/servers/${server.id}/bans/${u.id}`)); load(); }}>${t('Unban')}<//></span></div>`)}</div>` : html`<${Empty} icon="ban" title=${t('No bans')}>${t('Everyone here is behaving.')}<//>`}
+  return html`<div class="s-page"><${Section} title=${t('Bans')} desc=${t('Banning also blocks the person’s network, so they can’t simply make a new account and rejoin. Unbanning frees it again.')}>
+    ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : list.length ? html`<div class="mem-table">${list.map((u) => html`<div class="mem-row" key=${u.id}><${Avatar} user=${u} size=${36} /><div class="mem-name"><b>${u.displayName}</b><small>${u.username}${u.ban?.reason ? ` · ${u.ban.reason}` : ''}</small></div>
+      <small class="mem-join">${u.ban?.by ? `${t('by')} ${u.ban.by}` : ''}${u.ban?.at ? ` · ${formatMemberSince(u.ban.at)}` : ''}</small>
+      ${u.ban?.ipBanned ? html`<span class="role-chip" data-tip=${t('Their network is blocked too')}><i style=${{ background: '#e5314f' }}></i>${t('IP ban')}</span>` : null}
+      <span class="chs-acts" style="opacity:1"><${Btn} size="sm" onClick=${async () => { await act(api.del(`/servers/${server.id}/bans/${u.id}`)); load(); }}>${t('Unban')}<//></span></div>`)}</div>` : html`<${Empty} icon="ban" title=${t('No bans')}>${t('Everyone here is behaving.')}<//>`}
   <//></div>`;
 }
 
 /* ------------------------------------------------------------------ shell */
-const NAV = [['overview', 'server', 'Overview'], ['roles', 'tag', 'Roles'], ['channels', 'hash', 'Channels'], ['members', 'users', 'Members'], ['invites', 'link', 'Invites'], ['bans', 'ban', 'Bans']];
-const PAGES = { overview: Overview, roles: Roles, channels: Channels, members: Members, invites: Invites, bans: Bans };
+const NAV = [['overview', 'server', 'Overview'], ['roles', 'tag', 'Roles'], ['channels', 'hash', 'Channels'], ['emoji', 'smile', 'Emoji'], ['stickers', 'sticker', 'Stickers'], ['members', 'users', 'Members'], ['invites', 'link', 'Invites'], ['bans', 'ban', 'Bans']];
+const PAGES = { overview: Overview, roles: Roles, channels: Channels, emoji: EmojiPage, stickers: StickerPage, members: Members, invites: Invites, bans: Bans };
 export function ServerSettingsHost() {
   const ss = useSel((s) => s.serverSettings); const server = useSel((s) => (s.serverSettings ? s.servers[s.serverSettings.id] : null));
   useEscape(() => { if (!state.modals.length && !state.popover && !state.ctx) close(); }, !!ss);

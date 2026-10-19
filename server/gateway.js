@@ -1,6 +1,6 @@
 // Orate — realtime gateway: presence, voice rooms and WebRTC signalling over WebSocket.
 import { WebSocketServer } from 'ws';
-import { db, sha, conns, gatedConns, send, emitTo, canView, audienceOf, publicUser, broadcastPresence, newId, canIn, voice, effectiveStatus, save } from './core.js';
+import { db, sha, conns, gatedConns, send, emitTo, canView, audienceOf, publicUser, broadcastPresence, newId, canIn, voice, effectiveStatus, save, serverView, serverAudience } from './core.js';
 import { buildReady } from './api.js';
 import { findSession } from './sessions.js';
 import { expireListening } from './music.js';
@@ -150,10 +150,15 @@ export function attachGateway(server) {
   return wss;
 }
 
-// expire timed custom statuses (and "listening to" statuses of tracks that must have ended)
+// expire timed custom statuses (and "listening to" statuses of tracks that must have ended) and finished timeouts
 setInterval(() => {
   const now = Date.now();
   expireListening();
+  for (const s of Object.values(db.servers)) {
+    let changed = false;
+    for (const m of Object.values(s.members)) if (m.timeoutUntil && m.timeoutUntil <= now) { delete m.timeoutUntil; changed = true; }
+    if (changed) { save(); for (const uid of serverAudience(s)) emitTo([uid], 'server_update', { server: serverView(s, uid) }); }
+  }
   for (const u of Object.values(db.users)) {
     if (u.customStatus?.expiresAt && u.customStatus.expiresAt < now) { u.customStatus = null; broadcastPresence(u.id); emitTo([u.id], 'self_update', { user: { ...publicUser(u), customStatus: null } }); }
   }

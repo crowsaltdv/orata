@@ -18,7 +18,7 @@ export const state = {
   settings: deepMerge(DEFAULT_SETTINGS, migrateSettings(ls('settings', {}))),
   local: deepMerge(DEFAULT_LOCAL, ls('local', {})),
   focused: document.hasFocus(), idle: false, width: window.innerWidth, mobileNav: false,
-  music: { open: false, query: '', results: null, searching: false, error: null, queue: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7 }, musicOk: null,
+  music: { open: false, query: '', results: null, searching: false, error: null, queue: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7 }, musicOk: null, postIndex: {}, postLists: {},
   gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, replyTo: null, editing: null, searchQuery: '', speaking: {},
 };
 state.panel = state.local.panel;
@@ -80,6 +80,7 @@ export function rebuildIndex() {
   const idx = {};
   for (const s of Object.values(state.servers)) for (const c of s.channels) idx[c.id] = c;
   for (const d of Object.values(state.dms)) idx[d.id] = d;
+  for (const p of Object.values(state.postIndex)) if (state.servers[p.serverId]) idx[p.id] = p;   // forum posts are channels too
   state.channelIndex = idx;
 }
 export const getChannel = (id) => state.channelIndex[id];
@@ -105,12 +106,25 @@ export function hasPerm(serverId, perm) {
   const s = state.servers[serverId]; if (!s) return false;
   return s.ownerId === state.me?.id || s.perms.includes('ADMINISTRATOR') || s.perms.includes(perm);
 }
+/** Custom emoji of every server you are in. */
+export function allCustomEmojis() {
+  const out = [];
+  for (const s of Object.values(state.servers)) for (const e of s.emojis || []) out.push({ ...e, serverId: s.id, serverName: s.name });
+  return out;
+}
+export const emojiById = (id) => { for (const s of Object.values(state.servers)) { const e = s.emojis?.find((x) => x.id === id); if (e) return e; } return null; };
+/** `<:name:id>` (or `<a:name:id>` when animated) for the custom emoji called `name`; the current server's wins. */
+export function customToken(name, serverId = state.route?.serverId) {
+  const list = allCustomEmojis().filter((e) => e.name.toLowerCase() === String(name).toLowerCase());
+  const e = list.find((x) => x.serverId === serverId) || list[0]; if (!e) return null;
+  return `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`;
+}
 /** What the signed-in user may do in one channel: the channel's own overwrites (when it has any) or else their server-wide permissions. */
 export function hasChannelPerm(ch, perm) {
   if (!ch?.serverId) return true;
   const s = state.servers[ch.serverId]; if (!s) return false;
   if (s.ownerId === state.me?.id) return true;
-  const list = ch.cperms || s.perms;
+  const list = ch.cperms || (ch.type === 'post' ? state.channelIndex[ch.forumId]?.cperms : null) || s.perms;   // a post follows its forum
   return list.includes('ADMINISTRATOR') || list.includes(perm);
 }
 export function dmName(ch, max = 3) {
@@ -148,6 +162,7 @@ export function serverUnread(serverId) {
     mentions += u.mentions;
     if (u.unread && !state.settings.mutedChannels[c.id]) unread = true;
   }
+  for (const p of Object.values(state.postIndex)) if (p.serverId === serverId) mentions += state.reads[p.id]?.mentions || 0;   // mentions inside forum posts count too
   if (state.settings.mutedServers[serverId]) unread = false;
   return { unread, mentions };
 }
@@ -178,7 +193,7 @@ export function resolveRoute(r) {
   if (r.view === 'channel') {
     const s = state.servers[r.serverId];
     if (!s) return { view: 'friends', serverId: '@me', channelId: null, tab: 'online' };
-    let ch = r.channelId && s.channels.find((c) => c.id === r.channelId);
+    let ch = r.channelId && (s.channels.find((c) => c.id === r.channelId) || (state.postIndex[r.channelId]?.serverId === s.id ? state.postIndex[r.channelId] : null));
     if (!ch) {
       const remembered = state.settings.lastChannel?.[s.id];
       ch = s.channels.find((c) => c.id === remembered && c.type !== 'category') || s.channels.find((c) => c.id === s.systemChannelId) || s.channels.find((c) => c.type === 'text') || s.channels.find((c) => c.type === 'voice');

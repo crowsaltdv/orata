@@ -67,7 +67,7 @@ export async function uploadGifFrom(url, name = 'image.gif') {
   const r = await fetch('/api/img?url=' + encodeURIComponent(url));
   if (!r.ok) throw new Error('Could not download that GIF');
   const blob = await r.blob();
-  if (blob.size > 8 * 1024 * 1024) throw new Error('That GIF is too large for an avatar (max 8 MB)');
+  if (blob.size > 8 * 1024 * 1024) throw new Error('That GIF is too large (max 8 MB)');
   const res = await upload(new File([blob], name, { type: blob.type || 'image/gif' }));
   return res.url;
 }

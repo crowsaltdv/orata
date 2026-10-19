@@ -9,7 +9,7 @@ import {
   db, save, newId, cmpId, sha, ENV, DATA_DIR, UPLOAD_DIR, ROOT, ApiError, bad, forbidden, notFound, byUsername, byEmail,
   conns, emitTo, can, need, permsOf, permsIn, canIn, needIn, listedFor, isSynced, overwritesOf, sanitizeOverwrites, topRolePos, canView, audienceOf, serverAudience, channelsOfServer, publicUser, selfUser,
   serverView, channelView, messageView, relatedUserIds, broadcastPresence, readStateFor, systemMessage, randomCode, RESERVED,
-  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId,
+  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteIp, ipHash, clientIp, userIpHashes, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView,
 } from './core.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
 import { verificationMode, isGated, issueVerification, consumeVerification, resendWait, maskEmail } from './verify.js';
@@ -50,7 +50,7 @@ function str(v, min, max, name) {
 }
 const uploadRef = (v) => (v === null || v === '' ? null : (/^\/uploads\/[A-Za-z0-9_.-]+$/.test(String(v)) ? String(v) : undefined));
 
-const newSession = (user, req) => createSession(user.id, req.headers['user-agent']);   // no IP address is kept
+const newSession = (user, req) => { noteIp(user, req); return createSession(user.id, req.headers['user-agent']); };   // sessions keep no IP; the account keeps a few hashes for ban checks (see core.js)
 
 function getChannel(req, id) {
   const ch = db.channels[id];
@@ -104,7 +104,7 @@ export function buildReady(user) {
   for (const d of dms) for (const id of d.recipients) userIds.add(id);
   for (const id of Object.keys(user.rel || {})) userIds.add(id);
   const readStates = {};
-  const chans = [...dms, ...servers.flatMap((s) => channelsOfServer(s.id).filter((c) => canView(user.id, c) && c.type !== 'category' && c.type !== 'voice'))];
+  const chans = [...dms, ...servers.flatMap((s) => channelsOfServer(s.id).filter((c) => canView(user.id, c) && !['category', 'voice', 'forum', 'post'].includes(c.type)))];
   for (const ch of chans) readStates[ch.id] = readStateFor(user, ch);
   const voiceStates = [];
   for (const [channelId, room] of voice) { const ch = db.channels[channelId]; if (ch && canView(user.id, ch)) for (const st of room.values()) voiceStates.push(st); }
@@ -141,9 +141,14 @@ export function createApi() {
 
   r.post('/auth/register', limit('register', 8, 60_000), h(async (req, res) => {
     const b = req.body || {};
-    const email = str(b.email, 5, 254, 'Email').toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw bad('Enter a valid email address', 'email');
-    if (byEmail.has(email)) throw bad('That email is already registered', 'email');
+    // an email is optional: without one you sign in with your username (and nothing needs verifying)
+    const emailRaw = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
+    let email = null;
+    if (emailRaw) {
+      if (emailRaw.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailRaw)) throw bad('Enter a valid email address', 'email');
+      if (byEmail.has(emailRaw)) throw bad('That email is already registered', 'email');
+      email = emailRaw;
+    }
     const username = str(b.username, 2, 32, 'Username').toLowerCase();
     if (!/^[a-z0-9_.]+$/.test(username) || /\.\./.test(username)) throw bad('Usernames can only use letters, numbers, underscores and single periods', 'username');
     if (byUsername.has(username) || RESERVED.has(username)) throw bad('That username is taken', 'username');
@@ -161,8 +166,8 @@ export function createApi() {
     ensureBot();
     const { salt, hash } = await hashPassword(password);
     const fields = { email, username, displayName, salt, hash, dob };
-    if (verificationMode().enabled) {
-      // nobody gets an account until they type the code we email them (the half-finished sign-up is only kept in memory)
+    if (email && verificationMode().enabled) {
+      // nobody who gives an email gets an account until they type the code we email them (the half-finished sign-up is only kept in memory)
       const out = await beginSignup(fields);
       return res.json({ verify: true, ticket: out.ticket, email: maskEmail(email), mode: out.mode, expiresIn: out.expiresIn, resendIn: out.resendIn });
     }
@@ -192,7 +197,7 @@ export function createApi() {
       accentColor: null, bio: '', pronouns: '', status: 'online', customStatus: null, createdAt: Date.now(), rel: {}, reads: {}, settings: {}, closedDms: {},
       emailVerified: true,   // new accounts are verified: either verification is off, or they typed the emailed code
     };
-    db.users[id] = user; byUsername.set(username, id); byEmail.set(email, id);
+    db.users[id] = user; byUsername.set(username, id); if (email) byEmail.set(email, id);
 
     // First user owns the shared community server; everybody after joins it.
     let community = db.defaultServerId && db.servers[db.defaultServerId];
@@ -279,6 +284,7 @@ export function createApi() {
 
   r.post('/auth/resend-verification', limit('resend', 8, 3600_000, (req) => req.user.id), h(async (req, res) => {
     const u = req.user;
+    if (!u.email) throw bad('Add an email address first');
     if (!verificationMode().enabled) throw bad('Email verification is not enabled on this server');
     if (u.emailVerified !== false) throw bad('Your email is already verified', 'already_verified');
     const wait = resendWait(u);
@@ -318,13 +324,17 @@ export function createApi() {
       if (byUsername.has(name) || RESERVED.has(name)) throw bad('That username is taken', 'username');
       byUsername.delete(u.username); byUsername.set(name, u.id); u.username = name;
     }
-    if (b.email !== undefined && b.email.toLowerCase() !== u.email) {
+    if (b.email !== undefined && String(b.email ?? '').trim().toLowerCase() !== (u.email || '')) {
       if (!(await checkPassword(u, b.password))) throw bad('Current password is incorrect', 'password');
-      const email = str(b.email, 5, 254, 'Email').toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw bad('Enter a valid email address', 'email');
-      if (byEmail.has(email)) throw bad('That email is already registered', 'email');
-      byEmail.delete(u.email); byEmail.set(email, u.id); u.email = email;
-      if (verificationMode().enabled) { u.emailVerified = false; emailChanged = true; }   // the new address must be confirmed too
+      const email = String(b.email ?? '').trim().toLowerCase();
+      if (!email) { if (u.email) byEmail.delete(u.email); u.email = null; u.emailVerified = true; }   // removing the address: nothing left to verify
+      else {
+        if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw bad('Enter a valid email address', 'email');
+        if (byEmail.has(email)) throw bad('That email is already registered', 'email');
+        if (u.email) byEmail.delete(u.email);
+        byEmail.set(email, u.id); u.email = email;
+        if (verificationMode().enabled) { u.emailVerified = false; emailChanged = true; }   // the new address must be confirmed too
+      }
     }
     save();
     emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) });
@@ -447,11 +457,19 @@ export function createApi() {
     const ids = Object.keys(s.members);
     res.json({ code: inv.code, server: { id: s.id, name: s.name, icon: s.icon, banner: s.banner, accent: s.accent || null, createdAt: s.createdAt, description: s.description, memberCount: ids.length, onlineCount: ids.filter((id) => effectiveStatus(db.users[id]) !== 'offline').length }, inviter: publicUser(db.users[inv.inviterId]), joined: !!s.members[req.user.id] });
   }));
+  /** Banned by account, or by network: a new account from the same connection as someone banned here is turned away too. */
+  function isBannedFrom(s, user, req) {
+    if (s.bans?.includes(user.id)) return true;
+    const ips = s.bannedIps; if (!ips || !Object.keys(ips).length) return false;
+    for (const h of userIpHashes(user, ipHash(clientIp(req)))) if (ips[h] && ips[h] !== user.id) return true;
+    return false;
+  }
   r.post('/invites/:code/join', limit('join', 20, 60_000), h(async (req, res) => {
     const code = String(req.params.code).split('/').pop();
     const inv = db.invites[code]; if (!inv || (inv.expiresAt && inv.expiresAt < Date.now()) || (inv.maxUses && inv.uses >= inv.maxUses)) throw notFound('This invite is invalid or has expired');
     const s = db.servers[inv.serverId]; if (!s) throw notFound('This invite is invalid or has expired');
-    if (s.bans?.includes(req.user.id)) throw forbidden('You are banned from this server');
+    noteIp(req.user, req);
+    if (isBannedFrom(s, req.user, req)) throw forbidden('You are banned from this server');
     if (!s.members[req.user.id]) {
       addMember(s, req.user); inv.uses++; save();
       emitTo(serverAudience(s).filter((id) => id !== req.user.id), 'member_add', { serverId: s.id, member: { id: req.user.id, roles: [], nick: null, joinedAt: Date.now() }, user: publicUser(req.user) });
@@ -504,15 +522,15 @@ export function createApi() {
   r.post('/servers/:id/channels', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_CHANNELS');
     const b = req.body || {};
-    const type = ['text', 'voice', 'category'].includes(b.type) ? b.type : 'text';
+    const type = ['text', 'voice', 'category', 'forum'].includes(b.type) ? b.type : 'text';
     let name = str(b.name, 1, 100, 'Channel name');
-    if (type === 'text') name = name.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || 'new-channel';
+    if (type === 'text' || type === 'forum') name = name.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || 'new-channel';
     const siblings = channelsOfServer(s.id);
     if (siblings.length >= 200) throw bad('Too many channels');
     const parentId = b.parentId && db.channels[b.parentId]?.serverId === s.id && db.channels[b.parentId].type === 'category' ? b.parentId : null;
     const position = Math.max(0, ...siblings.filter((c) => (c.parentId || null) === parentId).map((c) => c.position || 0)) + 1;
     const id = newId();
-    const ch = { id, serverId: s.id, type, name, parentId: type === 'category' ? null : parentId, position: type === 'category' ? Math.max(0, ...siblings.filter((c) => c.type === 'category').map((c) => c.position)) + 1 : position, topic: String(b.topic || '').slice(0, 1024) };
+    const ch = { id, serverId: s.id, type, name, ...(type === 'forum' ? { tags: sanitizeTags(b.tags), requireTag: !!b.requireTag } : {}), parentId: type === 'category' ? null : parentId, position: type === 'category' ? Math.max(0, ...siblings.filter((c) => c.type === 'category').map((c) => c.position)) + 1 : position, topic: String(b.topic || '').slice(0, 1024) };
     let ows = sanitizeOverwrites(s, b.overwrites);
     if (b.private && !ows.length) ows = sanitizeOverwrites(s, [{ type: 'role', id: s.id, deny: ['VIEW_CHANNEL'] }, ...(Array.isArray(b.allowedRoles) ? b.allowedRoles : []).map((rid) => ({ type: 'role', id: rid, allow: ['VIEW_CHANNEL'] }))]);   // the "Private Channel" shortcut
     if (ows.length) { ch.overwrites = ows; if (ch.parentId) ch.synced = false; }   // a channel with its own rules no longer follows its category
@@ -579,15 +597,28 @@ export function createApi() {
   }));
   r.patch('/channels/:id', h(async (req, res) => {
     const ch = getChannel(req, req.params.id); const b = req.body || {};
+    if (ch.type === 'post') {
+      const mod = canIn(req.user.id, ch, 'MANAGE_MESSAGES') || canIn(req.user.id, ch, 'MANAGE_CHANNELS'); const mine = ch.ownerId === req.user.id;
+      const forum = db.channels[ch.forumId];
+      if (b.name !== undefined || b.tagIds !== undefined || b.locked !== undefined) { if (!mine && !mod) throw forbidden(); }
+      if (b.pinned !== undefined && !mod) throw forbidden();
+      if (b.name !== undefined) ch.name = str(b.name, 1, 100, 'Title');
+      if (b.tagIds !== undefined) ch.tagIds = (Array.isArray(b.tagIds) ? b.tagIds : []).map(String).filter((tid) => forum?.tags?.some((t) => t.id === tid)).slice(0, 5);
+      if (b.locked !== undefined) ch.locked = !!b.locked;
+      if (b.pinned !== undefined) ch.pinned = !!b.pinned;
+      save(); emitTo(audienceOf(ch), 'post_update', { post: postView(ch) });
+      return res.json(channelView(ch, req.user.id));
+    }
     if (ch.serverId) {
       const s = db.servers[ch.serverId]; const mine = permsIn(s, req.user.id, ch);
       const touchesPerms = b.overwrites !== undefined || b.synced !== undefined;
-      const touchesProps = ['name', 'topic', 'nsfw', 'slowmode', 'parentId'].some((k) => b[k] !== undefined);
+      const touchesProps = ['name', 'topic', 'nsfw', 'slowmode', 'parentId', 'tags', 'requireTag'].some((k) => b[k] !== undefined);
       if ((touchesProps || !touchesPerms) && !mine.has('MANAGE_CHANNELS')) throw forbidden();
       if (touchesPerms && !mine.has('MANAGE_ROLES')) throw forbidden();
-      if (b.name !== undefined) { let n = str(b.name, 1, 100, 'Channel name'); if (ch.type === 'text') n = n.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || ch.name; ch.name = n; }
+      if (b.name !== undefined) { let n = str(b.name, 1, 100, 'Channel name'); if (ch.type === 'text' || ch.type === 'forum') n = n.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || ch.name; ch.name = n; }
       if (b.topic !== undefined) ch.topic = String(b.topic).slice(0, 1024);
       if (b.nsfw !== undefined) ch.nsfw = !!b.nsfw;
+      if (ch.type === 'forum') { if (b.tags !== undefined) ch.tags = sanitizeTags(b.tags); if (b.requireTag !== undefined) ch.requireTag = !!b.requireTag; }
       if (b.slowmode !== undefined) ch.slowmode = clampInt(b.slowmode, 0, 21600, 0);
       if (b.parentId !== undefined && ch.type !== 'category') ch.parentId = b.parentId && db.channels[b.parentId]?.type === 'category' && db.channels[b.parentId].serverId === s.id ? b.parentId : null;
       if (touchesPerms) applyOverwrites(s, ch, b, req.user);
@@ -603,10 +634,17 @@ export function createApi() {
   }));
   r.delete('/channels/:id', h(async (req, res) => {
     const ch = getChannel(req, req.params.id);
+    if (ch.type === 'post') {
+      if (ch.ownerId !== req.user.id && !canIn(req.user.id, ch, 'MANAGE_MESSAGES') && !canIn(req.user.id, ch, 'MANAGE_CHANNELS')) throw forbidden();
+      const aud = audienceOf(ch); delete db.channels[ch.id]; delete db.messages[ch.id]; save();
+      emitTo(aud, 'post_delete', { serverId: ch.serverId, forumId: ch.forumId, postId: ch.id });
+      return res.json({ ok: true });
+    }
     if (ch.serverId) {
       const s = db.servers[ch.serverId]; needIn(req.user.id, ch, 'MANAGE_CHANNELS');
       if (channelsOfServer(s.id).filter((c) => c.type === 'text').length <= 1 && ch.type === 'text') throw bad('A server needs at least one text channel');
       if (ch.type === 'category') for (const c of channelsOfServer(s.id)) if (c.parentId === ch.id) c.parentId = null;
+      if (ch.type === 'forum') for (const p of channelsOfServer(s.id)) if (p.type === 'post' && p.forumId === ch.id) { delete db.channels[p.id]; delete db.messages[p.id]; }
       delete db.channels[ch.id]; delete db.messages[ch.id]; voice.delete(ch.id);
       if (s.systemChannelId === ch.id) s.systemChannelId = channelsOfServer(s.id).find((c) => c.type === 'text')?.id || null;
       save(); pushChannelEvent('channel_delete', ch); pushServerUpdate(s);
@@ -617,6 +655,46 @@ export function createApi() {
       emitTo([req.user.id], 'dm_close', { channelId: ch.id });
     }
     res.json({ ok: true });
+  }));
+
+  /* ---- forum channels: a list of posts, each post a small channel of its own ---- */
+  const sanitizeTags = (list) => {
+    const seen = new Set();
+    return (Array.isArray(list) ? list : []).slice(0, 20).map((t) => ({ id: String(t?.id || newId()).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24) || newId(), name: String(t?.name || '').trim().slice(0, 20), emoji: String(t?.emoji || '').trim().slice(0, 8) || null }))
+      .filter((t) => t.name && !seen.has(t.id) && seen.add(t.id));
+  };
+  r.get('/channels/:id', h(async (req, res) => { res.json(channelView(getChannel(req, req.params.id), req.user.id)); }));   // deep links to a post
+  r.get('/channels/:id/posts', h(async (req, res) => {
+    const forum = getChannel(req, req.params.id); if (forum.type !== 'forum') throw bad('That is not a forum');
+    const q = String(req.query.q || '').trim().toLowerCase().slice(0, 100); const tag = String(req.query.tag || '');
+    let posts = Object.values(db.channels).filter((c) => c.type === 'post' && c.forumId === forum.id);
+    if (tag) posts = posts.filter((p) => (p.tagIds || []).includes(tag));
+    if (q) posts = posts.filter((p) => p.name.toLowerCase().includes(q) || String((db.messages[p.id] || [])[0]?.content || '').toLowerCase().includes(q));
+    const byNew = req.query.sort === 'new';
+    posts.sort((a, b) => (Number(!!b.pinned) - Number(!!a.pinned)) || ((byNew ? b.createdAt - a.createdAt : (b.lastActivity || b.createdAt) - (a.lastActivity || a.createdAt))));
+    const offset = clampInt(req.query.offset, 0, 100000, 0); const limitN = clampInt(req.query.limit, 1, 50, 25);
+    const slice = posts.slice(offset, offset + limitN);
+    res.json({ posts: slice.map(postView), users: usersFor(slice.map((p) => p.ownerId)), total: posts.length, hasMore: offset + limitN < posts.length });
+  }));
+  r.post('/channels/:id/posts', limit('newpost', 8, 60_000, (req) => req.user.id), h(async (req, res) => {
+    const forum = getChannel(req, req.params.id); if (forum.type !== 'forum') throw bad('That is not a forum');
+    needIn(req.user.id, forum, 'SEND_MESSAGES');
+    const b = req.body || {}; const s = db.servers[forum.serverId];
+    const title = str(b.title, 1, 100, 'Title');
+    const content = typeof b.content === 'string' ? b.content : '';
+    if (content.length > 4000) throw bad('The post is too long (4000 characters max)');
+    await Promise.all((Array.isArray(b.attachments) ? b.attachments.slice(0, 10) : []).map((a) => restoreUpload(path.basename(String(a?.url || '')))));
+    let attachments = sanitizeAttachments(b.attachments, fs, path, UPLOAD_DIR);
+    if (attachments.length && !canIn(req.user.id, forum, 'ATTACH_FILES')) attachments = [];
+    if (!content.trim() && !attachments.length) throw bad('Write something in your post');
+    const tagIds = (Array.isArray(b.tags) ? b.tags : []).map(String).filter((tid) => forum.tags?.some((t) => t.id === tid)).slice(0, 5);
+    if (forum.requireTag && !tagIds.length) throw bad('Pick at least one tag for your post', 'tags');
+    const id = newId(); const now = Date.now();
+    const post = db.channels[id] = { id, serverId: s.id, type: 'post', forumId: forum.id, name: title, ownerId: req.user.id, createdAt: now, lastActivity: now, tagIds, locked: false, pinned: false };
+    db.messages[id] = []; save();
+    emitTo(audienceOf(forum), 'post_create', { post: postView(post), users: [publicUser(req.user)] });
+    const msg = postMessage(post, req.user.id, { content, attachments });
+    res.json({ post: channelView(post, req.user.id), message: messageView(msg) });
   }));
 
   /* ---- DMs ---- */
@@ -699,6 +777,58 @@ export function createApi() {
     delete db.invites[inv.code]; save(); res.json({ ok: true });
   }));
 
+  /* ---- custom emoji & stickers (a server's "expressions") ---- */
+  const EXPR_MAX = { emojis: 50, stickers: 30 }; const EXPR_BYTES = 512 * 1024;
+  const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  /** An uploaded picture that is really a small PNG / JPEG / GIF / WebP; says whether it moves. */
+  async function expressionFile(url) {
+    const ref = uploadRef(url); if (!ref) throw bad('Upload the image first');
+    const base = path.basename(ref); await restoreUpload(base);   // after a restart the file may only be in the database
+    const file = path.join(UPLOAD_DIR, base); let st; try { st = fs.statSync(file); } catch { throw bad('That upload was not found'); }
+    if (st.size > EXPR_BYTES) throw bad('Images must be under 512 KB');
+    const head = Buffer.alloc(32); const fd = fs.openSync(file, 'r'); try { fs.readSync(fd, head, 0, 32, 0); } finally { fs.closeSync(fd); }
+    const kind = head.subarray(0, 8).equals(PNG_SIG) ? 'png' : (head[0] === 0xff && head[1] === 0xd8) ? 'jpeg' : head.subarray(0, 3).toString('latin1') === 'GIF' ? 'gif'
+      : (head.subarray(0, 4).toString('latin1') === 'RIFF' && head.subarray(8, 12).toString('latin1') === 'WEBP') ? 'webp' : null;
+    if (!kind) throw bad('Use a PNG, JPEG, GIF or WebP image');
+    const animated = kind === 'gif' || (kind === 'webp' && head.subarray(12, 16).toString('latin1') === 'VP8X' && (head[20] & 2) !== 0);
+    return { url: ref, animated };
+  }
+  const exprName = (v, kind, list, selfId) => {
+    const name = String(v ?? '').trim();
+    if (kind === 'emojis' ? !/^[A-Za-z0-9_]{2,32}$/.test(name) : (name.length < 2 || name.length > 30)) throw bad(kind === 'emojis' ? 'Emoji names are 2–32 letters, numbers or underscores' : 'Sticker names are 2–30 characters', 'name');
+    if (list.some((x) => x.id !== selfId && x.name.toLowerCase() === name.toLowerCase())) throw bad('Something here already has that name', 'name');
+    return name;
+  };
+  for (const kind of ['emojis', 'stickers']) {
+    r.post(`/servers/:id/${kind}`, limit(`expr-${kind}`, 40, 60_000, (req) => req.user.id), h(async (req, res) => {
+      const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_EXPRESSIONS');
+      const b = req.body || {}; const list = (s[kind] ||= []);
+      if (list.length >= EXPR_MAX[kind]) throw bad(`This server can have at most ${EXPR_MAX[kind]} ${kind}`);
+      const name = exprName(b.name, kind, list); const file = await expressionFile(b.url);
+      const item = { id: newId(), name, url: file.url, animated: file.animated, by: req.user.id, at: Date.now() };
+      if (kind === 'stickers') item.description = String(b.description || '').trim().slice(0, 100);
+      list.push(item); save(); pushServerUpdate(s); res.json(item);
+    }));
+    r.patch(`/servers/:id/${kind}/:eid`, h(async (req, res) => {
+      const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_EXPRESSIONS');
+      const list = s[kind] || []; const item = list.find((x) => x.id === req.params.eid); if (!item) throw notFound('Unknown ' + kind.slice(0, -1));
+      const b = req.body || {};
+      if (b.name !== undefined) item.name = exprName(b.name, kind, list, item.id);
+      if (kind === 'stickers' && b.description !== undefined) item.description = String(b.description || '').trim().slice(0, 100);
+      save(); pushServerUpdate(s); res.json(item);
+    }));
+    r.delete(`/servers/:id/${kind}/:eid`, h(async (req, res) => {
+      const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_EXPRESSIONS');
+      s[kind] = (s[kind] || []).filter((x) => x.id !== req.params.eid); save(); pushServerUpdate(s); res.json({ ok: true });   // messages that used it keep showing it (they carry the picture)
+    }));
+  }
+  /** `{ serverId, id }` from the sticker picker → the sticker as it is stored in a message (only from servers the sender is in). */
+  function serverSticker(ref, userId) {
+    const s = db.servers[String(ref?.serverId)]; if (!s || !s.members[userId]) return null;
+    const st = s.stickers?.find((x) => x.id === String(ref.id)); if (!st) return null;
+    return { id: 's:' + st.id, title: st.name, url: st.url, w: 160, h: 160, kind: 'sticker', custom: true, serverId: s.id, animated: !!st.animated };
+  }
+
   /* ---- roles & members ---- */
   const roleView = (s, id) => s.roles.find((r) => r.id === id);
   r.post('/servers/:id/roles', h(async (req, res) => {
@@ -752,7 +882,7 @@ export function createApi() {
     need(s, req.user.id, self ? 'CHANGE_NICKNAME' : 'MANAGE_NICKNAMES');
     const nick = String((req.body || {}).nick || '').trim().slice(0, 32);
     m.nick = nick || null; save();
-    emitTo(serverAudience(s), 'member_update', { serverId: s.id, member: { id: req.params.uid, roles: m.roles, nick: m.nick, joinedAt: m.joinedAt } });
+    emitTo(serverAudience(s), 'member_update', { serverId: s.id, member: memberView(req.params.uid, m) });
     res.json({ ok: true });
   }));
   const removeMember = (s, uid, ban) => {
@@ -774,21 +904,62 @@ export function createApi() {
     const uid = req.params.uid; if (!db.users[uid]) throw notFound('Unknown user');
     if (uid === s.ownerId || uid === req.user.id) throw forbidden('You can’t ban that member');
     if (s.members[uid] && topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
-    removeMember(s, uid, true); res.json({ ok: true });
+    const b = req.body || {};
+    // remember why and by whom, and which networks the person used — they can't come back with another account from those
+    s.banInfo ||= {}; s.banInfo[uid] = { reason: String(b.reason || '').trim().slice(0, 200), by: req.user.id, at: Date.now() };
+    s.bannedIps ||= {};
+    const safe = new Set([...userIpHashes(db.users[s.ownerId]), ...userIpHashes(req.user)]);   // never lock out the owner or the moderator who banned
+    for (const h of userIpHashes(db.users[uid])) if (!safe.has(h)) s.bannedIps[h] = uid;
+    removeMember(s, uid, true);
+    purgeMessages(s, uid, clampInt(b.deleteHours, 0, 168, 0));
+    res.json({ ok: true });
   }));
+  /** Deletes what a person posted in this server during the last `hours` hours (0 = nothing). */
+  function purgeMessages(s, uid, hours) {
+    if (!hours) return;
+    const cutoff = Date.now() - hours * 3600_000;
+    for (const c of channelsOfServer(s.id)) {
+      const list = db.messages[c.id]; if (!list?.length) continue;
+      const gone = list.filter((m) => m.authorId === uid && m.createdAt >= cutoff && (!m.type || m.type === 'default'));
+      if (!gone.length) continue;
+      db.messages[c.id] = list.filter((m) => !gone.includes(m));
+      for (const m of gone) emitTo(audienceOf(c), 'message_delete', { channelId: c.id, messageId: m.id });
+    }
+    save();
+  }
   r.get('/servers/:id/bans', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'BAN_MEMBERS');
-    res.json(usersFor(s.bans || []));
+    const ipBanned = new Set(Object.values(s.bannedIps || {}));
+    res.json((s.bans || []).map((id) => {
+      const u = publicUser(db.users[id]); if (!u) return null; const info = s.banInfo?.[id] || {};
+      return { ...u, ban: { reason: info.reason || '', by: info.by ? (db.users[info.by]?.displayName || null) : null, at: info.at || null, ipBanned: ipBanned.has(id) } };
+    }).filter(Boolean));
   }));
   r.delete('/servers/:id/bans/:uid', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'BAN_MEMBERS');
-    s.bans = (s.bans || []).filter((id) => id !== req.params.uid); save(); res.json({ ok: true });
+    const uid = req.params.uid;
+    s.bans = (s.bans || []).filter((id) => id !== uid);
+    if (s.banInfo) delete s.banInfo[uid];
+    for (const [h, id] of Object.entries(s.bannedIps || {})) if (id === uid) delete s.bannedIps[h];   // their networks are free again
+    save(); res.json({ ok: true });
+  }));
+
+  /* ---- timeouts: a member can read but not talk, react or join voice until it runs out ---- */
+  r.put('/servers/:id/members/:uid/timeout', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MODERATE_MEMBERS');
+    const uid = req.params.uid; const m = s.members[uid]; if (!m) throw notFound('Unknown member');
+    if (uid === s.ownerId || uid === req.user.id || can(s, uid, 'ADMINISTRATOR')) throw forbidden('You can’t time out that member');
+    if (topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
+    const minutes = clampInt((req.body || {}).minutes, 0, 28 * 24 * 60, 0);
+    if (minutes) m.timeoutUntil = Date.now() + minutes * 60_000; else delete m.timeoutUntil;
+    save(); pushServerUpdate(s); revalidateVoice(s);
+    res.json({ ok: true, timeoutUntil: m.timeoutUntil || null });
   }));
 
   /* --------------------------- messages --------------------------- */
   r.get('/channels/:id/messages', h(async (req, res) => {
     const ch = getChannel(req, req.params.id);
-    if (ch.type === 'voice' || ch.type === 'category') return res.json({ messages: [], users: [], hasMore: false });
+    if (ch.type === 'voice' || ch.type === 'category' || ch.type === 'forum') return res.json({ messages: [], users: [], hasMore: false });
     const list = db.messages[ch.id] || [];
     const limitN = clampInt(req.query.limit, 1, 100, 50);
     let slice; let hasMore = false;
@@ -813,6 +984,8 @@ export function createApi() {
     const ch = getChannel(req, req.params.id);
     if (ch.type === 'voice' && !ch.serverId) throw bad('Cannot post here');
     if (ch.type === 'category') throw bad('Cannot post to a category');
+    if (ch.type === 'forum') throw bad('Start a post instead — a forum has no messages of its own', 'forum');
+    if (ch.type === 'post' && ch.locked && !canIn(req.user.id, ch, 'MANAGE_MESSAGES') && ch.ownerId !== req.user.id) throw forbidden('This post is locked');
     const server = ch.serverId ? db.servers[ch.serverId] : null;
     if (server) needIn(req.user.id, ch, 'SEND_MESSAGES');
     if (!server && ch.type === 'dm') {
@@ -827,11 +1000,13 @@ export function createApi() {
     await Promise.all((Array.isArray(b.attachments) ? b.attachments.slice(0, 10) : []).map((a) => restoreUpload(path.basename(String(a?.url || '')))));   // after a restart the file may only be in the database
     let attachments = sanitizeAttachments(b.attachments, fs, path, UPLOAD_DIR);
     if (server && attachments.length && !canIn(req.user.id, ch, 'ATTACH_FILES')) attachments = [];
-    const gif = sanitizeMedia(b.gif, 'gif'); const sticker = sanitizeMedia(b.sticker, 'sticker');
+    const gif = sanitizeMedia(b.gif, 'gif'); const sticker = b.sticker?.custom ? serverSticker(b.sticker.custom, req.user.id) : sanitizeMedia(b.sticker, 'sticker');
     const content = typeof b.content === 'string' ? b.content : '';
-    if (!content.trim() && !attachments.length && !gif && !sticker) throw bad('Cannot send an empty message');
+    const poll = b.poll ? sanitizePoll(b.poll) : null;
+    const theme = b.theme ? sanitizeSharedTheme(b.theme) : null;
+    if (!content.trim() && !attachments.length && !gif && !sticker && !poll && !theme) throw bad('Cannot send an empty message');
     if (content.length > 4000) throw bad('Message is too long (4000 characters max)');
-    const msg = postMessage(ch, req.user.id, { content, attachments, gif, sticker, replyTo: b.replyTo, replyPing: b.replyPing !== false, nonce: b.nonce });
+    const msg = postMessage(ch, req.user.id, { content, attachments, gif, sticker, replyTo: b.replyTo, replyPing: b.replyPing !== false, nonce: b.nonce, poll, theme });
     res.json(messageView(msg));
   }));
 
@@ -840,10 +1015,13 @@ export function createApi() {
     const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid);
     if (m.authorId !== req.user.id) throw forbidden('You can only edit your own messages');
     if (m.type !== 'default') throw forbidden();
+    if (m.poll) throw forbidden('A poll can’t be edited');
+    if (m.theme) throw forbidden('A shared theme can’t be edited');
     const content = String((req.body || {}).content ?? '');
     if (!content.trim() && !(m.attachments?.length || m.gif || m.sticker)) throw bad('Message cannot be empty — delete it instead');
     if (content.length > 4000) throw bad('Message is too long');
     m.content = content; m.editedAt = Date.now();
+    m.emojis = customEmojisIn(content, req.user.id, m.emojis || []) || undefined;
     m.mentions = [...new Set([...content.matchAll(/<@!?(\d{10,20})>/g)].map((x) => x[1]))].filter((id) => db.users[id] && id !== req.user.id);
     save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
     res.json(messageView(m));
@@ -868,7 +1046,10 @@ export function createApi() {
   const reaction = (add) => h(async (req, res) => {
     const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid);
     const s = ch.serverId && db.servers[ch.serverId]; if (s) needIn(req.user.id, ch, 'ADD_REACTIONS');
-    const emoji = decodeURIComponent(req.params.emoji); if (!emoji || emoji.length > 40 || /[<>]/.test(emoji)) throw bad('Invalid emoji');
+    const emoji = decodeURIComponent(req.params.emoji);
+    const custom = /^<a?:[A-Za-z0-9_]{2,32}:\d{6,20}>$/.test(emoji);
+    if (!emoji || emoji.length > (custom ? 64 : 40) || (!custom && /[<>]/.test(emoji))) throw bad('Invalid emoji');
+    if (custom) { const e = findEmoji(emoji.match(/:(\d{6,20})>$/)[1], req.user.id); if (!e) throw bad('You can only use emoji from servers you are in'); m.emojis = customEmojisIn(emoji, req.user.id, m.emojis || []); }
     m.reactions ||= {};
     const arr = m.reactions[emoji] || [];
     if (add) {
@@ -907,6 +1088,56 @@ export function createApi() {
   });
   r.put('/channels/:id/pins/:mid', pin(true));
   r.delete('/channels/:id/pins/:mid', pin(false));
+
+  /* ---- polls ---- */
+  /* ---- shared themes (the /theme command): a look others can try with one click. The server only checks the shape and size; the client re-checks every setting against its own limits when applying. */
+  const THEME_SECTIONS = ['theme', 'bg', 'rain', 'glass', 'fonts', 'motion', 'chat'];
+  function sanitizeSharedTheme(t) {
+    if (!t || typeof t !== 'object' || !t.data || typeof t.data !== 'object') throw bad('There is no theme to share');
+    const clean = (v, depth) => {
+      if (v === null || typeof v === 'boolean') return v;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+      if (typeof v === 'string') return v.length <= 300 && !/[;{}<>"'`\\\r\n]/.test(v) ? v : undefined;   // nothing that could break out of a CSS value
+      if (v && typeof v === 'object' && !Array.isArray(v) && depth < 2) {
+        const out = {};
+        for (const [k, x] of Object.entries(v)) { if (!/^\w{1,24}$/.test(k)) continue; const c = clean(x, depth + 1); if (c !== undefined) out[k] = c; }
+        return out;
+      }
+      return undefined;
+    };
+    const data = {};
+    for (const k of THEME_SECTIONS) { const c = clean(t.data[k], 0); if (c && typeof c === 'object' && Object.keys(c).length) data[k] = c; }
+    if (data.bg) delete data.bg.library;       // your saved wallpapers stay yours
+    if (data.motion) delete data.motion.reduce;   // an accessibility choice nobody else should flip
+    if (!Object.keys(data).length) throw bad('There is no theme to share');
+    if (JSON.stringify(data).length > 6000) throw bad('That theme is too large to share');
+    return { name: String(t.name || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 40) || null, data };
+  }
+  function sanitizePoll(p) {
+    if (!p || typeof p !== 'object') return null;
+    const question = String(p.question || '').trim().slice(0, 300); if (!question) throw bad('Ask a question first');
+    const answers = (Array.isArray(p.answers) ? p.answers : []).map((a) => ({ text: String(a?.text ?? a ?? '').trim().slice(0, 55), emoji: String(a?.emoji || '').trim().slice(0, 8) || null })).filter((a) => a.text);
+    if (answers.length < 2) throw bad('A poll needs at least two answers'); if (answers.length > 10) throw bad('A poll can have at most 10 answers');
+    const hours = [1, 4, 8, 24, 72, 168, 336].includes(Number(p.hours)) ? Number(p.hours) : 24;
+    return { question, answers: answers.map((a, i) => ({ id: String(i + 1), ...a })), multi: !!p.multi, expiresAt: Date.now() + hours * 3600_000, votes: {}, closed: false };
+  }
+  const pollOf = (req) => { const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid); if (!m.poll) throw notFound('There is no poll on that message'); return { ch, m, p: m.poll }; };
+  r.put('/channels/:id/messages/:mid/poll/votes', limit('vote', 40, 30_000, (req) => req.user.id), h(async (req, res) => {
+    const { ch, m, p } = pollOf(req);
+    if (p.closed || (p.expiresAt && p.expiresAt <= Date.now())) throw bad('This poll has ended', 'poll_closed');
+    let ids = [...new Set((Array.isArray((req.body || {}).answers) ? req.body.answers : []).map(String))].filter((id) => p.answers.some((a) => a.id === id));
+    if (!p.multi) ids = ids.slice(0, 1);
+    p.votes ||= {};
+    if (ids.length) p.votes[req.user.id] = ids; else delete p.votes[req.user.id];
+    save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
+    res.json({ ok: true });
+  }));
+  r.post('/channels/:id/messages/:mid/poll/close', h(async (req, res) => {
+    const { ch, m, p } = pollOf(req);
+    if (m.authorId !== req.user.id && !(ch.serverId && canIn(req.user.id, ch, 'MANAGE_MESSAGES'))) throw forbidden();
+    p.closed = true; save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
+    res.json({ ok: true });
+  }));
 
   r.post('/channels/:id/typing', limit('typing', 20, 10_000, (req) => req.user.id), h(async (req, res) => {
     const ch = getChannel(req, req.params.id);

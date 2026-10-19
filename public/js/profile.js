@@ -41,8 +41,15 @@ export function userMenu(userId, serverId) {
     items.push({ type: 'sep' });
     if (hasPerm(serverId, 'MANAGE_NICKNAMES')) items.push({ label: t('Change Nickname'), icon: 'edit', onClick: () => openModal('nickname', { serverId, userId }) });
     if (canRoles && roles.length) items.push({ label: t('Roles'), icon: 'tag', submenu: roles.map((r) => ({ label: r.name, checked: member.roles.includes(r.id), onClick: () => act(member.roles.includes(r.id) ? api.del(`/servers/${serverId}/members/${userId}/roles/${r.id}`) : api.put(`/servers/${serverId}/members/${userId}/roles/${r.id}`)) })) });
+    if (hasPerm(serverId, 'MODERATE_MEMBERS') && userId !== server.ownerId) {
+      const set = (minutes) => act(api.put(`/servers/${serverId}/members/${userId}/timeout`, { minutes }), { success: minutes ? `${u.displayName} was timed out` : 'Timeout removed' });
+      items.push({ label: t('Timeout'), icon: 'clock', submenu: [
+        ...[[1, '60 seconds'], [5, '5 minutes'], [10, '10 minutes'], [60, '1 hour'], [1440, '1 day'], [10080, '1 week']].map(([m, l]) => ({ label: t(l), onClick: () => set(m) })),
+        member.timeoutUntil > Date.now() && { label: t('Remove Timeout'), icon: 'x', onClick: () => set(0) },
+      ].filter(Boolean) });
+    }
     if (hasPerm(serverId, 'KICK_MEMBERS') && userId !== server.ownerId) items.push({ label: `${t('Kick')} ${u.displayName}`, icon: 'log-out', danger: true, onClick: async () => { if (await confirmDialog({ title: `Kick ${u.displayName}`, body: 'They can rejoin with a new invite.', confirmLabel: 'Kick', danger: true })) act(api.del(`/servers/${serverId}/members/${userId}`), { success: 'Member kicked' }); } });
-    if (hasPerm(serverId, 'BAN_MEMBERS') && userId !== server.ownerId) items.push({ label: `${t('Ban')} ${u.displayName}`, icon: 'ban', danger: true, onClick: async () => { if (await confirmDialog({ title: `Ban ${u.displayName}`, body: 'They will be removed and unable to rejoin until unbanned.', confirmLabel: 'Ban', danger: true })) act(api.put(`/servers/${serverId}/bans/${userId}`), { success: 'Member banned' }); } });
+    if (hasPerm(serverId, 'BAN_MEMBERS') && userId !== server.ownerId) items.push({ label: `${t('Ban')} ${u.displayName}`, icon: 'ban', danger: true, onClick: () => openModal('ban', { serverId, userId }) });
     void mine;
   }
   items.push({ type: 'sep' }, { label: t('Copy User ID'), icon: 'copy', onClick: async () => { await copyText(userId); toast('Copied', 'success', 1400); } });

@@ -17,11 +17,12 @@ const MemberRow = memo(function MemberRow({ id, serverId, groupColor }) {
   const nick = useSel((s) => s.servers[serverId]?.members.find((m) => m.id === id)?.nick);
   const color = useSel((s) => roleColor(serverId, id));
   const owner = useSel((s) => s.servers[serverId]?.ownerId === id);
+  const timedOut = useSel((s) => (s.servers[serverId]?.members.find((m) => m.id === id)?.timeoutUntil || 0) > Date.now());
   if (!u) return null;
   const off = u.status === 'offline';
   return html`<button type="button" class=${cx('member-row', off && 'off')} onClick=${(e) => openProfile(id, e.currentTarget)} onContextMenu=${(e) => openContext(e, userMenu(id, serverId))}>
     <${Avatar} user=${u} size=${34} status=${u.status} />
-    <span class="mr-text"><span class="mr-name" style=${color ? { color } : null}>${nick || u.displayName}${owner ? html`<${Icon} name="crown" size=${13} class="crown" />` : null}${u.bot ? html`<span class="bot-tag">APP</span>` : null}</span>
+    <span class="mr-text"><span class="mr-name" style=${color ? { color } : null}>${nick || u.displayName}${owner ? html`<${Icon} name="crown" size=${13} class="crown" />` : null}${timedOut ? html`<span class="timeout-ico" title=${t('Timed out')}><${Icon} name="clock" size=${13} /></span>` : null}${u.bot ? html`<span class="bot-tag">APP</span>` : null}</span>
       ${u.customStatus ? html`<span class="mr-sub">${u.customStatus.emoji} ${u.customStatus.text}</span>` : null}</span>
   </button>`;
 });

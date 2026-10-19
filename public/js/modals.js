@@ -36,7 +36,7 @@ MODALS['add-server'] = function AddServer({ id }) {
     const c = code.trim().split('/').pop(); if (!c) return; setBusy(true); setErr(null);
     try { const s = await api.post(`/invites/${c}/join`); close(); goChannel(s.id, null); toast(`Joined ${s.name}!`, 'success'); } catch (e) { setErr(errMsg(e)); setBusy(false); }
   };
-  const pickIcon = async () => { setUploading(true); try { const u = await chooseAndUploadImage({ aspect: 1, out: 256, round: true, title: 'Server Icon' }); if (u) setIcon(u); } catch (e) { toast(errMsg(e), 'error'); } setUploading(false); };
+  const pickIcon = async () => { setUploading(true); try { const u = await chooseAndUploadImage({ aspect: 1, out: 256, round: true, title: 'Server Icon', allowGif: true }); if (u) setIcon(u); } catch (e) { toast(errMsg(e), 'error'); } setUploading(false); };
   return html`<${Modal} title=${step === 'choose' ? t('Create a server') : step === 'template' ? t('Pick a template') : step === 'customize' ? t('Customize your server') : t('Join a server')}
     subtitle=${step === 'choose' ? t('Your server is where you and your friends hang out. Make yours and start talking.') : step === 'template' ? t('Choose a starting point. You can change everything later.') : step === 'customize' ? t('Give your new server a personality with a name and an icon.') : t('Enter an invite below to join an existing server.')} width=${480} onClose=${close}>
     <div class="step-wrap" key=${step} style=${{ '--d': dir }}>
@@ -101,10 +101,10 @@ MODALS['create-channel'] = function CreateChannel({ id, serverId, parentId, type
     if (!name.trim()) { setErr('Give it a name'); return; } setBusy(true);
     try { const c = await api.post(`/servers/${serverId}/channels`, { name: name.trim(), type, parentId: type === 'category' ? null : parent, private: priv, allowedRoles: roles }); closeModal(id); if (c.type !== 'category') setTimeout(() => goChannel(serverId, c.id), 80); } catch (e) { setErr(errMsg(e)); setBusy(false); }
   };
-  const types = [['text', 'hash', t('Text'), t('Send messages, images, GIFs, emoji and more')], ['voice', 'volume', t('Voice'), t('Hang out together with voice, video and screen share')], ['category', 'folder', t('Category'), t('Organize channels into groups')]];
+  const types = [['text', 'hash', t('Text'), t('Send messages, images, GIFs, emoji and more')], ['voice', 'volume', t('Voice'), t('Hang out together with voice, video and screen share')], ['forum', 'forum', t('Forum'), t('Organized discussions — every topic gets its own post')], ['category', 'folder', t('Category'), t('Organize channels into groups')]];
   return html`<${Modal} title=${t('Create Channel')} subtitle=${parentId ? `${t('in')} ${server.channels.find((c) => c.id === parentId)?.name}` : null} width=${470} onClose=${() => closeModal(id)} footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="primary" loading=${busy} disabled=${!name.trim()} onClick=${create}>${t('Create Channel')}<//>`}>
     <div class="type-list">${types.map(([k, ic, l, d]) => html`<button type="button" class=${cx('type-opt', type === k && 'sel')} onClick=${() => setType(k)}><${Icon} name=${ic} size=${24} /><span><b>${l}</b><small>${d}</small></span><span class="radio"></span></button>`)}</div>
-    <${Field} label=${type === 'category' ? t('Category name') : t('Channel name')} error=${err}><${TextInput} value=${name} onInput=${(v) => { setName(type === 'text' ? v.toLowerCase().replace(/\s+/g, '-') : v); setErr(null); }} icon=${type === 'voice' ? 'volume' : type === 'category' ? 'folder' : 'hash'} placeholder=${type === 'text' ? 'new-channel' : type === 'voice' ? 'General' : 'New Category'} autofocus onKeyDown=${(e) => e.key === 'Enter' && create()} /><//>
+    <${Field} label=${type === 'category' ? t('Category name') : t('Channel name')} error=${err}><${TextInput} value=${name} onInput=${(v) => { setName(type === 'text' || type === 'forum' ? v.toLowerCase().replace(/\s+/g, '-') : v); setErr(null); }} icon=${type === 'voice' ? 'volume' : type === 'category' ? 'folder' : type === 'forum' ? 'forum' : 'hash'} placeholder=${type === 'text' ? 'new-channel' : type === 'forum' ? 'new-forum' : type === 'voice' ? 'General' : 'New Category'} autofocus onKeyDown=${(e) => e.key === 'Enter' && create()} /><//>
     ${type !== 'category' && cats.length ? html`<${Field} label=${t('Category')}><${Dropdown} value=${parent} options=${[{ value: null, label: t('No category') }, ...cats.map((c) => ({ value: c.id, label: c.name }))]} onChange=${setParent} /><//>` : null}
     ${type !== 'category' ? html`<${SettingRow} title=${t('Private Channel')} desc=${t('Only selected roles and admins will be able to view this channel.')}><${Toggle} checked=${priv} onChange=${setPriv} /><//>` : null}
     ${priv && type !== 'category' ? html`<div class="role-pick slide-down">${server.roles.filter((r) => r.id !== server.id).map((r) => html`<label class="role-opt"><input type="checkbox" checked=${roles.includes(r.id)} onChange=${(e) => setRoles(e.target.checked ? [...roles, r.id] : roles.filter((x) => x !== r.id))} /><i style=${{ background: r.color || 'var(--text-3)' }}></i>${r.name}</label>`)}${server.roles.length <= 1 ? html`<div class="muted-note">${t('Create roles in Server Settings to grant access.')}</div>` : null}</div>` : null}
@@ -114,7 +114,7 @@ MODALS['create-channel'] = function CreateChannel({ id, serverId, parentId, type
 MODALS['edit-channel'] = function EditChannel({ id, channelId, tab: startTab }) {
   const ch = getChannel(channelId); const server = state.servers[ch?.serverId];
   const canProps = !!ch && hasChannelPerm(ch, 'MANAGE_CHANNELS'); const canPerms = !!ch && Array.isArray(ch.overwrites);   // the server only sends overwrites to people who may change them
-  const orig = { name: ch?.name || '', topic: ch?.topic || '', nsfw: !!ch?.nsfw, slowmode: ch?.slowmode || 0 };
+  const orig = { name: ch?.name || '', topic: ch?.topic || '', nsfw: !!ch?.nsfw, slowmode: ch?.slowmode || 0, ...(ch?.type === 'forum' ? { tags: ch.tags || [], requireTag: !!ch.requireTag } : {}) };
   const [f, setF] = useState(orig); const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState(startTab === 'permissions' && canPerms ? 'permissions' : canProps ? 'overview' : 'permissions');
   const [ows, setOws] = useState(() => cloneOverwrites(ch?.overwrites)); const [synced, setSynced] = useState(!!ch?.synced);
@@ -146,12 +146,30 @@ MODALS['edit-channel'] = function EditChannel({ id, channelId, tab: startTab }) 
     footer=${html`${canProps ? html`<${Btn} variant="danger" class="mr-auto" icon="trash" onClick=${async () => { closeModal(id); await deleteChannel(ch); }}>${t('Delete')}<//>` : null}<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="primary" loading=${busy} disabled=${!propsDirty && !permsDirty} onClick=${save}>${t('Save Changes')}<//>`}>
     ${canProps && canPerms ? html`<div class="chan-tabs">${tabBtn('overview', t('Overview'))}${tabBtn('permissions', t('Permissions'))}</div>` : null}
     ${tab === 'permissions' && canPerms ? html`<${PermissionsEditor} ch=${ch} server=${server} ows=${ows} onChange=${editOws} synced=${synced} onSync=${sync} parent=${parent} kids=${kids} />` : html`<div>
-      <${Field} label=${isCat ? t('Category name') : t('Channel name')}><${TextInput} value=${f.name} onInput=${(v) => setF({ ...f, name: ch.type === 'text' ? v.toLowerCase().replace(/\s+/g, '-') : v })} maxlength="100" disabled=${!canProps} /><//>
+      <${Field} label=${isCat ? t('Category name') : t('Channel name')}><${TextInput} value=${f.name} onInput=${(v) => setF({ ...f, name: ch.type === 'text' || ch.type === 'forum' ? v.toLowerCase().replace(/\s+/g, '-') : v })} maxlength="100" disabled=${!canProps} /><//>
+      ${ch.type === 'forum' ? html`<${Field} label=${t('Guidelines')}><textarea class="textarea" value=${f.topic} maxlength="1024" onInput=${(e) => setF({ ...f, topic: e.target.value })} placeholder=${t('Tell people what belongs here before they post.')}></textarea><//>
+        <${Field} label=${`${t('Tags')} (${f.tags.length}/20)`}><div class="tag-edit">${f.tags.map((tg, i) => html`<div class="tag-row" key=${tg.id}><input class="input tg-emoji" value=${tg.emoji || ''} maxlength="4" placeholder="🙂" aria-label=${t('Emoji')} onInput=${(e) => setF({ ...f, tags: f.tags.map((x, j) => (j === i ? { ...x, emoji: e.target.value } : x)) })} /><input class="input" value=${tg.name} maxlength="20" placeholder=${t('Tag name')} onInput=${(e) => setF({ ...f, tags: f.tags.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} /><button type="button" class="icon-btn" aria-label=${t('Remove')} onClick=${() => setF({ ...f, tags: f.tags.filter((_, j) => j !== i) })}><${Icon} name="x" size=${16} /></button></div>`)}
+          <${Btn} size="sm" icon="plus" disabled=${f.tags.length >= 20} onClick=${() => setF({ ...f, tags: [...f.tags, { id: 't' + Math.random().toString(36).slice(2, 9), name: '', emoji: '' }] })}>${t('Add tag')}<//></div><//>
+        <${SettingRow} title=${t('Require a tag')} desc=${t('People must pick at least one tag when they start a post.')}><${Toggle} checked=${f.requireTag} onChange=${(v) => setF({ ...f, requireTag: v })} /><//>` : null}
       ${ch.type === 'text' ? html`<${Field} label=${t('Channel topic')}><textarea class="textarea" value=${f.topic} maxlength="1024" onInput=${(e) => setF({ ...f, topic: e.target.value })} placeholder=${t('Let everyone know how to use this channel!')}></textarea><//>
         <${SettingRow} title=${t('Slowmode')} desc=${t('Members must wait between messages unless they can manage messages.')}><${Dropdown} width=${110} value=${f.slowmode} options=${SLOW} onChange=${(v) => setF({ ...f, slowmode: v })} /><//>` : null}
       ${canPerms ? html`<${SettingRow} title=${isCat ? t('Private Category') : t('Private Channel')} desc=${t('Only the roles and members you allow in Permissions can view it. Admins always can.')}><${Toggle} checked=${isPrivate} onChange=${setPrivate} /><//>
         <button type="button" class="link-btn" onClick=${() => setTab('permissions')}>${t('Fine-tune who can do what in Permissions →')}</button>` : null}
     </div>`}
+  <//>`;
+};
+
+/* ------------------------------------------------------------------ ban */
+MODALS.ban = function BanModal({ id, serverId, userId }) {
+  const u = state.users[userId]; const server = state.servers[serverId];
+  const [reason, setReason] = useState(''); const [del, setDel] = useState(0); const [busy, setBusy] = useState(false);
+  if (!u || !server) return null;
+  const DEL = [{ value: 0, label: t('Don’t delete any') }, { value: 1, label: t('Previous hour') }, { value: 24, label: t('Previous 24 hours') }, { value: 168, label: t('Previous 7 days') }];
+  const go2 = async () => { setBusy(true); const r = await act(api.put(`/servers/${serverId}/bans/${userId}`, { reason: reason.trim(), deleteHours: del }), { success: `${u.displayName} was banned` }); setBusy(false); if (r) closeModal(id); };
+  return html`<${Modal} title=${`${t('Ban')} ${u.displayName}`} subtitle=${t('They are removed from the server and can’t rejoin — with this account or a new one from the same network — until you unban them.')} width=${460} onClose=${() => closeModal(id)}
+    footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="danger" icon="ban" loading=${busy} onClick=${go2}>${t('Ban')}<//>`}>
+    <${Field} label=${t('Reason (only moderators see it)')}><${TextInput} value=${reason} onInput=${setReason} maxlength="200" placeholder=${t('Optional')} autofocus onKeyDown=${(e) => e.key === 'Enter' && go2()} /><//>
+    <${Field} label=${t('Delete their recent messages')}><${Dropdown} value=${del} options=${DEL} onChange=${setDel} /><//>
   <//>`;
 };
 

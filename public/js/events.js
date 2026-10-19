@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, deepMerge, migrateSettings } from '/js/defaults.js';
 import { mapMessage, patchEntry, applyReaction, loadMessages, ackChannel } from '/js/actions.js';
 import { playSound, startRing, stopRing } from '/js/sound.js';
 import { stopMusic } from '/js/music.js';
+import { ensurePost } from '/js/forum.js';
 
 /* ------------------------------------------------------------ session */
 export async function login(loginName, password) {
@@ -35,7 +36,7 @@ function clearSession() {
   gateway.disconnect(); lsRemove('token');
   set({
     token: null, phase: 'auth', gated: false, verifyDismissed: false, me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {}, msgs: {}, reads: {}, lastMsg: {}, typing: {},
-    voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel, musicOk: null,
+    voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel, musicOk: null, postIndex: {}, postLists: {},
   });
 }
 export async function logout({ silent } = {}) {
@@ -116,6 +117,9 @@ function bootstrap(d) {
   ls('settings', null, settings);
   if (!Object.keys(remote).length) updateSettings({}, { sync: true });
   rebuildIndex();
+  // a link to a forum post: it isn't in the channel list, so fetch it and go there once we know it
+  const deep = parseRoute(location.pathname);
+  if (deep.view === 'channel' && deep.channelId && servers[deep.serverId] && !servers[deep.serverId].channels.some((c) => c.id === deep.channelId)) ensurePost(deep.channelId).then((p) => { if (p && p.serverId === deep.serverId) go({ view: 'channel', serverId: p.serverId, channelId: p.id }); });
   const r = resolveRoute(state.route.view === 'login' || state.route.view === 'register' || state.route.view === 'boot' ? parseRoute(location.pathname) : state.route);
   if (r.view !== 'verify' && (!reconnect || !getChannel(state.route.channelId))) go(r.view === 'login' || r.view === 'register' ? { view: 'friends', serverId: '@me', channelId: null } : r, { replace: true });
   if (reconnect) { // re-sync whatever is on screen after a dropped connection
@@ -134,7 +138,7 @@ function isMentioned(m, ch) {
 }
 function previewText(m) {
   if (m.content) return m.content.replace(/<@!?(\d+)>/g, (_, id) => '@' + (state.users[id]?.displayName || 'user')).replace(/<#(\d+)>/g, (_, id) => '#' + (getChannel(id)?.name || 'channel')).replace(/[*_~`|>]/g, '').slice(0, 140);
-  if (m.gif) return 'sent a GIF'; if (m.sticker) return 'sent a sticker'; if (m.attachments?.length) return m.attachments.length > 1 ? `sent ${m.attachments.length} attachments` : 'sent an attachment';
+  if (m.poll) return 'started a poll: ' + m.poll.question; if (m.theme) return 'shared a theme'; if (m.gif) return 'sent a GIF'; if (m.sticker) return 'sent a sticker'; if (m.attachments?.length) return m.attachments.length > 1 ? `sent ${m.attachments.length} attachments` : 'sent an attachment';
   return '';
 }
 function notifyMessage(m, ch, mentioned) {

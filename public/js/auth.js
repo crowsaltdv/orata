@@ -38,7 +38,6 @@ function LoginForm({ go }) {
     <${Field} label=${t('Email or username')}><${TextInput} value=${id} onInput=${setId} placeholder="you@example.com" autocomplete="username" autofocus icon="user" onKeyDown=${(e) => e.key === 'Enter' && document.getElementById('login-pw')?.focus()} /><//>
     <${Field} label=${t('Password')}><${PasswordInput} id="login-pw" value=${pw} onInput=${setPw} autocomplete="current-password" placeholder="••••••••" onEnter=${submit} /><//>
     ${err ? html`<div class="auth-error slide-down"><${Icon} name="alert-circle" size=${16} />${err}</div>` : null}
-    <button type="button" class="link-btn" onClick=${() => toast('Self-hosted Orate has no email service yet. Ask the server admin to run: npm run reset-password <username>', 'info', 7000)}>${t('Forgot your password?')}</button>
     <${Btn} variant="primary" size="lg" class="btn-block" loading=${busy} onClick=${submit}>${t('Log In')}<//>
     <div class="auth-switch">${t('Need an account?')} <button type="button" class="link-btn" onClick=${() => go('register')}>${t('Register')}</button></div>
   </div>`;
@@ -93,14 +92,14 @@ function RegisterForm({ go, onPending }) {
   const score = strength(f.password);
   const submit = async () => {
     const e = {};
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email)) e.email = 'Enter a valid email';
+    if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) e.email = 'Enter a valid email, or leave it empty';
     if (!f.username) e.username = 'Choose a username'; else if (!/^[a-z0-9_.]{2,32}$/.test(f.username)) e.username = '2–32 letters, numbers, _ or .'; else if (avail === false) e.username = 'Already taken';
     if (f.password.length < 8) e.password = 'At least 8 characters';
     if (!f.month || !f.day || !f.year) e.dob = 'Enter your birthday';
     if (Object.keys(e).length) { setErrs(e); return; }
     setBusy(true);
     try {
-      const r = await register({ email: f.email, username: f.username, displayName: f.displayName.trim() || f.username, password: f.password, dob: { year: +f.year, month: +f.month, day: +f.day } });
+      const r = await register({ email: f.email.trim() || undefined, username: f.username, displayName: f.displayName.trim() || f.username, password: f.password, dob: { year: +f.year, month: +f.month, day: +f.day } });
       if (r?.verify) { setBusy(false); onPending(r); }   // the server emailed a code: ask for it
     } catch (er) {
       setBusy(false);
@@ -108,14 +107,14 @@ function RegisterForm({ go, onPending }) {
     }
   };
   return html`<div class="auth-form">
-    <${Field} label=${t('Email')} error=${errs.email}><${TextInput} type="email" value=${f.email} onInput=${up('email')} autocomplete="email" icon="at" autofocus placeholder="you@example.com" /><//>
     <div class="two-col">
-      <${Field} label=${t('Display name')}><${TextInput} value=${f.displayName} onInput=${up('displayName')} maxlength="32" placeholder="How friends see you" icon="user" /><//>
+      <${Field} label=${t('Display name')}><${TextInput} value=${f.displayName} onInput=${up('displayName')} maxlength="32" placeholder="How friends see you" icon="user" autofocus /><//>
       <${Field} label=${t('Username')} error=${errs.username}>
         <${TextInput} value=${f.username} onInput=${onUsername} maxlength="32" autocomplete="username" placeholder="unique_name" icon="hash"
           right=${f.username ? html`<span class=${cx('avail', avail === true && 'ok', avail === false && 'no')}>${avail === null ? html`<${Spinner} size=${14} />` : html`<${Icon} name=${avail ? 'check' : 'x'} size=${16} sw=${3} />`}</span>` : null} />
       <//>
     </div>
+    <${Field} label=${t('Email (optional)')} error=${errs.email} hint=${t('Not needed — you can sign in with just your username.')}><${TextInput} type="email" value=${f.email} onInput=${up('email')} autocomplete="email" icon="at" placeholder="you@example.com" /><//>
     <${Field} label=${t('Password')} error=${errs.password}>
       <${PasswordInput} value=${f.password} onInput=${up('password')} autocomplete="new-password" placeholder="At least 8 characters" />
       ${f.password ? html`<div class="strength s${score}"><div class="bars"><i></i><i></i><i></i><i></i></div><span>${SCORE[score]}</span></div>` : null}

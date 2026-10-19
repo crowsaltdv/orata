@@ -22,6 +22,10 @@ services:
         value: "8"
       - key: KLIPY_API_KEY
         sync: false
+      # Optional: make server bans match the visitor's real network even if someone fakes X-Forwarded-For.
+      # Only set it after checking that your host really sends this header (README → "Moderation").
+      # - key: CLIENT_IP_HEADER
+      #   value: CF-Connecting-IP
       # Optional: sign-up codes by email (see README → "Email verification")
       # - key: SMTP_HOST
       #   value: smtp.gmail.com

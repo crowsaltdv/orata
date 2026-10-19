@@ -28,6 +28,7 @@ function ChannelIntro({ ch }) {
   const other = ch.type === 'dm' ? state.users[dmUserId(ch)] : null;
   if (ch.type === 'dm') return html`<div class="intro"><${Avatar} user=${other} size=${88} /><h2>${other?.displayName}</h2><div class="intro-sub">@${other?.username}</div><p>This is the beginning of your direct message history with <b>${other?.displayName}</b>.</p></div>`;
   if (ch.type === 'group') return html`<div class="intro"><span class="group-av big"><${Icon} name="users" size=${42} /></span><h2>${dmName(ch)}</h2><p>Welcome to the beginning of the <b>${dmName(ch)}</b> group.</p></div>`;
+  if (ch.type === 'post') return html`<div class="intro"><span class="intro-hash"><${Icon} name="forum" size=${38} sw=${2} /></span><h2>${ch.name}</h2></div>`;
   return html`<div class="intro"><span class="intro-hash"><${Icon} name="hash" size=${40} sw=${2.2} /></span><h2>${t('Welcome to #{name}!', { name: ch.name })}</h2><p>${t("This is the start of the #{name} channel.", { name: ch.name })}${ch.topic ? ' ' + ch.topic : ''}</p>${server ? '' : ''}</div>`;
 }
 
