@@ -22,11 +22,6 @@ services:
         value: "8"
       - key: KLIPY_API_KEY
         sync: false
-      # Optional: the Music player (see README → "Music (SoundCloud)")
-      # - key: SOUNDCLOUD_CLIENT_ID
-      #   sync: false
-      # - key: SOUNDCLOUD_CLIENT_SECRET
-      #   sync: false
       # Optional: sign-up codes by email (see README → "Email verification")
       # - key: SMTP_HOST
       #   value: smtp.gmail.com

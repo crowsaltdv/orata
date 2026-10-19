@@ -1,8 +1,9 @@
 // Orate feature self-test (runs after the main self-test):  npm test
 // Channel & category permission overwrites (allow / deny / inherit, sync with the category), sessions that never expire, invite cards,
-// the SoundCloud proxy (against a fake SoundCloud) and the "listening to" status.
+// the keyless Apple Music preview player (against a fake iTunes Search server) and the "listening to" status.
 import { spawn } from 'node:child_process';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,37 +13,36 @@ import WebSocket from 'ws';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-feat-test-'));
 const PORT = 3800 + Math.floor(Math.random() * 90);
-const SC_PORT = PORT + 100;
+const AP_PORT = PORT + 100;
 const base = `http://127.0.0.1:${PORT}`;
 let pass = 0; let fail = 0;
 const ok = (c, name, extra = '') => { if (c) { pass++; console.log('  ✓', name); } else { fail++; console.log('  ✗', name, extra); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/* ---------------------------------------------------------------- a fake SoundCloud (token endpoint, search, track, stream) */
-const sc = { tokens: 0, searches: [], badAuth: 0 };
-const fakeSoundCloud = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://127.0.0.1:${SC_PORT}`);
-  const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
-  if (url.pathname === '/oauth/token') {
-    let body = ''; req.on('data', (c) => { body += c; });
-    req.on('end', () => {
-      const p = new URLSearchParams(body);
-      const basic = Buffer.from(`test-id:test-secret`).toString('base64');
-      if (req.headers.authorization !== 'Basic ' + basic || p.get('grant_type') !== 'client_credentials' || p.get('client_secret')) return json({ error: 'invalid_client' }, 401);   // only HTTP Basic is accepted
-      sc.tokens++; json({ access_token: 'tok-' + sc.tokens, expires_in: 3600, token_type: 'bearer' });
-    });
-    return;
+/* ---------------------------------------------------------------- a fake iTunes Search API (/search, /lookup) + preview host */
+const ap = { requests: [], mediaFetches: {} };
+const itunesSong = (id, name, extra = {}) => ({ wrapperType: 'track', kind: 'song', trackId: id, artistName: 'Test Artist', collectionName: 'Test Album', trackName: name, trackViewUrl: `https://music.apple.com/us/album/${name.toLowerCase().replace(/\W+/g, '-')}/55?i=${id}&uo=4`, previewUrl: `http://127.0.0.1:${AP_PORT}/media/${id}.m4a`, artworkUrl100: `https://is1-ssl.mzstatic.com/image/thumb/Music/test/${id}/100x100bb.jpg`, trackTimeMillis: 215000, trackExplicitness: 'notExplicit', ...extra });
+const fakeItunes = http.createServer((req, res) => {
+  const url = new URL(req.url, `http://127.0.0.1:${AP_PORT}`);
+  const js = (o, code = 200) => { res.writeHead(code, { 'content-type': 'text/javascript; charset=utf-8' }); res.end(JSON.stringify(o)); };   // the real one is served as text/javascript too
+  if (url.pathname.startsWith('/media/')) {
+    const id = url.pathname.split('/').pop().replace('.m4a', ''); ap.mediaFetches[id] = (ap.mediaFetches[id] || 0) + 1;
+    res.writeHead(200, { 'content-type': 'audio/x-m4p', 'content-length': 20000 }); return res.end(Buffer.alloc(20000, 7));   // Apple labels previews audio/x-m4p
   }
-  if (!/^OAuth tok-\d+$/.test(req.headers.authorization || '')) { sc.badAuth++; return json({ error: 'unauthorized' }, 401); }
-  const track = (id, title) => ({ id, title, duration: 215000, permalink_url: `https://soundcloud.com/artist/${id}`, artwork_url: `https://i1.sndcdn.com/artworks-${id}-large.jpg`, user: { username: 'Test Artist', permalink_url: 'https://soundcloud.com/artist' }, access: 'playable', streamable: true });
-  if (url.pathname === '/tracks') { sc.searches.push(url.searchParams.get('q')); return json([track(101, 'Night Drive'), track(102, 'Rain Sounds'), { ...track(103, 'Blocked'), access: 'blocked', streamable: false }]); }
-  if (url.pathname === '/tracks/101/streams') return json({ http_mp3_128_url: `http://127.0.0.1:${SC_PORT}/media/101.mp3`, hls_mp3_128_url: `http://127.0.0.1:${SC_PORT}/media/101.m3u8` });
-  if (url.pathname === '/tracks/102/streams') return json({ hls_mp3_128_url: `http://127.0.0.1:${SC_PORT}/media/102.m3u8` });
-  if (url.pathname === '/tracks/103/streams') return json({});
-  if (url.pathname === '/media/102.m3u8') { res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl' }); return res.end('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:10\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:10.0,\nseg1.mp3\n#EXTINF:10.0,\nseg2.mp3\n#EXT-X-ENDLIST\n'); }
-  if (url.pathname === '/media/seg1.mp3' || url.pathname === '/media/key.bin') { res.writeHead(200, { 'content-type': 'audio/mpeg' }); return res.end(Buffer.alloc(300, 9)); }
-  if (url.pathname === '/media/101.mp3') { const buf = Buffer.alloc(2000, 7); if (req.headers.range) { res.writeHead(206, { 'content-type': 'audio/mpeg', 'content-range': 'bytes 0-99/2000', 'content-length': 100, 'accept-ranges': 'bytes' }); return res.end(buf.subarray(0, 100)); } res.writeHead(200, { 'content-type': 'audio/mpeg', 'content-length': 2000, 'accept-ranges': 'bytes' }); return res.end(buf); }
-  json({ error: 'not found' }, 404);
+  ap.requests.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), hasAuth: !!req.headers.authorization });
+  if (url.pathname === '/search') {
+    const term = url.searchParams.get('term');
+    if (term === 'ratelimit') { res.writeHead(403); return res.end('Forbidden'); }
+    if (term === 'empty') return js({ resultCount: 0, results: [] });
+    return js({ resultCount: 6, results: [itunesSong(101, 'Night Drive'), itunesSong(102, 'Rain Sounds', { trackTimeMillis: 187000, trackExplicitness: 'explicit' }), itunesSong(103, 'No Preview Here', { previewUrl: undefined }), { ...itunesSong(201, 'An Album'), wrapperType: 'collection', kind: undefined }, { ...itunesSong(202, 'A Video'), kind: 'music-video' }, itunesSong(203, 'Bad Host', { previewUrl: 'https://evil.example/x.m4a' })] });
+  }
+  if (url.pathname === '/lookup') {
+    const id = Number(url.searchParams.get('id'));
+    if (id === 104) return js({ resultCount: 1, results: [itunesSong(104, 'Deep Cut', { trackTimeMillis: 187000 })] });
+    if (id === 103) return js({ resultCount: 1, results: [itunesSong(103, 'No Preview Here', { previewUrl: undefined })] });
+    return js({ resultCount: 0, results: [] });
+  }
+  res.writeHead(404); res.end();
 });
 
 /* ---------------------------------------------------------------- scratch server */
@@ -50,7 +50,7 @@ let child = null;
 function startServer(extra = {}) {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '',
-      SOUNDCLOUD_CLIENT_ID: 'test-id', SOUNDCLOUD_CLIENT_SECRET: 'test-secret', SOUNDCLOUD_API_BASE: `http://127.0.0.1:${SC_PORT}`, SOUNDCLOUD_AUTH_URL: `http://127.0.0.1:${SC_PORT}/oauth/token`, SOUNDCLOUD_MEDIA_HOSTS: '127.0.0.1', ...extra },
+      MUSIC: '', MUSIC_API_BASE: `http://127.0.0.1:${AP_PORT}`, MUSIC_MEDIA_HOSTS: '127.0.0.1', ...extra },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
 }
@@ -79,7 +79,7 @@ const register = async (username, email) => {
 };
 
 async function main() {
-  await new Promise((r) => fakeSoundCloud.listen(SC_PORT, '127.0.0.1', r));
+  await new Promise((r) => fakeItunes.listen(AP_PORT, '127.0.0.1', r));
   startServer(); await ready();
   console.log('Orate feature test on port', PORT);
 
@@ -198,60 +198,79 @@ async function main() {
   r = await api('GET', '/invites/nonsense', E.token); ok(r.status === 404, 'unknown invite codes are invalid');
 
   /* ---------------------------------------------------------------- music + listening status */
-  console.log('\nMusic (SoundCloud)');
-  r = await api('GET', '/config'); ok(r.body.music === true, '/api/config says music is available');
+  console.log('\nMusic (Apple Music previews, no key)');
+  r = await api('GET', '/config'); ok(r.body.music === true, '/api/config says music is available — without any key being set');
   r = await api('GET', '/music/search?q=night', null); ok(r.status === 401, 'search needs a login');
   r = await api('GET', '/music/search?q=night', A3);
-  ok(r.status === 200 && r.body.tracks.length === 2 && r.body.tracks[0].title === 'Night Drive' && r.body.tracks[0].artist === 'Test Artist', 'search returns playable tracks (blocked ones are dropped)', JSON.stringify(r.body).slice(0, 160));
-  ok(r.body.tracks[0].artwork.includes('t300x300') && sc.tokens === 1 && sc.badAuth === 0, 'artwork is upsized and the client-credentials token was fetched once');
-  await api('GET', '/music/search?q=again', A3); ok(sc.tokens === 1, 'the access token is cached between searches');
-  r = await api('GET', '/music/search?q=', A3); ok(r.status === 400, 'empty searches are rejected');
-  r = await api('GET', '/music/tracks/101/source', null); ok(r.status === 401, 'asking for a stream link needs a login');
+  ok(r.status === 200 && r.body.tracks.map((x) => x.id).join() === '101,102', 'search returns the songs that have a preview (albums, videos, other hosts and previewless songs are left out)', JSON.stringify(r.body).slice(0, 200));
+  const t0 = r.body.tracks[0];
+  ok(t0.title === 'Night Drive' && t0.artist === 'Test Artist' && t0.album === 'Test Album' && t0.artwork === 'https://is1-ssl.mzstatic.com/image/thumb/Music/test/101/300x300bb.jpg' && t0.url.startsWith('https://music.apple.com/') && t0.duration === 215000 && t0.explicit === false && r.body.tracks[1].explicit === true, 'titles, artwork (upsized), the Apple Music link and the song length come through');
+  ok(!JSON.stringify(r.body).includes('127.0.0.1') && !('_preview' in t0), 'the preview address stays on the server');
+  const q1 = ap.requests.find((x) => x.path === '/search');
+  ok(q1.query.term === 'night' && q1.query.media === 'music' && q1.query.entity === 'song' && q1.query.country === 'US' && !q1.hasAuth, 'it asked Apple\'s keyless search for songs in the US storefront, with no credentials');
+  await api('GET', '/music/search?q=night', A3); ok(ap.requests.filter((x) => x.path === '/search').length === 1, 'repeat searches are served from a cache');
+  r = await api('GET', '/music/search?q=empty', A3); ok(r.status === 200 && r.body.tracks.length === 0, 'an empty result is an empty list');
+  r = await api('GET', '/music/search?q=', A3); ok(r.status === 400, 'blank searches are rejected');
+  r = await api('GET', '/music/search?q=ratelimit', A3); ok(r.status === 429 && r.body.code === 'rate_limited', 'when Apple says "too many requests" (403) people are told to wait');
+  r = await api('GET', '/music/tracks/101/source', null); ok(r.status === 401, 'asking for a play link needs a login');
   r = await api('GET', '/music/tracks/bad!id/source', A3); ok(r.status === 400, 'track ids are validated');
   r = await api('GET', '/music/tracks/101/source', A3);
-  ok(r.status === 200 && r.body.type === 'mp3' && r.body.url.startsWith('/api/music/proxy?u=') && !r.body.preview, 'a progressive MP3 is preferred when SoundCloud offers one', JSON.stringify(r.body).slice(0, 120));
-  const mp3Url = r.body.url;
-  let st = await fetch(base + mp3Url);
-  ok(st.status === 200 && st.headers.get('content-type') === 'audio/mpeg' && (await st.arrayBuffer()).byteLength === 2000, 'the audio plays through the relay without a bearer token (an <audio> tag cannot send one)');
-  st = await fetch(base + mp3Url, { headers: { range: 'bytes=0-99' } });
-  ok(st.status === 206 && st.headers.get('content-range') === 'bytes 0-99/2000', 'range requests (seeking) are passed through');
-  st = await fetch(base + mp3Url.replace(/sig=[^&]+/, 'sig=forged')); ok(st.status === 403, 'a forged link is refused');
-  st = await fetch(base + mp3Url.replace(/exp=\d+/, 'exp=1')); ok(st.status === 403, 'so is a link whose time ran out or that was edited');
-  st = await fetch(`${base}/api/music/proxy?u=${encodeURIComponent('https://evil.example/x.mp3')}&exp=${Date.now() + 1e6}&sig=abc`); ok(st.status === 403, 'the relay never fetches arbitrary addresses');
-  r = await api('GET', '/music/tracks/102/source', A3); ok(r.body.type === 'hls', 'HLS is used when it is all SoundCloud has');
-  st = await fetch(base + r.body.url); const pl = await st.text();
-  ok(st.status === 200 && pl.startsWith('#EXTM3U') && (pl.match(/\/api\/music\/proxy\?u=/g) || []).length === 3 && !pl.includes('seg1.mp3\n') && pl.includes('URI="/api/music/proxy'), 'playlists are rewritten so segments and keys go through the relay too', pl.slice(0, 200));
-  const seg = pl.split('\n').find((l) => l.startsWith('/api/music/proxy')); st = await fetch(base + seg);
-  ok(st.status === 200 && (await st.arrayBuffer()).byteLength === 300, 'segments are relayed');
-  r = await api('GET', '/music/tracks/103/source', A3); ok(r.status === 404 && r.body.code === 'music_unavailable', 'a track without streams explains that it can’t be played');
+  ok(r.status === 200 && r.body.type === 'audio/mp4' && r.body.preview === true && r.body.bytes === 20000 && r.body.url.startsWith('/api/music/play/101?exp='), 'the player gets a signed link; the preview was downloaded first (and labelled audio/mp4, not Apple\'s audio/x-m4p)', JSON.stringify(r.body).slice(0, 140));
+  const playUrl = r.body.url;
+  let st = await fetch(base + playUrl);
+  ok(st.status === 200 && st.headers.get('content-type') === 'audio/mp4' && (await st.arrayBuffer()).byteLength === 20000, 'the audio plays without a bearer token (an <audio> tag cannot send one)');
+  st = await fetch(base + playUrl); ok(st.status === 200 && ap.mediaFetches['101'] === 1, '… as often as needed from memory — Apple was asked once');
+  st = await fetch(base + playUrl, { headers: { range: 'bytes=0-99' } });
+  ok(st.status === 206 && st.headers.get('content-range') === 'bytes 0-99/20000' && (await st.arrayBuffer()).byteLength === 100, 'range requests (seeking) are answered');
+  st = await fetch(base + playUrl, { headers: { range: 'bytes=15000-' } }); ok(st.status === 206 && st.headers.get('content-range') === 'bytes 15000-19999/20000', 'so are open-ended ranges');
+  st = await fetch(base + playUrl, { headers: { range: 'bytes=-500' } }); ok(st.status === 206 && st.headers.get('content-range') === 'bytes 19500-19999/20000', 'and suffix ranges');
+  st = await fetch(base + playUrl, { headers: { range: 'bytes=50000-60000' } }); ok(st.status === 416, 'a range past the end is refused');
+  st = await fetch(base + playUrl.replace(/sig=[^&]+/, 'sig=forged')); ok(st.status === 403, 'a forged link is refused');
+  st = await fetch(base + playUrl.replace(/exp=\d+/, 'exp=1')); ok(st.status === 403, 'so is a link whose time ran out or that was edited');
+  st = await fetch(base + playUrl.replace('/play/101', '/play/102')); ok(st.status === 403, 'and a link cannot be reused for another track');
+  r = await api('GET', '/music/tracks/103/source', A3); ok(r.status === 404 && r.body.code === 'music_unavailable', 'a song without a preview says so (the player skips it)');
+  r = await api('GET', '/music/tracks/999/source', A3); ok(r.status === 404 && r.body.code === 'music_unavailable', 'so does an unknown one');
+  r = await api('GET', '/music/tracks/203/source', A3); ok(r.status === 404, 'a preview on a non-Apple host is never fetched');
+  ok(ap.mediaFetches['203'] === undefined, '… (the fake never saw a request for it)');
 
   console.log('\nListening status');
   const w1 = await connect(A3); const w2 = await connect(D.token);
-  r = await api('PUT', '/me/listening', A3, { track: { id: 101, title: 'Night Drive', artist: 'Test Artist', artwork: 'https://i1.sndcdn.com/artworks-101-t300x300.jpg', url: 'https://soundcloud.com/artist/101', duration: 215000 }, position: 5000 });
-  ok(r.status === 200 && r.body.listening?.title === 'Night Drive', 'set what you are listening to');
+  r = await api('PUT', '/me/listening', A3, { track: { id: '101', title: 'Night Drive' }, duration: 30000, position: 5000 });
+  ok(r.status === 200 && r.body.listening?.title === 'Night Drive' && r.body.listening.artist === 'Test Artist' && r.body.listening.artwork.endsWith('/300x300bb.jpg') && r.body.listening.url.startsWith('https://music.apple.com/') && r.body.listening.duration === 30000, 'set what you are listening to');
   const upd = await w2.wait('user_update', (d) => d.user.listening?.title === 'Night Drive', 2000).catch(() => null);
   ok(!!upd && upd.user.listening.artist === 'Test Artist' && upd.user.listening.endsAt > Date.now(), 'people who share a server see it live, with an end time');
   r = await api('GET', `/users/${(await api('GET', '/me', A3)).body.id}`, D.token); ok(r.body.user.listening?.title === 'Night Drive', 'it is on the profile too');
-  r = await api('PUT', '/me/listening', A3, { track: { id: 'x', title: '<b>bad</b>', artist: 'a', artwork: 'javascript:alert(1)', url: 'javascript:alert(1)', duration: 1000 } });
-  ok(r.status === 400 || (r.body.listening && !String(r.body.listening.url || '').startsWith('javascript:') && !String(r.body.listening.artwork || '').startsWith('javascript:')), 'links must be https');
+  r = await api('PUT', '/me/listening', A3, { track: { id: '101', title: '<img src=x onerror=alert(1)>', artist: 'Somebody Else', artwork: 'https://evil.example/pixel.gif', url: 'https://evil.example/' }, duration: 30000 });
+  ok(r.status === 200 && r.body.listening.title === 'Night Drive' && r.body.listening.artwork.startsWith('https://is1-ssl.mzstatic.com/') && r.body.listening.url.startsWith('https://music.apple.com/'), 'titles, artwork and links come from Apple via the server — whatever a client sends is ignored');
+  r = await api('PUT', '/me/listening', A3, { track: { id: '104' }, position: 1000 });
+  ok(r.status === 200 && r.body.listening.title === 'Deep Cut' && r.body.listening.duration === 30000, 'a song the server hasn’t listed yet is looked up on Apple (and a preview lasts 30 s unless the player says otherwise)');
+  r = await api('PUT', '/me/listening', A3, { track: { id: '999' }, duration: 30000 }); ok(r.status === 404, 'an unknown song is refused');
+  r = await api('PUT', '/me/listening', A3, { track: { id: 'x1' }, duration: 30000 }); ok(r.status === 400, 'so is a malformed id');
   await api('PATCH', '/me/settings', A3, { privacy: { showActivity: false } });
-  r = await api('PUT', '/me/listening', A3, { track: { id: 102, title: 'Rain Sounds', artist: 'Test Artist', artwork: null, url: 'https://soundcloud.com/artist/102', duration: 100000 } });
+  r = await api('PUT', '/me/listening', A3, { track: { id: '102' }, duration: 30000 });
   r = await api('GET', `/users/${(await api('GET', '/me', A3)).body.id}`, D.token); ok(!r.body.user.listening, 'Activity Status off hides it from everybody else');
   await api('PATCH', '/me/settings', A3, { privacy: { showActivity: true } });
-  await api('PUT', '/me/listening', A3, { track: { id: 102, title: 'Rain Sounds', artist: 'Test Artist', artwork: null, url: 'https://soundcloud.com/artist/102', duration: 100000 } });
+  await api('PUT', '/me/listening', A3, { track: { id: '102' }, duration: 30000 });
   r = await api('DELETE', '/me/listening', A3); ok(r.status === 200, 'stop listening');
   ok(!!(await w2.wait('user_update', (d) => d.user.listening === null, 2000).catch(() => null)), 'everyone sees it clear');
-  await api('PUT', '/me/listening', A3, { track: { id: 102, title: 'Rain Sounds', artist: 'Test Artist', artwork: null, url: 'https://soundcloud.com/artist/102', duration: 60000 } });
+  await api('PUT', '/me/listening', A3, { track: { id: '102' }, duration: 60000 });
   w1.ws.close();
   const gone = await w2.wait('presence_update', (d) => d.userId === (A.user.id) && d.listening === null, 5000).catch(() => null);
   ok(!!gone, 'closing the last tab clears the status (the music stopped with it)');
   w2.ws.close();
 
-  console.log('\nMusic without credentials');
-  await stopServer(); startServer({ SOUNDCLOUD_CLIENT_ID: '', SOUNDCLOUD_CLIENT_SECRET: '' }); await ready();
-  r = await api('GET', '/config'); ok(r.body.music === false, 'music reports itself as not configured');
-  r = await api('GET', '/music/search?q=night', A3); ok(r.status === 503 && r.body.code === 'music_not_configured', 'searching explains that SoundCloud is not set up');
+  console.log('\nRequest budget');
+  await stopServer(); startServer({ MUSIC_API_PER_MIN: '2' }); await ready();
+  const before = ap.requests.length;
+  r = await api('GET', '/music/search?q=one', A3); const r2 = await api('GET', '/music/search?q=two', A3); r = await api('GET', '/music/search?q=three', A3);
+  ok(r2.status === 200 && r.status === 429 && r.body.code === 'rate_limited' && ap.requests.length === before + 2, 'Orate never sends Apple more than MUSIC_API_PER_MIN requests a minute, however many people search');
+  r = await api('GET', '/music/search?q=one', A3); ok(r.status === 200, '… and cached searches still work when the budget is used up');
+
+  console.log('\nMusic switched off');
+  await stopServer(); startServer({ MUSIC: 'off' }); await ready();
+  r = await api('GET', '/config'); ok(r.body.music === false, 'MUSIC=off turns the player off');
+  r = await api('GET', '/music/search?q=night', A3); ok(r.status === 503 && r.body.code === 'music_not_configured', 'and searching explains it');
 
   console.log(`\n${pass} passed, ${fail} failed`);
 }
-main().catch((e) => { console.error(e); fail++; }).finally(async () => { await stopServer(); fakeSoundCloud.close(); setTimeout(() => { fs.rmSync(data, { recursive: true, force: true }); process.exit(fail ? 1 : 0); }, 300); });
+main().catch((e) => { console.error(e); fail++; }).finally(async () => { await stopServer(); fakeItunes.close(); setTimeout(() => { fs.rmSync(data, { recursive: true, force: true }); process.exit(fail ? 1 : 0); }, 300); });

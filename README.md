@@ -41,7 +41,7 @@ npm run reset-password <user>    # forgot a password? prints a new one
 | `TURN_USERNAME` / `TURN_CREDENTIAL` | – | Fixed TURN credentials (use instead of `TURN_SECRET`) |
 | `TURN_TTL` | `86400` | Lifetime of generated TURN credentials, in seconds |
 | `ICE_TRANSPORT_POLICY` | `all` | Set to `relay` to force every call through TURN (testing / hiding IP addresses) |
-| `SOUNDCLOUD_CLIENT_ID` / `SOUNDCLOUD_CLIENT_SECRET` | – | Turns on the Music player — see [Music](#music-soundcloud) |
+| `MUSIC` | on | `MUSIC=off` turns the Music player off — see [Music](#music-apple-music-previews--no-key-needed) |
 
 > **Microphone, camera, screen sharing and desktop notifications only work on `localhost` or over HTTPS.** To use voice with other devices on your network, set `HTTPS_KEY`/`HTTPS_CERT`, or put Orate behind a TLS reverse proxy (Caddy, nginx, Cloudflare Tunnel …). Make sure it forwards WebSocket upgrades on `/gateway`.
 
@@ -125,23 +125,22 @@ Orate asks its own server for the ICE configuration every time you join a call (
 
 Hosted TURN services (Cloudflare, Twilio, Metered …) work too: use the URLs and static username/credential they give you.
 
-## Music (SoundCloud)
+## Music (Apple Music previews — no key needed)
 
-The note icon above Home opens a music panel: search SoundCloud, press play, and what you're listening to shows on your profile (and in friends' *Active Now*) for as long as the song lasts. It needs SoundCloud API keys, because SoundCloud only lets registered apps search and stream:
+The note icon above Home opens a music panel: search the Apple Music catalogue, press play, and what you're listening to shows on your profile (and in friends' *Active Now*) while it plays. It works out of the box — **no account, no API key**.
 
-1. Get a **Client ID** and **Client Secret** — create an app in SoundCloud's *Your apps* page, or run the CLI from [SoundCloud's "Building with AI" page](https://developers.soundcloud.com/docs/building-with-ai#get-api-credentials) (it prints both after you approve it in the browser).
-2. Put them in `.env` (on Render: *Environment*), then restart:
+Orate uses Apple's public, keyless [iTunes Search API](https://performance-partners.apple.com/search-api) (`itunes.apple.com/search` and `/lookup`): the same catalogue as Apple Music, with cover art, a link to every song on Apple Music and a **30-second preview** of each one. (The Apple Music API proper needs a developer token signed with a key from a paid Apple Developer account — that's the part this avoids. Full-length playback needs MusicKit and each listener's own Apple Music subscription, so previews it is. When a preview ends the next result starts.)
 
-   ```
-   SOUNDCLOUD_CLIENT_ID=your-client-id
-   SOUNDCLOUD_CLIENT_SECRET=your-client-secret
-   ```
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `MUSIC` | on | `MUSIC=off` turns the music player off for everybody |
+| `MUSIC_COUNTRY` | `US` | Which Apple Music storefront the search uses (two letters, e.g. `GB`) |
+| `MUSIC_API_PER_MIN` | `18` | The most requests Orate sends to Apple per minute (Apple allows about 20 per IP address) |
+| `MUSIC_CACHE_MB` | `48` | Memory used to keep recently played previews |
 
-Until both are set the music panel just explains that music isn't set up (everything else works as before).
+**How it works:** the server does all the talking to Apple. A preview (about 1 MB) is downloaded when it's asked for, kept in memory for a while and served to the `<audio>` tag from `/api/music/play/<track>` with Range support, so the seek bar works. An `<audio>` tag can't send a login, so that link is signed by the server and short-lived. Searches are cached (10 minutes), and because Apple limits searches per IP address, Orate never sends more than `MUSIC_API_PER_MIN` a minute however many people search — beyond that people see "search is busy" for a moment.
 
-How it works: Orate signs in to SoundCloud itself with the *client credentials* flow (HTTP Basic auth, the token is cached until shortly before it expires), so listeners don't need a SoundCloud account and the secret never reaches a browser. Audio goes through a small relay (`/api/music/proxy`) — SoundCloud's stream links only work together with the server's login, which an `<audio>` tag can't send. The relay only fetches SoundCloud hosts and only for links this server signed. Streams that SoundCloud serves as HLS are played with the bundled [hls.js](https://github.com/video-dev/hls.js) (`public/vendor/`). Tracks SoundCloud marks as *preview* play their 30-second preview; blocked tracks are hidden. The player links back to the track on SoundCloud.
-
-**What others see:** the track, artist, artwork and a progress bar, only while it plays. It disappears when you pause, stop, close the last tab or the song ends, and it is never shown when **Settings → Privacy → Show my status to everyone** is off or you are *Invisible* (the switch is also in the music panel). SoundCloud rate-limits sign-ins (50 tokens per 12 hours per app); Orate caches its token, so normal use stays far below that.
+**What others see:** the title, artist, artwork and a progress bar, only while it plays. They always come from Apple via the server — a client can't make up a "listening to" status — and disappear when you pause, stop, close the last tab or the preview ends. Nothing is shown when **Settings → Privacy → Show my status to everyone** is off or you are *Invisible* (the switch is also in the music panel). The player links every track back to Apple Music.
 
 ## Free hosting with a free database
 
@@ -194,6 +193,8 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 
 **Voice & video** — WebRTC mesh calls in voice channels and DMs, speaking indicators, mute / deafen, camera, screen share (with audio), per-user volume, push-to-talk, noise suppression, echo cancellation, device pickers and a mic level test. Incoming-call ring for DMs. Connects peer-to-peer using STUN; add a [TURN relay](#turn-relay-for-voice--video) for people behind strict NATs or firewalls.
 
+**Music** — an Apple Music search and 30-second preview player behind the note icon above Home (no key needed), and a "Listening to" card on your profile (see [Music](#music-apple-music-previews--no-key-needed)).
+
 **Customization** (User Settings → Appearance) — new accounts start with a slate-blue dark theme, the Snow Peaks wallpaper, light rain and the Montserrat font; everything below can be changed. The sign-in and sign-up screens always show this default look (a new account starts from it too), and your own look returns when you log in.
 
 * **Theme** — dark / light / midnight / system, solid or gradient accent, solid or gradient panels, panel opacity, panel blur, saturation, corner radius, spacing, custom text color.
@@ -228,7 +229,7 @@ server/
   env.js        .env parsing   db-tool.js  db:import / db:export / db:info
   verify.js     email verification tokens, modes and gating
   sessions.js   sign-in sessions (never expire; in their own Postgres table when DATABASE_URL is set)
-  music.js      SoundCloud search + audio relay + "listening to" status
+  music.js      Apple Music (iTunes Search API) search + preview relay + "listening to" status
 public/
   js/           Preact + htm (vendored, no build step), ES modules (rain.js, glass.js, fx.js: rain, liquid glass, button particles)
   css/          base · layout · chat · ui · features · settings · auth · extras
@@ -248,7 +249,7 @@ Passwords are hashed with scrypt; sessions are random 256-bit tokens (stored has
 ## Credits
 
 * **Rain on glass** is a port of Lucas Bebber's [Rain & Water Effect Experiments](https://tympanus.net/codrops/2015/11/04/rain-water-effect-experiments/) (Codrops, 2015): the drop simulation, the drop textures (`public/img/rain/`) and the water shader come from the [original project](https://github.com/codrops/RainEffect), adapted into a single ES module with Orate's sliders, presets and lightning. Its licence lets you integrate or build upon it in personal or commercial projects, but not republish or redistribute it as-is — so keep it as part of Orate rather than extracting it on its own.
-* **Music playback** in the browser uses [hls.js](https://github.com/video-dev/hls.js) (Apache-2.0, `public/vendor/hls.light.min.js`) for SoundCloud's HLS streams; tracks and artwork belong to their uploaders and SoundCloud.
+* **Music** comes from Apple's public iTunes Search API (the Apple Music catalogue and its 30-second previews); tracks and artwork belong to their artists and Apple.
 * **Liquid glass** uses the signed-distance-field lens, rim-light and dispersion approach from the [Apple-style glass CodePen](https://codepen.io/jhnsnc/pen/ByoEmoq) by jhnsnc, re-implemented as per-button WebGL lenses over your wallpaper.
 
 ## License

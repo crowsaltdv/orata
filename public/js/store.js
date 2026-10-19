@@ -18,7 +18,7 @@ export const state = {
   settings: deepMerge(DEFAULT_SETTINGS, migrateSettings(ls('settings', {}))),
   local: deepMerge(DEFAULT_LOCAL, ls('local', {})),
   focused: document.hasFocus(), idle: false, width: window.innerWidth, mobileNav: false,
-  music: { open: false, query: '', results: null, searching: false, error: null, queue: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7, preview: false }, musicOk: null,
+  music: { open: false, query: '', results: null, searching: false, error: null, queue: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7 }, musicOk: null,
   gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, replyTo: null, editing: null, searchQuery: '', speaking: {},
 };
 state.panel = state.local.panel;
