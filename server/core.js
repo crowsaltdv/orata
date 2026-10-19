@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { ROOT, ENV, loadEnv } from './env.js';
 import { PgStore, ConflictError, isSafeFileName } from './storage.js';
 import net from 'node:net';
+import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 export { ROOT, ENV, loadEnv };
 export const DATA_DIR = process.env.ORATE_DATA || path.join(ROOT, 'data');
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
@@ -40,18 +41,32 @@ export function ipHash(ip) {
   if (!db.ipSecret) { db.ipSecret = crypto.randomBytes(24).toString('hex'); save(); }
   return crypto.createHmac('sha256', db.ipSecret).update(key).digest('hex').slice(0, 24);
 }
-/** Remembers (as hashes) the network this account just used; at most 8, refreshed at most every 6 hours. */
-export function noteIp(user, req) {
-  const h = ipHash(clientIp(req)); if (!h || !user) return;
-  const now = Date.now(); const list = (user.ips ||= []); const hit = list.find((x) => x.h === h);
-  if (hit) { if (now - hit.at > 6 * 3600_000) { hit.at = now; save(); } return; }
-  list.unshift({ h, at: now }); if (list.length > 8) list.length = 8; save();
+/** A keyed hash of the random id each browser sends (x-orate-device): a much stronger sign of "same person" than a shared network. */
+export function deviceHash(id) {
+  const v = String(id || ''); if (!/^[A-Za-z0-9_-]{16,64}$/.test(v)) return null;
+  if (!db.ipSecret) { db.ipSecret = crypto.randomBytes(24).toString('hex'); save(); }
+  return 'dv' + crypto.createHmac('sha256', db.ipSecret).update('dev:' + v).digest('hex').slice(0, 22);
 }
+const remember = (user, field, h, max) => {
+  const now = Date.now(); const list = (user[field] ||= []); const hit = list.find((x) => x.h === h);
+  if (hit) { if (now - hit.at > 6 * 3600_000) { hit.at = now; save(); } return; }
+  list.unshift({ h, at: now }); if (list.length > max) list.length = max; save();
+};
+/** Remembers (as hashes) the network and the browser this account just used; at most 8 + 6, refreshed at most every 6 hours. Used only to find ban evaders and alts. */
+export function noteIp(user, req) {
+  if (!user) return;
+  const h = ipHash(clientIp(req)); if (h) remember(user, 'ips', h, 8);
+  const d = deviceHash(req?.headers?.['x-orate-device']); if (d) remember(user, 'devs', d, 6);
+}
+/** Everything that links an account to others: its recent networks and browsers (plus `extra`, e.g. the one it is using right now). */
 export const userIpHashes = (user, extra = null) => {
-  const now = Date.now(); const out = new Set((user?.ips || []).filter((x) => now - x.at < 180 * 86400_000).map((x) => x.h));
-  if (extra) out.add(extra);
+  const now = Date.now(); const fresh = (x) => now - x.at < 180 * 86400_000;
+  const out = new Set([...(user?.ips || []).filter(fresh), ...(user?.devs || []).filter(fresh)].map((x) => x.h));
+  for (const e of [].concat(extra || [])) if (e) out.add(e);
   return out;
 };
+/** The hashes of the connection this request came on: its network and its browser. */
+export const requestHashes = (req) => [ipHash(clientIp(req)), deviceHash(req?.headers?.['x-orate-device'])].filter(Boolean);
 
 /* ---------------------------------------------------------------- db: files in data/ (default) or PostgreSQL (DATABASE_URL) */
 export const pg = ENV.DATABASE_URL ? new PgStore(ENV.DATABASE_URL, ENV) : null;
@@ -191,8 +206,8 @@ export function emitTo(userIds, op, d, exceptConn) {
 }
 
 /* -------------------------------------------------------- permissions */
-export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES', 'VIEW_CHANNEL', 'MODERATE_MEMBERS', 'MANAGE_EXPRESSIONS'];
-export const DEFAULT_PERMS = ['VIEW_CHANNEL', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
+export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES', 'VIEW_CHANNEL', 'MODERATE_MEMBERS', 'MANAGE_EXPRESSIONS', 'SEND_GIFS'];
+export const DEFAULT_PERMS = ['VIEW_CHANNEL', 'CREATE_INVITE', 'SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
 /** The permissions a channel (or category) can override per role / member — MANAGE_ROLES doubles as "Manage Permissions" there. */
 export const CHANNEL_PERMS = ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK'];
 const CHANNEL_PERM_SET = new Set(CHANNEL_PERMS);
@@ -281,10 +296,15 @@ export function sanitizeOverwrites(server, list) {
 function migrateDb() {
   let changed = false;
   for (const s of Object.values(db.servers)) {
-    if (s.permsV === 2) continue;
-    const ev = s.roles.find((r) => r.id === s.id);
-    if (ev && !ev.permissions.includes('VIEW_CHANNEL')) ev.permissions.push('VIEW_CHANNEL');
-    s.permsV = 2; changed = true;
+    if ((s.permsV || 0) < 2) {
+      const ev = s.roles.find((r) => r.id === s.id);
+      if (ev && !ev.permissions.includes('VIEW_CHANNEL')) ev.permissions.push('VIEW_CHANNEL');
+      s.permsV = 2; changed = true;
+    }
+    if (s.permsV < 3) {   // v3: "Send GIFs & Stickers" is its own permission — everybody who could already send messages keeps being able to
+      for (const role of s.roles) if (role.permissions.includes('SEND_MESSAGES') && !role.permissions.includes('SEND_GIFS')) role.permissions.push('SEND_GIFS');
+      s.permsV = 3; changed = true;
+    }
   }
   for (const c of Object.values(db.channels)) {
     if (!c.serverId || !('private' in c || 'allowedRoles' in c || 'allowedUsers' in c)) continue;
@@ -341,7 +361,7 @@ export function publicUser(u) {
   return {
     id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar || null,
     banner: u.banner || null, bannerColor: u.bannerColor || null, accentColor: u.accentColor || null,
-    bio: u.bio || '', pronouns: u.pronouns || '', createdAt: u.createdAt,
+    bio: u.bio || '', pronouns: u.pronouns || '', profile: u.profile ? sanitizeProfileStyle(u.profile) : null, createdAt: u.createdAt,   // (re-checked on the way out so styles saved by older versions, e.g. frames, simply disappear)
     bot: !!u.bot, status: effectiveStatus(u), customStatus: u.customStatus || null, listening: visibleListening(u),
   };
 }
@@ -358,6 +378,7 @@ export function serverView(server, userId) {
     members: Object.entries(server.members).map(([id, m]) => memberView(id, m)),
     perms: [...permsOf(server, userId)], systemChannelId: server.systemChannelId || null,
     emojis: server.emojis || [], stickers: server.stickers || [],
+    safety: { profanity: server.safety?.profanity || 'off', ...(permsOf(server, userId).has('MANAGE_SERVER') || permsOf(server, userId).has('ADMINISTRATOR') || server.ownerId === userId ? { words: server.safety?.words || [] } : {}) },
   };
 }
 /** `userId` adds what that member may do here (`cperms`, only when overwrites make it differ from their server-wide permissions) and, for people who can manage permissions, the overwrites themselves. */
@@ -478,7 +499,7 @@ export function ensureBot() {
 export function createServer(owner, { name, icon = null, template = 'default' }) {
   const id = newId();
   const everyone = { id, name: '@everyone', color: null, position: 0, permissions: [...DEFAULT_PERMS], hoist: false };
-  const server = { id, name: String(name).slice(0, 100), icon, banner: null, description: '', ownerId: owner.id, createdAt: Date.now(), roles: [everyone], members: { [owner.id]: { roles: [], joinedAt: Date.now() } }, bans: [], accent: null };
+  const server = { id, name: String(name).slice(0, 100), icon, banner: null, description: '', ownerId: owner.id, createdAt: Date.now(), permsV: 3, roles: [everyone], members: { [owner.id]: { roles: [], joinedAt: Date.now() } }, bans: [], accent: null };
   db.servers[id] = server;
   const mk = (type, nm, parentId, position, extra = {}) => {
     const cid = newId();

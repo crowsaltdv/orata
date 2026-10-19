@@ -8,8 +8,9 @@ export const PERM_INFO = {
   VIEW_CHANNEL: ['View Channels', 'See channels and read their messages.'],
   MANAGE_EXPRESSIONS: ['Manage Expressions', 'Add, rename and delete the server’s custom emoji and stickers.'],
   MODERATE_MEMBERS: ['Timeout Members', 'Temporarily stop members from talking, reacting and joining voice.'],
+  SEND_GIFS: ['Send GIFs & Stickers', 'Post GIFs and stickers (the GIF and sticker pickers).'],
 };
-export const PERM_ORDER = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'VIEW_CHANNEL', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'MODERATE_MEMBERS', 'MANAGE_EXPRESSIONS', 'MANAGE_NICKNAMES', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
+export const PERM_ORDER = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'VIEW_CHANNEL', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'MODERATE_MEMBERS', 'MANAGE_EXPRESSIONS', 'MANAGE_NICKNAMES', 'CREATE_INVITE', 'SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
 
 /** Inside a channel the same permissions read a little differently. */
 export const CHANNEL_PERM_INFO = {
@@ -23,8 +24,8 @@ export const CHANNEL_PERM_INFO = {
 };
 /** The sections of the channel permission editor, per kind of channel. */
 export const CHANNEL_PERM_GROUPS = {
-  text: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Text', ['SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES']]],
+  text: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Text', ['SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES']]],
   voice: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Voice', ['CONNECT', 'SPEAK']]],
-  forum: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Posts', ['SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES']]],
-  category: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Text', ['SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES']], ['Voice', ['CONNECT', 'SPEAK']]],
+  forum: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Posts', ['SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES']]],
+  category: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Text', ['SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES']], ['Voice', ['CONNECT', 'SPEAK']]],
 };

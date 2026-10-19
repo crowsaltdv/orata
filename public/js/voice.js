@@ -46,13 +46,25 @@ export const streamStore = { version: 0, byUser: new Map() }; // userId -> { cam
 const bump = () => { streamStore.version++; notify(); set({ voice: { ...state.voice, rev: streamStore.version } }); };
 const patchConn = (p) => set({ voice: { ...state.voice, conn: state.voice.conn ? { ...state.voice.conn, ...p } : null } });
 const me = () => state.me.id;
+/** Browsers only hand out the microphone, camera and screen on https:// pages (or localhost). */
+const needsSecure = () => (!navigator.mediaDevices?.getUserMedia ? 'Microphone, camera and screen sharing only work on https:// (or localhost). Open Orate over HTTPS to use them.' : null);
+/** How the link to each other person is doing: 'connecting' | 'slow' | 'failed' | 'connected' (shown on their tile). */
+const setLink = (uid, st) => { const cur = state.voice.links || {}; if (cur[uid] === st) return; set({ voice: { ...state.voice, links: { ...cur, [uid]: st } } }); };
+const warned = new Set();
+function warnUnreachable(uid) {
+  if (warned.has(uid)) return; warned.add(uid);
+  const name = state.users[uid]?.displayName || 'someone';
+  toast(state.turn ? `Couldn’t connect to ${name}, even through the relay. Try leaving and rejoining.` : `Couldn’t connect to ${name}: your two networks can’t link directly. The server needs a TURN relay for calls like this (see the README).`, 'error', 9000);
+}
 
 /* ------------------------------------------------------------------ local audio graph */
 async function startMic() {
+  const insecure = needsSecure();
   try {
+    if (insecure) throw Object.assign(new Error(insecure), { name: 'InsecureContext' });
     S.mic = await navigator.mediaDevices.getUserMedia(micConstraints());
   } catch (e) {
-    toast(e.name === 'NotAllowedError' ? 'Microphone permission was denied — you can listen but not speak.' : 'No microphone found — you can listen but not speak.', 'error', 5000);
+    toast(e.name === 'InsecureContext' ? e.message : e.name === 'NotAllowedError' ? 'Microphone permission was denied — you can listen but not speak.' : 'No microphone found — you can listen but not speak.', 'error', 6000);
     S.mic = null; patchConn({ muted: true, noMic: true }); gateway.send('voice_update', { muted: true }); return;
   }
   const Ctx = window.AudioContext || window.webkitAudioContext; S.audioCtx = new Ctx();
@@ -107,6 +119,14 @@ function getPeer(uid) {
     try { p.making = true; await pc.setLocalDescription(); gateway.send('voice_signal', { to: uid, signal: { description: pc.localDescription } }); } catch (e) { console.warn('[voice] negotiate', e); } finally { p.making = false; }
   };
   pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'failed') pc.restartIce(); };
+  setLink(uid, 'connecting');
+  p.timer = setTimeout(() => { if (pc.connectionState !== 'connected') setLink(uid, 'slow'); }, 12000);
+  pc.onconnectionstatechange = () => {
+    const cs = pc.connectionState;
+    if (cs === 'connected') { clearTimeout(p.timer); setLink(uid, 'connected'); }
+    else if (cs === 'failed') { setLink(uid, 'failed'); warnUnreachable(uid); }
+    else if (cs === 'disconnected') setLink(uid, 'slow');
+  };
   pc.ontrack = (e) => attachRemote(uid, e);
   // our audio
   if (S.outTrack) p.senders.audio = pc.addTrack(S.outTrack, S.dest.stream);
@@ -165,7 +185,9 @@ export const getUserVolume = (uid) => S.userVol[uid] ?? 1;
 export function refreshOutputs() { for (const [uid, a] of S.remoteAudio) applyOutput(a, uid); if (S.gain) S.gain.gain.value = (state.local.voice.inputVolume ?? 100) / 100; applyMute(); }
 
 function dropPeer(uid) {
-  const p = S.peers.get(uid); if (p) { try { p.pc.close(); } catch { /* ignore */ } S.peers.delete(uid); }
+  const p = S.peers.get(uid); if (p) { clearTimeout(p.timer); try { p.pc.close(); } catch { /* ignore */ } S.peers.delete(uid); }
+  if (state.voice.links?.[uid]) { const links = { ...state.voice.links }; delete links[uid]; set({ voice: { ...state.voice, links } }); }
+  warned.delete(uid);
   const a = S.remoteAudio.get(uid); if (a) { a.srcObject = null; S.remoteAudio.delete(uid); }
   S.remoteMeters.get(uid)?.stop?.(); S.remoteMeters.delete(uid);
   streamStore.byUser.delete(uid); delete S.meta[uid];
@@ -177,7 +199,7 @@ function teardown() {
   for (const k of ['camera', 'screen', 'mic']) { S[k]?.getTracks().forEach((t) => t.stop()); S[k] = null; }
   try { S.audioCtx?.close(); } catch { /* ignore */ }
   Object.assign(S, { audioCtx: null, micSrc: null, gain: null, gate: null, analyser: null, dest: null, outTrack: null, channelId: null, meta: {} });
-  streamStore.byUser.clear(); set({ voice: { ...state.voice, speaking: {}, conn: null } }); bump();
+  warned.clear(); streamStore.byUser.clear(); set({ voice: { ...state.voice, speaking: {}, links: {}, conn: null } }); bump();
 }
 
 /* ------------------------------------------------------------------ public API */
@@ -207,6 +229,7 @@ export const voice = {
   async toggleCamera() {
     const c = state.voice.conn; if (!c) return;
     if (S.camera) { stopCamera(); return; }
+    if (needsSecure()) { toast(needsSecure(), 'error', 6000); return; }
     try {
       S.camera = await navigator.mediaDevices.getUserMedia(cameraConstraints());
       const track = S.camera.getVideoTracks()[0]; track.onended = () => stopCamera();
@@ -217,6 +240,7 @@ export const voice = {
   async toggleScreen() {
     const c = state.voice.conn; if (!c) return;
     if (S.screen) { stopScreen(); return; }
+    if (!navigator.mediaDevices?.getDisplayMedia) { toast(needsSecure() || 'Your browser can’t share its screen.', 'error', 6000); return; }
     try {
       S.screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 }, cursor: 'always' }, audio: true });
       const vt = S.screen.getVideoTracks()[0]; vt.onended = () => stopScreen();

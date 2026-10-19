@@ -9,9 +9,11 @@ import {
   db, save, newId, cmpId, sha, ENV, DATA_DIR, UPLOAD_DIR, ROOT, ApiError, bad, forbidden, notFound, byUsername, byEmail,
   conns, emitTo, can, need, permsOf, permsIn, canIn, needIn, listedFor, isSynced, overwritesOf, sanitizeOverwrites, topRolePos, canView, audienceOf, serverAudience, channelsOfServer, publicUser, selfUser,
   serverView, channelView, messageView, relatedUserIds, broadcastPresence, readStateFor, systemMessage, randomCode, RESERVED,
-  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteIp, ipHash, clientIp, userIpHashes, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView,
+  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteIp, ipHash, clientIp, userIpHashes, requestHashes, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView,
 } from './core.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
+import { sanitizeProfileStyle } from '../public/js/profile-data.js';
+import { hasProfanity, censor, cleanBlockedWords } from './profanity.js';   // the same checker the browser uses
 import { verificationMode, isGated, issueVerification, consumeVerification, resendWait, maskEmail } from './verify.js';
 import { beginSignup, confirmSignup, resendSignup } from './signup.js';
 import { closeConns, storeUpload, restoreUpload } from './core.js';
@@ -78,10 +80,47 @@ const csv = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolea
  *   TURN_SECRET=<coturn static-auth-secret>          time-limited credentials (TURN REST API, recommended)
  *   TURN_TTL=86400                                   lifetime of generated credentials, seconds
  *   ICE_TRANSPORT_POLICY=relay                       force all media through TURN (testing / privacy)
+ * Or let a hosted relay hand out credentials (free tiers exist; see README → TURN):
+ *   CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN        Cloudflare Realtime TURN
+ *   METERED_APP (your app name) + METERED_API_KEY             Metered / Open Relay
  */
-export function buildIceConfig(userId) {
+const hostedTurnConfigured = () => !!((ENV.CLOUDFLARE_TURN_KEY_ID && ENV.CLOUDFLARE_TURN_API_TOKEN) || (ENV.METERED_APP && ENV.METERED_API_KEY));
+const hostedCache = { at: 0, ttl: 0, servers: null, pending: null };
+/** ICE servers from the hosted relay, fetched with the server's own key and cached; browsers only ever see short-lived credentials. */
+async function hostedTurn() {
+  if (!hostedTurnConfigured()) return null;
+  const fresh = hostedCache.servers && Date.now() - hostedCache.at < hostedCache.ttl * 500;
+  if (fresh) return hostedCache.servers;
+  hostedCache.pending ||= (async () => {
+    try {
+      let servers; let ttl;
+      if (ENV.CLOUDFLARE_TURN_KEY_ID && ENV.CLOUDFLARE_TURN_API_TOKEN) {
+        ttl = 86400;
+        const base = String(ENV.CLOUDFLARE_TURN_API_BASE || 'https://rtc.live.cloudflare.com').replace(/\/+$/, '');
+        const res = await fetch(`${base}/v1/turn/keys/${encodeURIComponent(ENV.CLOUDFLARE_TURN_KEY_ID)}/credentials/generate-ice-servers`, { method: 'POST', headers: { authorization: `Bearer ${ENV.CLOUDFLARE_TURN_API_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ ttl }), signal: AbortSignal.timeout(6000) });
+        if (!res.ok) throw new Error(`Cloudflare TURN answered ${res.status}`);
+        servers = (await res.json()).iceServers;
+      } else {
+        ttl = 3600;
+        const base = String(ENV.METERED_API_BASE || `https://${encodeURIComponent(ENV.METERED_APP)}.metered.live`).replace(/\/+$/, '');
+        const res = await fetch(`${base}/api/v1/turn/credentials?apiKey=${encodeURIComponent(ENV.METERED_API_KEY)}`, { signal: AbortSignal.timeout(6000) });
+        if (!res.ok) throw new Error(`Metered answered ${res.status}`);
+        servers = await res.json();
+      }
+      servers = (Array.isArray(servers) ? servers : []).filter((s) => s && s.urls && (Array.isArray(s.urls) ? s.urls.length : true)).slice(0, 8);
+      if (!servers.some((s) => s.username)) throw new Error('the relay returned no TURN credentials');
+      Object.assign(hostedCache, { at: Date.now(), ttl, servers });
+    } catch (e) {
+      console.warn('[ice] hosted TURN unavailable:', e.message);
+      if (!hostedCache.servers) hostedCache.at = Date.now() - 50_000;   // retry in about 10 s instead of on every call
+    } finally { hostedCache.pending = null; }
+    return hostedCache.servers;
+  })();
+  return hostedCache.pending;
+}
+export async function buildIceConfig(userId) {
   const stun = csv(ENV.STUN_URLS); const turn = csv(ENV.TURN_URLS || ENV.TURN_URL);
-  const iceServers = [{ urls: stun.length ? stun : ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  const iceServers = [{ urls: stun.length ? stun : ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
   if (turn.length) {
     if (ENV.TURN_SECRET) {
       const ttl = Math.max(300, Number(ENV.TURN_TTL || 86400));
@@ -92,7 +131,10 @@ export function buildIceConfig(userId) {
       iceServers.push({ urls: turn, username: ENV.TURN_USERNAME, credential: ENV.TURN_CREDENTIAL || '' });
     } else iceServers.push({ urls: turn });
   }
-  return { iceServers, iceTransportPolicy: ENV.ICE_TRANSPORT_POLICY === 'relay' && turn.length ? 'relay' : 'all', turn: turn.length > 0, ttl: ENV.TURN_SECRET ? Math.max(300, Number(ENV.TURN_TTL || 86400)) : 3600 };
+  const hosted = await hostedTurn();   // Cloudflare / Metered, when configured
+  if (hosted) iceServers.push(...hosted);
+  const relay = turn.length > 0 || !!hosted;
+  return { iceServers, iceTransportPolicy: ENV.ICE_TRANSPORT_POLICY === 'relay' && relay ? 'relay' : 'all', turn: relay, ttl: hosted ? Math.min(3600, Math.round(hostedCache.ttl / 2)) : ENV.TURN_SECRET ? Math.max(300, Number(ENV.TURN_TTL || 86400)) : 3600 };
 }
 
 /* ------------------------------------------------------------ ready */
@@ -124,7 +166,7 @@ export function createApi() {
   r.use(express.json({ limit: '2mb' }));
 
   r.get('/config', (req, res) => res.json({
-    name: 'Orate', gifs: !!ENV.KLIPY_API_KEY, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0, maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
+    name: 'Orate', gifs: !!ENV.KLIPY_API_KEY, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0 || hostedTurnConfigured(), maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
     users: Object.keys(db.users).length, botId: db.botId,
     emailVerification: verificationMode(),   // { enabled, required, smtp }
     music: musicConfigured(),
@@ -275,6 +317,7 @@ export function createApi() {
     if (!user || user.deleted) throw new ApiError(401, 'Not signed in', 'unauthorized');
     req.user = user; req.session = found.rec; req.sessionId = found.hash;
     touchSession(found.hash, found.rec);
+    noteIp(user, req);   // the network and browser this account uses (hashed; only ever compared, to find ban evaders and alts)
     next();
   }));
 
@@ -297,19 +340,23 @@ export function createApi() {
   mountMusic(r, { h, limit });
 
   r.post('/auth/logout', h(async (req, res) => { await endSession(req.sessionId); res.json({ ok: true }); }));
-  r.get('/ready', (req, res) => res.json(buildReady(req.user)));
+  r.get('/ready', (req, res) => { noteIp(req.user, req); res.json(buildReady(req.user)); });   // (also remembers the network and browser, for the alt checks)
 
   /* --------------------------- me --------------------------- */
   r.get('/me', (req, res) => res.json(selfUser(req.user)));
 
   /* --------------------------- ICE servers (STUN / TURN for voice & video) --------------------------- */
-  r.get('/ice', (req, res) => res.json(buildIceConfig(req.user.id)));
+  r.get('/ice', h(async (req, res) => res.json(await buildIceConfig(req.user.id))));
 
   r.patch('/me', h(async (req, res) => {
     const u = req.user; const b = req.body || {}; let emailChanged = false;
     if (b.displayName !== undefined) u.displayName = str(b.displayName, 1, 32, 'Display name');
     if (b.bio !== undefined) u.bio = String(b.bio).slice(0, 400);
     if (b.pronouns !== undefined) u.pronouns = String(b.pronouns).slice(0, 40);
+    if (b.profile !== undefined) {   // colours, outline, fonts, effect and frames of the profile card (see public/js/profile-data.js)
+      if (b.profile !== null && (typeof b.profile !== 'object' || JSON.stringify(b.profile).length > 4000)) throw bad('That profile style is invalid');
+      u.profile = sanitizeProfileStyle(b.profile) || undefined;
+    }
     for (const k of ['avatar', 'banner']) if (b[k] !== undefined) { const v = uploadRef(b[k]); if (v === undefined) throw bad(`Invalid ${k}`); u[k] = v; }
     for (const k of ['bannerColor', 'accentColor']) if (b[k] !== undefined) { if (b[k] !== null && !HEX.test(b[k])) throw bad(`Invalid ${k}`); u[k] = b[k]; }
     if (b.status !== undefined) { if (!['online', 'idle', 'dnd', 'invisible'].includes(b.status)) throw bad('Invalid status'); u.status = b.status; }
@@ -457,12 +504,30 @@ export function createApi() {
     const ids = Object.keys(s.members);
     res.json({ code: inv.code, server: { id: s.id, name: s.name, icon: s.icon, banner: s.banner, accent: s.accent || null, createdAt: s.createdAt, description: s.description, memberCount: ids.length, onlineCount: ids.filter((id) => effectiveStatus(db.users[id]) !== 'offline').length }, inviter: publicUser(db.users[inv.inviterId]), joined: !!s.members[req.user.id] });
   }));
+  /** The server's swearing protection (Server Settings → Safety, off by default): returns `text` unchanged, censored, or throws, depending on the mode. The owner and administrators are not filtered. */
+  function guardText(ch, userId, text) {
+    const s = ch?.serverId ? db.servers[ch.serverId] : null; const mode = s?.safety?.profanity;
+    if (!s || !text || !mode || mode === 'off') return text;
+    if (s.ownerId === userId || can(s, userId, 'ADMINISTRATOR')) return text;
+    const words = s.safety.words || [];
+    if (!hasProfanity(text, words)) return text;
+    if (mode === 'block') throw new ApiError(400, 'That contains language this server doesn’t allow', 'profanity');
+    return censor(text, words);
+  }
   /** Banned by account, or by network: a new account from the same connection as someone banned here is turned away too. */
   function isBannedFrom(s, user, req) {
     if (s.bans?.includes(user.id)) return true;
     const ips = s.bannedIps; if (!ips || !Object.keys(ips).length) return false;
-    for (const h of userIpHashes(user, ipHash(clientIp(req)))) if (ips[h] && ips[h] !== user.id) return true;
+    for (const h of userIpHashes(user, requestHashes(req))) if (ips[h] && ips[h] !== user.id) return true;
     return false;
+  }
+  /** Other accounts that share a network or a browser with `uid` (never the server owner, the moderator acting, or anything those two share). */
+  function altAccounts(s, uid, actorId, req) {
+    const safe = new Set([...userIpHashes(db.users[s.ownerId]), ...userIpHashes(db.users[actorId], requestHashes(req))]);
+    const mine = userIpHashes(db.users[uid]); for (const h of safe) mine.delete(h);
+    if (!mine.size) return { alts: [], mine, safe };
+    const alts = Object.values(db.users).filter((u) => u.id !== uid && u.id !== s.ownerId && u.id !== actorId && !u.bot && !u.deleted && [...userIpHashes(u)].some((h) => mine.has(h))).map((u) => u.id);
+    return { alts, mine, safe };
   }
   r.post('/invites/:code/join', limit('join', 20, 60_000), h(async (req, res) => {
     const code = String(req.params.code).split('/').pop();
@@ -471,7 +536,9 @@ export function createApi() {
     noteIp(req.user, req);
     if (isBannedFrom(s, req.user, req)) throw forbidden('You are banned from this server');
     if (!s.members[req.user.id]) {
-      addMember(s, req.user); inv.uses++; save();
+      addMember(s, req.user); inv.uses++;
+      linkedTimeout(s, req.user.id, userIpHashes(req.user, requestHashes(req)));   // someone who is timed out here can't dodge it with another account
+      save();
       emitTo(serverAudience(s).filter((id) => id !== req.user.id), 'member_add', { serverId: s.id, member: { id: req.user.id, roles: [], nick: null, joinedAt: Date.now() }, user: publicUser(req.user) });
       emitTo([req.user.id], 'server_create', { server: serverView(s, req.user.id), users: usersFor(Object.keys(s.members)) });
       if (s.systemChannelId) systemMessage(s.systemChannelId, 'join', req.user.id);
@@ -487,6 +554,8 @@ export function createApi() {
     for (const k of ['icon', 'banner']) if (b[k] !== undefined) { const v = uploadRef(b[k]); if (v === undefined) throw bad(`Invalid ${k}`); s[k] = v; }
     if (b.accent !== undefined) { if (b.accent !== null && !HEX.test(b.accent)) throw bad('Invalid accent'); s.accent = b.accent; }
     if (b.systemChannelId !== undefined) s.systemChannelId = db.channels[b.systemChannelId]?.serverId === s.id ? b.systemChannelId : null;
+    if (b.profanity !== undefined) { if (!['off', 'censor', 'block'].includes(b.profanity)) throw bad('Invalid swearing protection mode'); (s.safety ||= {}).profanity = b.profanity; }
+    if (b.blockedWords !== undefined) (s.safety ||= {}).words = cleanBlockedWords(b.blockedWords);
     save(); pushServerUpdate(s); res.json(serverView(s, req.user.id));
   }));
   function deleteServer(s) {
@@ -602,7 +671,7 @@ export function createApi() {
       const forum = db.channels[ch.forumId];
       if (b.name !== undefined || b.tagIds !== undefined || b.locked !== undefined) { if (!mine && !mod) throw forbidden(); }
       if (b.pinned !== undefined && !mod) throw forbidden();
-      if (b.name !== undefined) ch.name = str(b.name, 1, 100, 'Title');
+      if (b.name !== undefined) ch.name = guardText(ch, req.user.id, str(b.name, 1, 100, 'Title'));
       if (b.tagIds !== undefined) ch.tagIds = (Array.isArray(b.tagIds) ? b.tagIds : []).map(String).filter((tid) => forum?.tags?.some((t) => t.id === tid)).slice(0, 5);
       if (b.locked !== undefined) ch.locked = !!b.locked;
       if (b.pinned !== undefined) ch.pinned = !!b.pinned;
@@ -680,8 +749,8 @@ export function createApi() {
     const forum = getChannel(req, req.params.id); if (forum.type !== 'forum') throw bad('That is not a forum');
     needIn(req.user.id, forum, 'SEND_MESSAGES');
     const b = req.body || {}; const s = db.servers[forum.serverId];
-    const title = str(b.title, 1, 100, 'Title');
-    const content = typeof b.content === 'string' ? b.content : '';
+    const title = guardText(forum, req.user.id, str(b.title, 1, 100, 'Title'));
+    const content = guardText(forum, req.user.id, typeof b.content === 'string' ? b.content : '');
     if (content.length > 4000) throw bad('The post is too long (4000 characters max)');
     await Promise.all((Array.isArray(b.attachments) ? b.attachments.slice(0, 10) : []).map((a) => restoreUpload(path.basename(String(a?.url || '')))));
     let attachments = sanitizeAttachments(b.attachments, fs, path, UPLOAD_DIR);
@@ -905,14 +974,20 @@ export function createApi() {
     if (uid === s.ownerId || uid === req.user.id) throw forbidden('You can’t ban that member');
     if (s.members[uid] && topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
     const b = req.body || {};
-    // remember why and by whom, and which networks the person used — they can't come back with another account from those
-    s.banInfo ||= {}; s.banInfo[uid] = { reason: String(b.reason || '').trim().slice(0, 200), by: req.user.id, at: Date.now() };
-    s.bannedIps ||= {};
-    const safe = new Set([...userIpHashes(db.users[s.ownerId]), ...userIpHashes(req.user)]);   // never lock out the owner or the moderator who banned
-    for (const h of userIpHashes(db.users[uid])) if (!safe.has(h)) s.bannedIps[h] = uid;
-    removeMember(s, uid, true);
-    purgeMessages(s, uid, clampInt(b.deleteHours, 0, 168, 0));
-    res.json({ ok: true });
+    // remember why and by whom, and which networks and browsers the person used — they can't come back with another account from those,
+    // and the accounts they already have on them (their alts) are banned along with them
+    s.banInfo ||= {}; s.bannedIps ||= {}; s.bans ||= [];
+    const { alts: found, safe } = altAccounts(s, uid, req.user.id, req);
+    const alts = b.alts === false ? [] : found.filter((id) => !(s.members[id] && topRolePos(s, req.user.id) <= topRolePos(s, id)));
+    const hours = clampInt(b.deleteHours, 0, 168, 0); const reason = String(b.reason || '').trim().slice(0, 200); const at = Date.now();
+    for (const target of [uid, ...alts]) {
+      s.banInfo[target] = { reason: target === uid ? reason : `Alt of ${db.users[uid].displayName}${reason ? ` — ${reason}` : ''}`.slice(0, 200), by: req.user.id, at, ...(target === uid ? {} : { altOf: uid }) };
+      for (const h of userIpHashes(db.users[target])) if (!safe.has(h)) s.bannedIps[h] = uid;
+      if (s.members[target]) removeMember(s, target, true); else if (!s.bans.includes(target)) s.bans.push(target);
+      purgeMessages(s, target, hours);
+    }
+    save();
+    res.json({ ok: true, alts: alts.map((id) => ({ id, displayName: db.users[id].displayName })) });
   }));
   /** Deletes what a person posted in this server during the last `hours` hours (0 = nothing). */
   function purgeMessages(s, uid, hours) {
@@ -932,16 +1007,18 @@ export function createApi() {
     const ipBanned = new Set(Object.values(s.bannedIps || {}));
     res.json((s.bans || []).map((id) => {
       const u = publicUser(db.users[id]); if (!u) return null; const info = s.banInfo?.[id] || {};
-      return { ...u, ban: { reason: info.reason || '', by: info.by ? (db.users[info.by]?.displayName || null) : null, at: info.at || null, ipBanned: ipBanned.has(id) } };
+      return { ...u, ban: { reason: info.reason || '', by: info.by ? (db.users[info.by]?.displayName || null) : null, at: info.at || null, ipBanned: ipBanned.has(id) || !!info.altOf, altOf: info.altOf ? (db.users[info.altOf]?.displayName || null) : null } };
     }).filter(Boolean));
   }));
   r.delete('/servers/:id/bans/:uid', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'BAN_MEMBERS');
-    const uid = req.params.uid;
-    s.bans = (s.bans || []).filter((id) => id !== uid);
-    if (s.banInfo) delete s.banInfo[uid];
+    const uid = req.params.uid; const info = s.banInfo?.[uid];
+    // unbanning the person frees their alts too; unbanning one alt on its own frees just what only that account used
+    const targets = [uid, ...Object.entries(s.banInfo || {}).filter(([, i]) => i.altOf === uid).map(([id]) => id)];
+    for (const t of targets) { s.bans = (s.bans || []).filter((id) => id !== t); if (s.banInfo) delete s.banInfo[t]; }
     for (const [h, id] of Object.entries(s.bannedIps || {})) if (id === uid) delete s.bannedIps[h];   // their networks are free again
-    save(); res.json({ ok: true });
+    if (info?.altOf) { const main = userIpHashes(db.users[info.altOf]); for (const h of userIpHashes(db.users[uid])) if (!main.has(h) && s.bannedIps?.[h] === info.altOf) delete s.bannedIps[h]; }
+    save(); res.json({ ok: true, freed: targets.length - 1 });
   }));
 
   /* ---- timeouts: a member can read but not talk, react or join voice until it runs out ---- */
@@ -951,10 +1028,25 @@ export function createApi() {
     if (uid === s.ownerId || uid === req.user.id || can(s, uid, 'ADMINISTRATOR')) throw forbidden('You can’t time out that member');
     if (topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
     const minutes = clampInt((req.body || {}).minutes, 0, 28 * 24 * 60, 0);
-    if (minutes) m.timeoutUntil = Date.now() + minutes * 60_000; else delete m.timeoutUntil;
+    const until = minutes ? Date.now() + minutes * 60_000 : 0;
+    const { alts, mine } = altAccounts(s, uid, req.user.id, req);
+    const apply = (id, by) => { const mm = s.members[id]; if (!mm) return false; if (until) { mm.timeoutUntil = until; if (by) mm.timeoutAlt = by; } else { delete mm.timeoutUntil; delete mm.timeoutAlt; } return true; };
+    apply(uid, null);
+    s.timeoutLinks = (s.timeoutLinks || []).filter((l) => l.uid !== uid && l.until > Date.now());
+    let hit = 0;
+    if (until) {
+      for (const id of alts) { if (id === s.ownerId || can(s, id, 'ADMINISTRATOR') || (s.members[id] && topRolePos(s, req.user.id) <= topRolePos(s, id))) continue; if (apply(id, uid)) hit++; }
+      if (mine.size) s.timeoutLinks.push({ uid, until, hashes: [...mine] });   // an account made (or joined) later on the same network or browser gets it too
+    } else { for (const [id, mm] of Object.entries(s.members)) if (mm.timeoutAlt === uid) { apply(id, null); hit++; } }
     save(); pushServerUpdate(s); revalidateVoice(s);
-    res.json({ ok: true, timeoutUntil: m.timeoutUntil || null });
+    res.json({ ok: true, timeoutUntil: m.timeoutUntil || null, alts: hit });
   }));
+  /** A new member whose network or browser matches someone currently timed out here is timed out for the rest of that time. */
+  function linkedTimeout(s, userId, hashes) {
+    const now = Date.now(); s.timeoutLinks = (s.timeoutLinks || []).filter((l) => l.until > now);
+    const m = s.members[userId]; if (!m || userId === s.ownerId) return;
+    for (const l of s.timeoutLinks) if (l.uid !== userId && l.hashes.some((h) => hashes.has(h)) && (m.timeoutUntil || 0) < l.until) { m.timeoutUntil = l.until; m.timeoutAlt = l.uid; }
+  }
 
   /* --------------------------- messages --------------------------- */
   r.get('/channels/:id/messages', h(async (req, res) => {
@@ -1001,10 +1093,12 @@ export function createApi() {
     let attachments = sanitizeAttachments(b.attachments, fs, path, UPLOAD_DIR);
     if (server && attachments.length && !canIn(req.user.id, ch, 'ATTACH_FILES')) attachments = [];
     const gif = sanitizeMedia(b.gif, 'gif'); const sticker = b.sticker?.custom ? serverSticker(b.sticker.custom, req.user.id) : sanitizeMedia(b.sticker, 'sticker');
-    const content = typeof b.content === 'string' ? b.content : '';
+    const content = guardText(ch, req.user.id, typeof b.content === 'string' ? b.content : '');
     const poll = b.poll ? sanitizePoll(b.poll) : null;
+    if (poll) { poll.question = guardText(ch, req.user.id, poll.question); for (const a of poll.answers) a.text = guardText(ch, req.user.id, a.text); }
     const theme = b.theme ? sanitizeSharedTheme(b.theme) : null;
     if (!content.trim() && !attachments.length && !gif && !sticker && !poll && !theme) throw bad('Cannot send an empty message');
+    if ((gif || sticker) && server && !canIn(req.user.id, ch, 'SEND_GIFS')) throw new ApiError(403, 'You don’t have permission to send GIFs or stickers here', 'no_gifs');
     if (content.length > 4000) throw bad('Message is too long (4000 characters max)');
     const msg = postMessage(ch, req.user.id, { content, attachments, gif, sticker, replyTo: b.replyTo, replyPing: b.replyPing !== false, nonce: b.nonce, poll, theme });
     res.json(messageView(msg));
@@ -1017,7 +1111,7 @@ export function createApi() {
     if (m.type !== 'default') throw forbidden();
     if (m.poll) throw forbidden('A poll can’t be edited');
     if (m.theme) throw forbidden('A shared theme can’t be edited');
-    const content = String((req.body || {}).content ?? '');
+    const content = guardText(ch, req.user.id, String((req.body || {}).content ?? ''));
     if (!content.trim() && !(m.attachments?.length || m.gif || m.sticker)) throw bad('Message cannot be empty — delete it instead');
     if (content.length > 4000) throw bad('Message is too long');
     m.content = content; m.editedAt = Date.now();

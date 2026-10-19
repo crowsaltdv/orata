@@ -36,6 +36,11 @@ const fakeItunes = http.createServer((req, res) => {
     if (term === 'empty') return js({ resultCount: 0, results: [] });
     return js({ resultCount: 6, results: [itunesSong(101, 'Night Drive'), itunesSong(102, 'Rain Sounds', { trackTimeMillis: 187000, trackExplicitness: 'explicit' }), itunesSong(103, 'No Preview Here', { previewUrl: undefined }), { ...itunesSong(201, 'An Album'), wrapperType: 'collection', kind: undefined }, { ...itunesSong(202, 'A Video'), kind: 'music-video' }, itunesSong(203, 'Bad Host', { previewUrl: 'https://evil.example/x.m4a' })] });
   }
+  const rss = url.pathname.match(/^\/us\/rss\/topsongs\/limit=30(?:\/genre=(\d+))?\/json$/);
+  if (rss) {
+    const entry = (id, name) => ({ 'im:name': { label: name }, 'im:image': [{ label: `https://is1-ssl.mzstatic.com/image/thumb/Music/test/${id}/55x55bb.png` }, { label: `https://is1-ssl.mzstatic.com/image/thumb/Music/test/${id}/170x170bb.png` }], 'im:collection': { 'im:name': { label: 'Chart Album' } }, id: { label: `https://music.apple.com/us/album/x/1?i=${id}`, attributes: { 'im:id': String(id) } }, 'im:artist': { label: 'Chart Artist' }, link: [{ attributes: { rel: 'alternate', href: `https://music.apple.com/us/album/x/1?i=${id}&uo=2` } }, { attributes: { rel: 'enclosure', href: `http://127.0.0.1:${AP_PORT}/media/${id}.m4a` } }] });
+    return js({ feed: { entry: [entry(rss[1] === '14' ? 301 : 300, rss[1] === '14' ? 'Pop Hit' : 'Overall Hit'), { ...entry(302, 'No Preview'), link: [] }] } });
+  }
   if (url.pathname === '/lookup') {
     const id = Number(url.searchParams.get('id'));
     if (id === 104) return js({ resultCount: 1, results: [itunesSong(104, 'Deep Cut', { trackTimeMillis: 187000 })] });
@@ -156,13 +161,14 @@ async function main() {
   const dbFile = path.join(data, 'db.json'); const dbj = JSON.parse(fs.readFileSync(dbFile, 'utf8'));
   const legacy = Object.values(dbj.channels).find((c) => c.name === 'own-rules');
   legacy.private = true; legacy.allowedRoles = [vip.id]; delete legacy.overwrites; legacy.synced = false;
-  for (const s of Object.values(dbj.servers)) { s.permsV = undefined; for (const role of s.roles) if (role.id === s.id) role.permissions = role.permissions.filter((p) => p !== 'VIEW_CHANNEL'); }
+  for (const s of Object.values(dbj.servers)) { s.permsV = undefined; for (const role of s.roles) { role.permissions = role.permissions.filter((p) => p !== 'SEND_GIFS'); if (role.id === s.id) role.permissions = role.permissions.filter((p) => p !== 'VIEW_CHANNEL'); } }   // (an old server has neither View Channel on @everyone nor the GIFs permission)
   fs.writeFileSync(dbFile, JSON.stringify(dbj));
   wb.ws.close(); wc.ws.close();
   startServer(); await ready();
   r = await api('GET', `/channels/${legacy.id}/messages`, C.token); ok(r.status === 404, 'legacy private channel still hides from non-members after the upgrade');
   r = await api('GET', `/channels/${legacy.id}/messages`, B.token); ok(r.status === 200, '… and still shows to its allowed role');
   r = await api('GET', `/channels/${general.id}/messages`, C.token); ok(r.status === 200, 'old servers regain View Channel on @everyone');
+  r = await api('GET', '/ready', A.token); ok(r.body.servers.every((sv) => sv.roles.filter((ro) => ro.permissions.includes('SEND_MESSAGES')).every((ro) => ro.permissions.includes('SEND_GIFS'))), 'and everybody who could send messages keeps being able to send GIFs & stickers (the new permission)');
 
   /* ---------------------------------------------------------------- sessions */
   console.log('\nSessions');
@@ -212,6 +218,14 @@ async function main() {
   r = await api('GET', '/music/search?q=empty', A3); ok(r.status === 200 && r.body.tracks.length === 0, 'an empty result is an empty list');
   r = await api('GET', '/music/search?q=', A3); ok(r.status === 400, 'blank searches are rejected');
   r = await api('GET', '/music/search?q=ratelimit', A3); ok(r.status === 429 && r.body.code === 'rate_limited', 'when Apple says "too many requests" (403) people are told to wait');
+  r = await api('GET', '/music/charts', null); ok(r.status === 401, 'the category list needs a login');
+  r = await api('GET', '/music/charts', A3); ok(r.status === 200 && r.body.genres[0].key === 'top' && r.body.genres.some((g) => g.key === 'hiphop' && g.name === 'Hip-Hop / Rap') && r.body.genres.length >= 15, 'the Music page has categories');
+  r = await api('GET', '/music/charts/pop', A3);
+  ok(r.status === 200 && r.body.tracks.length === 1 && r.body.tracks[0].id === '301' && r.body.tracks[0].title === 'Pop Hit' && r.body.tracks[0].artist === 'Chart Artist' && r.body.tracks[0].artwork.endsWith('/301/300x300bb.png') && !JSON.stringify(r.body).includes('127.0.0.1'), 'a category lists the top songs that have a preview (artwork upsized, preview address kept on the server)', JSON.stringify(r.body).slice(0, 200));
+  ok(ap.requests.some((x) => x.path === '/us/rss/topsongs/limit=30/genre=14/json' && !x.hasAuth), "… from Apple's keyless genre chart");
+  r = await api('GET', '/music/charts/top', A3); ok(r.body.tracks[0].id === '300', 'Top Songs is the overall chart');
+  const chartCalls = ap.requests.filter((x) => x.path.includes('/rss/')).length; await api('GET', '/music/charts/pop', A3); ok(ap.requests.filter((x) => x.path.includes('/rss/')).length === chartCalls, 'charts are cached');
+  r = await api('GET', '/music/charts/nonsense', A3); ok(r.status === 404, 'unknown categories are refused');
   r = await api('GET', '/music/tracks/101/source', null); ok(r.status === 401, 'asking for a play link needs a login');
   r = await api('GET', '/music/tracks/bad!id/source', A3); ok(r.status === 400, 'track ids are validated');
   r = await api('GET', '/music/tracks/101/source', A3);

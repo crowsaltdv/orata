@@ -70,6 +70,7 @@ export function Composer({ chId }) {
   const timedOut = timeoutUntil > Date.now() && !server?.perms.includes('ADMINISTRATOR') && server?.ownerId !== state.me.id;
   const canSend = (!server || hasChannelPerm(ch, 'SEND_MESSAGES')) && !lockedPost;
   const canAttach = !server || hasChannelPerm(ch, 'ATTACH_FILES');
+  const canGif = !server || hasChannelPerm(ch, 'SEND_GIFS');
 
   // swap drafts when the channel changes
   useEffect(() => { setText(drafts.get(chId) || ''); setAtts([]); setMedia(null); setAc(null); setPing(true); if (matchMedia('(pointer:fine)').matches) setTimeout(() => ta.current?.focus(), 30); }, [chId]);
@@ -127,7 +128,7 @@ export function Composer({ chId }) {
       else if (cmd === 'spoiler') { if (!arg) return; v = `||${arg}||`; }
       else if (cmd === 'poll') { setText(''); openModal('create-poll', { channelId: chId }); return; }
       else if (cmd === 'theme') { setText(''); await shareTheme(chId, arg); return; }
-      else if (cmd === 'gif') { setText(''); const el = document.querySelector('.emoji-btn'); openPickerFor(el, 'gif', arg); return; }
+      else if (cmd === 'gif') { if (!canGif) { toast('You don’t have permission to send GIFs or stickers here', 'error'); return; } setText(''); const el = document.querySelector('.emoji-btn'); openPickerFor(el, 'gif', arg); return; }
       else if (cmd === 'nick') { if (!server) { toast('Nicknames only work in servers', 'error'); return; } setText(''); await act(api.patch(`/servers/${server.id}/members/${state.me.id}`, { nick: arg }), { success: arg ? 'Nickname updated' : 'Nickname cleared' }); return; }
     }
     v = encodeMentions(v.replace(/:([a-z0-9_+-]+):/gi, (all, code) => (customToken(code, server?.id) ? all : shortcodeEmoji(code.toLowerCase()) || all)), ch);
@@ -232,7 +233,7 @@ export function Composer({ chId }) {
   const stageGif = (item) => setMedia({ kind: 'gif', title: item.title || 'GIF', preview: item.preview, data: { id: item.id, title: item.title, url: item.full.mp4 || item.full.gif || item.full.webp, mp4: item.full.mp4, gif: item.full.gif, poster: item.full.poster, w: item.w, h: item.h } });
   const stageSticker = (item) => item.custom ? setMedia({ kind: 'sticker', title: item.title, preview: item.preview, data: { custom: item.custom } }) : setMedia({ kind: 'sticker', title: item.title || 'Sticker', preview: item.preview, data: { id: item.id, title: item.title, url: item.full.url, webp: item.full.webp, gif: item.full.gif, png: item.full.png, w: item.w, h: item.h } });
   const handlers = { onEmoji: (c, e) => { const tok = c.startsWith('<'); const nm = tok && /^<a?:(\w+):\d+>$/.exec(c); composerApi.insert(tok ? (nm && customToken(nm[1], server?.id) === c ? `:${nm[1]}:` : c) + ' ' : c); if (!tok) noteEmojiUse(c); if (!e?.shiftKey) closePopover(); }, onGif: (i) => { closePopover(); stageGif(i); ta.current?.focus(); }, onSticker: (i) => { closePopover(); stageSticker(i); ta.current?.focus(); } };
-  const openPickerFor = (anchor, tab, query) => openPicker(anchor || ta.current, handlers, { tab, query, placement: 'top-end' });
+  const openPickerFor = (anchor, tab, query) => openPicker(anchor || ta.current, handlers, { tab, query, placement: 'top-end', emojiOnly: !canGif });   // without the GIFs & stickers permission the picker is just emoji
 
   if (blockedBy) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="ban" size=${18} /> You have blocked this user. <button type="button" class="link-btn" onClick=${() => act(api.del(`/relationships/${dmUserId(ch)}`))}>Unblock</button></div></div>`;
   if (!canSend) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name=${timedOut ? 'clock' : 'lock'} size=${18} /> ${lockedPost ? t('This post is locked.') : timedOut ? `${t('You are timed out until')} ${new Date(timeoutUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : t('You do not have permission to send messages in this channel.')}</div></div>`;
@@ -262,8 +263,8 @@ export function Composer({ chId }) {
         <input type="file" multiple hidden ref=${file} onChange=${(e) => { addFiles(e.target.files); e.target.value = ''; }} />
         <textarea ref=${ta} class="composer-input" rows="1" value=${text} placeholder=${placeholder} maxlength="4000" spellcheck="true" aria-label=${placeholder} onInput=${onInput} onKeyDown=${onKeyDown} onPaste=${onPaste} onBlur=${() => setTimeout(() => setAc(null), 120)} onClick=${(e) => computeAc(text, e.target.selectionStart)}></textarea>
         <div class="comp-right">
-          <button type="button" class="comp-btn gif-btn" data-tip="GIF" data-tip-pos="top" aria-label="Open GIF picker" onClick=${(e) => openPickerFor(e.currentTarget, 'gif')}><span>GIF</span></button>
-          <button type="button" class="comp-btn hide-sm" data-tip="Stickers" data-tip-pos="top" aria-label="Open sticker picker" onClick=${(e) => openPickerFor(e.currentTarget, 'stickers')}><${Icon} name="sticker" size=${22} /></button>
+          ${canGif ? html`<button type="button" class="comp-btn gif-btn" data-tip="GIF" data-tip-pos="top" aria-label="Open GIF picker" onClick=${(e) => openPickerFor(e.currentTarget, 'gif')}><span>GIF</span></button>` : null}
+          ${canGif ? html`<button type="button" class="comp-btn hide-sm" data-tip="Stickers" data-tip-pos="top" aria-label="Open sticker picker" onClick=${(e) => openPickerFor(e.currentTarget, 'stickers')}><${Icon} name="sticker" size=${22} /></button>` : null}
           <button type="button" class="comp-btn emoji-btn" data-tip="Emoji" data-tip-pos="top" aria-label="Open emoji picker" onClick=${(e) => openPickerFor(e.currentTarget, 'emoji')} onMouseEnter=${(e) => e.currentTarget.classList.add('wiggle')} onMouseLeave=${(e) => e.currentTarget.classList.remove('wiggle')}><${Icon} name="smile" size=${22} /></button>
           <button type="button" class=${cx('comp-btn send', hasContent && 'ready')} data-tip=${t('Send')} data-tip-pos="top" aria-label="Send message" onClick=${submit}><${Icon} name="send" size=${20} /></button>
         </div>

@@ -147,17 +147,19 @@
 
 /* ------------------------------------------------ voice */
 .call-stage { flex: none; padding: 12px; border-bottom: 1px solid var(--border); background: rgb(0 0 0 / .18); animation: slide-down var(--t-med) var(--ease); }
-.stage-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.stage-grid { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.fit-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: var(--gap, 12px); }
+.fit-grid .tile { aspect-ratio: auto; flex: none; width: calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols)); height: calc((100% - (var(--rows) - 1) * var(--gap)) / var(--rows)); }
+.stage-strip { flex: none; height: 104px; display: flex; gap: 10px; justify-content: center; margin-top: 10px; } .stage-strip .tile { height: 100%; width: auto; aspect-ratio: 16 / 10; flex: none; border-radius: 14px; }
+.call-stage .stage-grid { flex: none; height: min(44vh, 420px); }
 .tile { position: relative; aspect-ratio: 16 / 10; border-radius: 18px; overflow: hidden; background: linear-gradient(145deg, rgb(var(--accent-rgb) / .25), rgb(0 0 0 / .35)); display: flex; align-items: center; justify-content: center; transition: box-shadow var(--t-med); animation: pop-in var(--t-med) var(--ease-spring) both; }
 .tile.speaking { box-shadow: 0 0 0 3px #3ba55d, 0 0 26px rgb(59 165 93 / .55); }
 .tile video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; } .tile video.screen { object-fit: contain; } .tile video.mirror { transform: scaleX(-1); }
 .tile-name { position: absolute; left: 10px; bottom: 10px; display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px; background: rgb(0 0 0 / .6); color: #fff; font-size: 13px; font-weight: 600; backdrop-filter: blur(6px); }
 .tile-muted { position: absolute; right: 10px; top: 10px; width: 28px; height: 28px; border-radius: 50%; background: rgb(0 0 0 / .6); color: #ff7b93; display: flex; align-items: center; justify-content: center; }
-.tile.expand { grid-column: 1 / -1; aspect-ratio: 16 / 8; }
 .stage-controls { display: flex; justify-content: center; gap: 10px; margin-top: 12px; }
 .ctl { width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgb(var(--surface-rgb) / .13); transition: all var(--t-fast) var(--ease-spring); } .ctl:hover { transform: scale(1.1); background: rgb(var(--surface-rgb) / .22); } .ctl.on { background: #fff; color: #111; } .ctl.bad { background: #e5314f; color: #fff; } .ctl.hang { width: 64px; border-radius: 26px; background: #e5314f; color: #fff; }
-.vc-view { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px; gap: 12px; overflow-y: auto; }
-.vc-view .stage-grid { flex: 1; align-content: center; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.vc-view { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px; gap: 12px; overflow: hidden; }
 .vc-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; color: var(--text-2); } .vc-empty h2 { font-size: 24px; color: var(--text); } .vc-empty .icon-big { width: 96px; height: 96px; border-radius: 50%; background: var(--accent-grad); color: var(--on-accent); display: flex; align-items: center; justify-content: center; box-shadow: 0 16px 40px -10px rgb(var(--accent-rgb) / .8); animation: float 5s ease-in-out infinite; }
 .call-ring { position: fixed; z-index: 110; top: 20px; left: 50%; transform: translateX(-50%); width: min(380px, calc(100vw - 24px)); padding: 16px 18px; display: flex; align-items: center; gap: 14px; border-radius: 22px; background: rgb(var(--panel-rgb) / .94); backdrop-filter: blur(30px); border: 1px solid var(--border); box-shadow: var(--shadow-pop), 0 0 0 4px rgb(59 165 93 / .2); animation: ring-in var(--t-slow) var(--ease-spring) both; }
 @keyframes ring-in { from { opacity: 0; transform: translate(-50%, -40px) scale(.9); } to { opacity: 1; transform: translate(-50%, 0); } }

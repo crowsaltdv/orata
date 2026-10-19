@@ -72,6 +72,25 @@ async function search(q) {
   searchCache.set(key, { at: Date.now(), tracks });
   return tracks;
 }
+/* ------------------------------------------------------------ charts (the Music page's categories) */
+// Apple's public top-songs feeds, per genre: `/<country>/rss/topsongs/limit=30/genre=<id>/json` (no key). Entries carry the track id, artwork and a 30-second preview.
+const GENRES = [['top', 'Top Songs', null], ['pop', 'Pop', 14], ['hiphop', 'Hip-Hop / Rap', 18], ['rnb', 'R&B / Soul', 15], ['rock', 'Rock', 21], ['alt', 'Alternative', 20], ['electronic', 'Electronic', 7], ['dance', 'Dance', 17],
+  ['country', 'Country', 6], ['latin', 'Latin', 12], ['kpop', 'K-Pop', 51], ['jpop', 'J-Pop', 27], ['jazz', 'Jazz', 11], ['classical', 'Classical', 5], ['metal', 'Metal', 1153], ['reggae', 'Reggae', 24],
+  ['singer', 'Singer / Songwriter', 10], ['soundtrack', 'Soundtracks', 16], ['blues', 'Blues', 2], ['gospel', 'Christian & Gospel', 22]];
+const chartCache = new Map();
+const chartSong = (e) => {
+  const links = [].concat(e?.link || []); const preview = links.find((l) => l?.attributes?.rel === 'enclosure')?.attributes?.href; const page = links.find((l) => l?.attributes?.rel === 'alternate')?.attributes?.href;
+  const image = [].concat(e?.['im:image'] || []).slice(-1)[0]?.label;
+  return songView({ wrapperType: 'track', kind: 'song', trackId: e?.id?.attributes?.['im:id'], trackName: e?.['im:name']?.label, artistName: e?.['im:artist']?.label, collectionName: e?.['im:collection']?.['im:name']?.label, artworkUrl100: image, trackViewUrl: page, previewUrl: preview });
+};
+async function chart(key) {
+  const g = GENRES.find((x) => x[0] === key); if (!g) throw notFound('Unknown category');
+  const hit = chartCache.get(key); if (hit && Date.now() - hit.at < 30 * 60_000) return hit.tracks;
+  const data = await apiGet(`/${COUNTRY.toLowerCase()}/rss/topsongs/limit=30${g[2] ? `/genre=${g[2]}` : ''}/json`, {});
+  const tracks = [].concat(data?.feed?.entry || []).map(chartSong).filter(Boolean).map(remember).map(forClient);
+  chartCache.set(key, { at: Date.now(), tracks });
+  return tracks;
+}
 async function trackInfo(id) {
   if (known.has(id)) return known.get(id);
   const t = songView((await apiGet('/lookup', { id, country: COUNTRY }))?.results?.[0]);
@@ -166,6 +185,11 @@ export function mountMusic(r, { h, limit }) {
     const q = String(req.query.q || '').trim().slice(0, 100);
     if (!q) throw bad('Type something to search for');
     res.json({ tracks: await search(q) });
+  }));
+  r.get('/music/charts', h(async (req, res) => { needEnabled(); res.json({ genres: GENRES.map(([key, name]) => ({ key, name })) }); }));
+  r.get('/music/charts/:key', limit('musicchart', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
+    needEnabled();
+    res.json({ key: String(req.params.key), tracks: await chart(String(req.params.key)) });
   }));
   // the player asks right before playing; the preview is loaded now, so problems show up immediately and playback can start at once
   r.get('/music/tracks/:id/source', limit('musicsrc', 90, 60_000, (req) => req.user.id), h(async (req, res) => {

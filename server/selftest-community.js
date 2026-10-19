@@ -2,11 +2,14 @@
 // Optional emails at sign-up, bans that also block the person's network (hashed, never shown), ban reasons, timeouts, GIF icons / banners,
 // custom emoji and stickers, forum channels and polls.
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
+import { ENGINES } from '../public/js/profile-effects.js';
+import { EFFECTS } from '../public/js/profile-data.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-comm-test-'));
@@ -132,6 +135,82 @@ async function main() {
   r = await api('PUT', `/servers/${S.id}/members/${A.user.id}/timeout`, MOD.token, { minutes: 5 }); ok(r.status === 403, 'the owner cannot be timed out');
   r = await api('PUT', `/servers/${S.id}/members/${T.user.id}/timeout`, MOD.token, { minutes: 0 }); ok(r.status === 200 && r.body.timeoutUntil === null, 'a timeout can be lifted');
   r = await api('POST', `/channels/${text.id}/messages`, T.token, { content: 'back' }); ok(r.status === 200, '… and then they can talk again');
+
+  /* ---------------------------------------------------------------- alt accounts: a ban or a timeout follows the person */
+  console.log('\nAlt accounts');
+  const mk = async (name, ip, dev) => {
+    const h = { ...(ip ? { 'x-forwarded-for': ip } : {}), ...(dev ? { 'x-orate-device': dev } : {}) };
+    const reg0 = await api('POST', '/auth/register', null, { username: name, displayName: name, password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, h);
+    const joined = await api('POST', `/invites/${code}/join`, reg0.body.token, null, h);
+    return { token: reg0.body.token, user: reg0.body.user, h, joined: joined.status };
+  };
+  const memberIds = async () => (await api('GET', '/ready', A.token)).body.servers.find((s) => s.id === S.id).members.map((m) => m.id);
+  const devA = 'device-aaaaaaaaaaaaaaaa'; const devB = 'device-bbbbbbbbbbbbbbbb';
+  const P1 = await mk('alt_p1', '198.51.100.1', devA); const P2 = await mk('alt_p2', '198.51.100.2', devA); const P3 = await mk('alt_p3', '198.51.100.3', devB);
+  ok(P1.joined === 200 && P2.joined === 200 && P3.joined === 200, 'three accounts join (two of them from the same browser)');
+  r = await api('PUT', `/servers/${S.id}/bans/${P1.user.id}`, A.token, { reason: 'spam' });
+  ok(r.status === 200 && r.body.alts.length === 1 && r.body.alts[0].id === P2.user.id, 'banning one account bans the other account on the same browser, even from another network');
+  let ids = await memberIds(); ok(!ids.includes(P1.user.id) && !ids.includes(P2.user.id) && ids.includes(P3.user.id), '… and only those two leave; an unrelated account stays');
+  r = await api('GET', `/servers/${S.id}/bans`, A.token); const altRow = r.body.find((x) => x.id === P2.user.id);
+  ok(altRow?.ban.altOf === 'alt_p1' && altRow.ban.reason.startsWith('Alt of alt_p1') && altRow.ban.ipBanned === true, 'the ban list says it is an alt, and of whom');
+  r = await api('POST', `/invites/${code}/join`, P2.token, null, P2.h); ok(r.status === 403, 'the alt cannot come back');
+  const P4 = await mk('alt_p4', '198.51.100.4', devA); ok(P4.joined === 403, 'a brand-new account on that browser is turned away');
+  const P5 = await mk('alt_p5', '198.51.100.5', devB); ok(P5.joined === 200, 'a new account from a different browser and network is fine');
+  r = await api('DELETE', `/servers/${S.id}/bans/${P1.user.id}`, A.token); ok(r.status === 200 && r.body.freed === 1, 'unbanning the person frees their alts too');
+  r = await api('POST', `/invites/${code}/join`, P2.token, null, P2.h); ok(r.status === 200, '… and the alt can rejoin');
+  const Q1 = await mk('alt_q1', '198.51.100.11', 'device-qqqqqqqqqqqqqqqq'); const Q2 = await mk('alt_q2', '198.51.100.12', 'device-qqqqqqqqqqqqqqqq');
+  r = await api('PUT', `/servers/${S.id}/bans/${Q1.user.id}`, A.token, { alts: false }); ids = await memberIds(); ok(r.status === 200 && r.body.alts.length === 0 && ids.includes(Q2.user.id), 'a moderator can choose to ban just the one account');
+  const N1 = await mk('alt_n1', '203.0.113.77'); const N2 = await mk('alt_n2', '203.0.113.77');
+  r = await api('PUT', `/servers/${S.id}/bans/${N1.user.id}`, A.token, {}); ok(r.status === 200 && r.body.alts.some((x) => x.id === N2.user.id), 'accounts that share only a network are alts too');
+  const U1 = await mk('alt_u1', '198.51.100.21', 'device-uuuuuuuuuuuuuuuu'); const U2 = await mk('alt_u2', '198.51.100.22', 'device-uuuuuuuuuuuuuuuu');
+  await api('PUT', `/servers/${S.id}/members/${MOD.user.id}/roles/${modRole.id}`, A.token);
+  r = await api('PUT', `/servers/${S.id}/members/${U1.user.id}/timeout`, MOD.token, { minutes: 5 });
+  const timed = async (id) => ((await api('GET', '/ready', A.token)).body.servers.find((s) => s.id === S.id).members.find((m) => m.id === id)?.timeoutUntil || 0) > Date.now();
+  ok(r.status === 200 && r.body.alts === 1 && await timed(U1.user.id) && await timed(U2.user.id), 'a timeout reaches the person’s other accounts too');
+  const U3 = await mk('alt_u3', '198.51.100.23', 'device-uuuuuuuuuuuuuuuu'); ok(U3.joined === 200 && await timed(U3.user.id), 'an account made afterwards on that browser joins already timed out');
+  r = await api('POST', `/channels/${text.id}/messages`, U3.token, { content: 'hello' }); ok(r.status === 403, '… and cannot talk');
+  r = await api('PUT', `/servers/${S.id}/members/${U1.user.id}/timeout`, MOD.token, { minutes: 0 });
+  ok(r.status === 200 && !(await timed(U1.user.id)) && !(await timed(U2.user.id)) && !(await timed(U3.user.id)), 'lifting it lifts it for all of them');
+
+  /* ---------------------------------------------------------------- swearing protection + the GIFs & stickers permission */
+  console.log('\nSwearing protection');
+  const W = await register('wordy'); await api('POST', `/invites/${code}/join`, W.token);
+  const say = (tok, content) => api('POST', `/channels/${text.id}/messages`, tok, { content });
+  r = await say(W.token, 'well, fuck'); ok(r.status === 200 && r.body.content === 'well, fuck', 'it is off by default: nothing is filtered');
+  ok((await api('GET', '/ready', W.token)).body.servers.find((s) => s.id === S.id).safety.profanity === 'off', 'and members can see that it is off');
+  r = await api('PATCH', `/servers/${S.id}`, W.token, { profanity: 'block' }); ok(r.status === 403, 'only people who manage the server can change it');
+  r = await api('PATCH', `/servers/${S.id}`, A.token, { profanity: 'shout' }); ok(r.status === 400, 'unknown modes are refused');
+  r = await api('PATCH', `/servers/${S.id}`, A.token, { profanity: 'censor' }); ok(r.status === 200 && r.body.safety.profanity === 'censor' && Array.isArray(r.body.safety.words), 'censor mode');
+  r = await say(W.token, 'what the f.u.c.k is this sh1t'); ok(r.status === 200 && !/f\.u\.c\.k|sh1t/i.test(r.body.content) && r.body.content.includes('∗') && r.body.content.startsWith('what the f'), 'swear words are hidden (even with symbols and look-alike characters), the rest stays');
+  r = await say(W.token, 'my class assignment is a Scunthorpe document'); ok(r.body.content === 'my class assignment is a Scunthorpe document', 'innocent words are never touched');
+  r = await say(A.token, 'bullshit'); ok(r.body.content === 'bullshit', 'the owner is not filtered');
+  const wm = (await say(W.token, 'clean text')).body; r = await api('PATCH', `/channels/${text.id}/messages/${wm.id}`, W.token, { content: 'now with damn in it' }); ok(r.status === 200 && !/damn/i.test(r.body.content), 'edits are filtered too');
+  r = await api('PATCH', `/servers/${S.id}`, A.token, { profanity: 'block' });
+  r = await say(W.token, 'you dumbass'); ok(r.status === 400 && r.body.code === 'profanity', 'block mode refuses the message');
+  r = await api('PATCH', `/channels/${text.id}/messages/${wm.id}`, W.token, { content: 'shit edit' }); ok(r.status === 400, '… and the edit');
+  r = await api('POST', `/channels/${text.id}/messages`, W.token, { poll: { question: 'is this fucking ok?', answers: [{ text: 'yes' }, { text: 'no' }] } }); ok(r.status === 400, '… and a poll question');
+  const rulesForum = (await api('POST', `/servers/${S.id}/channels`, A.token, { name: 'swear-forum', type: 'forum' })).body;
+  r = await api('POST', `/channels/${rulesForum.id}/posts`, W.token, { title: 'what the fuck', content: 'hello' }); ok(r.status === 400, '… and a forum post title');
+  r = await api('PATCH', `/servers/${S.id}`, A.token, { blockedWords: 'Pineapple Pizza, Heck\n  x ,pineapple pizza', profanity: 'censor' });
+  ok(JSON.stringify(r.body.safety.words) === JSON.stringify(['pineapple pizza', 'heck']), 'the server can add its own words');
+  ok(!('words' in (await api('GET', '/ready', W.token)).body.servers.find((s) => s.id === S.id).safety), 'ordinary members do not get the list');
+  r = await say(W.token, 'I love pineapple pizza, heck yes'); ok(r.body.content === `I love p${'∗'.repeat(14)}, h∗∗∗ yes`, 'custom words (even two-word ones) are filtered like the built-in ones');
+  r = await api('PATCH', `/servers/${S.id}`, A.token, { profanity: 'off' }); r = await say(W.token, 'fuck pineapple pizza'); ok(r.body.content === 'fuck pineapple pizza', 'switching it off lets everything through again');
+
+  console.log('\nSend GIFs & Stickers permission');
+  const stkOnly = await api('POST', `/servers/${S.id}/stickers`, A.token, { name: 'Perm', description: 'x', url: (await upload(A.token, PNG)).url });
+  const sendSticker = (tok) => api('POST', `/channels/${text.id}/messages`, tok, { sticker: { custom: { serverId: S.id, id: stkOnly.body.id } } });
+  ok((await api('GET', '/ready', A.token)).body.servers.find((x) => x.id === S.id).roles.find((x) => x.id === S.id).permissions.includes('SEND_GIFS'), 'SEND_GIFS is part of the default permissions of a new server');
+  r = await sendSticker(W.token); ok(r.status === 200, 'with the permission (the default) stickers can be sent');
+  const everyoneRole = (await api('GET', '/ready', A.token)).body.servers.find((s) => s.id === S.id).roles.find((x) => x.id === S.id);
+  r = await api('PATCH', `/servers/${S.id}/roles/${S.id}`, A.token, { permissions: everyoneRole.permissions.filter((p) => p !== 'SEND_GIFS') }); ok(r.status === 200, 'remove it from @everyone');
+  r = await sendSticker(W.token); ok(r.status === 403 && r.body.code === 'no_gifs', 'now stickers (and GIFs) are refused');
+  r = await say(W.token, 'but words are fine'); ok(r.status === 200, '… while ordinary messages still work');
+  r = await sendSticker(A.token); ok(r.status === 200, 'the owner is unaffected');
+  r = await api('POST', `/servers/${S.id}/roles`, A.token, { name: 'Memers', permissions: ['SEND_GIFS'] }); const memer = r.body;
+  await api('PUT', `/servers/${S.id}/members/${W.user.id}/roles/${memer.id}`, A.token); r = await sendSticker(W.token); ok(r.status === 200, 'a role that grants it brings it back');
+  await api('PATCH', `/servers/${S.id}/roles/${S.id}`, A.token, { permissions: everyoneRole.permissions });
+  ok((await api('GET', '/ready', W.token)).body.servers.find((s) => s.id === S.id).perms.includes('SEND_GIFS'), 'members can see whether they have it (the picker buttons hide without it)');
 
   /* ---------------------------------------------------------------- GIF icons and banners */
   console.log('\nGIF server icon and banner');
@@ -275,6 +354,63 @@ async function main() {
   r = await join2(h2.token, h2H); ok(r.status === 403, 'a new account is matched by the trusted header, whatever X-Forwarded-For claims');
   const h3H = { 'cf-connecting-ip': '198.51.100.77', 'x-forwarded-for': '203.0.113.99' }; const h3 = await reg2('hdr3', h3H);
   r = await join2(h3.token, h3H); ok(r.status === 200, 'a forged X-Forwarded-For cannot be used to frame someone else’s network');
+
+  /* ---------------------------------------------------------------- profile styling + GIF banners */
+  console.log('\nProfile styling');
+  r = await api('PATCH', '/me', A.token, { banner: gifUp.url }); ok(r.status === 200 && r.body.banner === gifUp.url, 'a GIF can be your profile banner');
+  const style = { colors: { mode: 'gradient', a: '#FF0000', b: '#0000ff', angle: 999, tint: 5 }, outline: { color: '#00ff00', color2: '#ffff00', width: 99, style: 'wavy' }, shadow: { color: '#112233', blur: 500, x: 3 },
+    fonts: { name: 'pacifico', text: 'not-a-font' }, nameColor: { mode: 'gradient', a: '#FDE047', b: '#22c55e', angle: 720 }, nameOutline: { mode: 'solid', a: '#14532d', width: 99 }, nameShadow: { color: '#14532d', angle: 135, distance: 400, blur: 2 },
+    effect: { id: 'rays', color: '#ffffff', density: 9 }, frame: { id: 'neon', color: '#123456' }, avatarFrame: { id: 'spin', color: '#aa00aa' }, nameStyle: { color: '#abcdef' }, evil: { x: 1 } };
+  r = await api('PATCH', '/me', A.token, { profile: style }); const ps = r.body.profile;
+  ok(r.status === 200 && ps.colors.a === '#ff0000' && ps.colors.angle === 360 && ps.colors.tint === 1 && ps.outline.width === 8 && ps.outline.style === 'solid' && ps.outline.color2 === '#ffff00' && ps.shadow.blur === 80, 'colours, outline and shadow are saved (numbers clamped, unknown styles replaced)');
+  ok(ps.fonts.name === 'pacifico' && ps.fonts.text === null && ps.nameColor.mode === 'gradient' && ps.nameColor.a === '#fde047' && ps.nameColor.angle === 360 && ps.nameOutline.width === 6 && ps.nameOutline.b === '#14532d' && ps.nameShadow.distance === 24 && ps.nameShadow.angle === 135, 'the name font, a gradient name color, its outline and an angled shadow are saved (clamped)');
+  ok(ps.effect.id === 'rays' && ps.effect.density === 1 && !('frame' in ps) && !('avatarFrame' in ps) && !('nameStyle' in ps) && !('evil' in ps), 'effects are saved; frames, the old name style and unknown parts are dropped');
+  r = await api('GET', `/users/${A.user.id}`, T.token); ok(r.status === 200 && r.body.user.profile?.nameShadow?.color === '#14532d', 'other people see it on your profile');
+  r = await api('GET', '/ready', T.token); ok(r.body.users.find((x) => x.id === A.user.id)?.profile?.effect?.id === 'rays', '… and on you everywhere you appear');
+  r = await api('PATCH', '/me', A.token, { profile: { effect: { id: 'lasers' }, avatarFrame: { id: 'ring' } } }); ok(r.status === 200 && r.body.profile === null, 'nothing valid left means no style');
+  for (const [id] of EFFECTS) { r = await api('PATCH', '/me', A.token, { profile: { effect: { id, color: '#336699' } } }); if (r.status !== 200 || r.body.profile?.effect?.id !== id) { ok(false, `effect ${id} is accepted`); break; } }
+  ok(EFFECTS.length >= 40, `${EFFECTS.length} effects to choose from, and every one is accepted`);
+  const rec = new Proxy(function () {}, { get: (t, k) => (k === 'canvas' ? { width: 300, height: 200 } : rec), apply: () => rec, set: () => true });   // a canvas context that records nothing
+  let engineError = null;
+  for (const [id] of EFFECTS) { const eng = ENGINES[id]; try { const parts = Array.from({ length: eng.count }, () => eng.make(300, 200, Math.random, true)); for (let k = 0; k < 40; k++) { for (const p of parts) eng.update(p, 0.033, 300, 200, Math.random, k * 0.033); if (eng.drawAll) eng.drawAll(rec, parts, '#336699', null, k * 0.033, 300, 200); else for (const p of parts) eng.draw(rec, p, '#336699', '#cc6699', k * 0.033, 300, 200); } } catch (e) { engineError = `${id}: ${e.message}`; break; } }
+  ok(!engineError, 'every effect engine runs without errors', engineError);
+  r = await api('PATCH', '/me', A.token, { profile: style }); r = await api('PATCH', '/me', A.token, { profile: null }); ok(r.status === 200 && r.body.profile === null, 'a style can be removed');
+  r = await api('PATCH', '/me', A.token, { profile: 'pink' }); ok(r.status === 400, 'a style that is not an object is refused');
+  r = await api('PATCH', '/me', A.token, { profile: { fonts: { name: 'pacifico' }, junk: 'x'.repeat(5000) } }); ok(r.status === 400, 'and so is an oversized one');
+
+  /* ---------------------------------------------------------------- hosted TURN relays (calls need one when two networks can't link directly) */
+  console.log('\nHosted TURN relays');
+  const seen = [];
+  const relay = http.createServer((req, res) => {
+    let body = ''; req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, body });
+      if (req.url.startsWith('/v1/turn/keys/key-1/credentials/generate-ice-servers') && req.headers.authorization === 'Bearer cf-token') {
+        res.setHeader('content-type', 'application/json'); res.statusCode = 201;
+        return res.end(JSON.stringify({ iceServers: [{ urls: ['stun:stun.cloudflare.test:3478'] }, { urls: ['turn:turn.cloudflare.test:3478?transport=udp', 'turns:turn.cloudflare.test:5349?transport=tcp'], username: 'cf-user', credential: 'cf-cred' }] }));
+      }
+      if (req.url.startsWith('/api/v1/turn/credentials?apiKey=met-key')) {
+        res.setHeader('content-type', 'application/json');
+        return res.end(JSON.stringify([{ urls: 'stun:relay.metered.test:80' }, { urls: 'turn:relay.metered.test:443', username: 'm-user', credential: 'm-cred' }]));
+      }
+      res.statusCode = 401; res.end('{"error":"nope"}');
+    });
+  });
+  await new Promise((r) => relay.listen(0, '127.0.0.1', r)); const relayBase = `http://127.0.0.1:${relay.address().port}`;
+  const iceOf = async (tok) => (await api('GET', '/ice', tok)).body;
+  r = await api('GET', '/ice', A.token); ok(r.body.turn === false && r.body.iceServers.length === 1 && r.body.iceServers[0].urls.length === 3, 'with no relay configured there is only STUN (the call can fail across strict networks)');
+  await stopServer(); startServer({ CLOUDFLARE_TURN_KEY_ID: 'key-1', CLOUDFLARE_TURN_API_TOKEN: 'cf-token', CLOUDFLARE_TURN_API_BASE: relayBase }); await ready();
+  let ice = await iceOf(A.token);
+  const cfTurn = ice.iceServers.find((s) => s.username === 'cf-user');
+  ok(ice.turn === true && cfTurn?.credential === 'cf-cred' && cfTurn.urls.length === 2 && ice.iceServers[0].urls.some((u) => u.startsWith('stun:')), 'Cloudflare: the relay’s servers and credentials are handed to the browser');
+  ok(seen.length === 1 && seen[0].method === 'POST' && JSON.parse(seen[0].body).ttl === 86400, '… fetched once with the server’s own token');
+  await iceOf(T.token); await iceOf(A.token); ok(seen.length === 1, '… and cached, not fetched for every person who joins a call');
+  r = await api('GET', '/config', null); ok(r.body.turn === true, 'the config tells the client a relay exists');
+  await stopServer(); startServer({ METERED_APP: 'demo', METERED_API_KEY: 'met-key', METERED_API_BASE: relayBase }); await ready();
+  ice = await iceOf(A.token); ok(ice.turn === true && ice.iceServers.some((s) => s.username === 'm-user' && s.credential === 'm-cred'), 'Metered: works the same way');
+  await stopServer(); startServer({ CLOUDFLARE_TURN_KEY_ID: 'key-1', CLOUDFLARE_TURN_API_TOKEN: 'wrong', CLOUDFLARE_TURN_API_BASE: relayBase }); await ready();
+  ice = await iceOf(A.token); ok(ice.turn === false && ice.iceServers.length === 1, 'a relay that refuses the key never breaks calls (STUN only)');
+  relay.close();
 
   /* ---------------------------------------------------------------- email verification still works for those who give an email */
   console.log('\nEmail verification and optional emails together');

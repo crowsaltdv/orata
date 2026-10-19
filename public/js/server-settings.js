@@ -2,7 +2,7 @@
 import { html, useState, useEffect, useRef, cx, formatMemberSince, relTime, copyText } from '/js/lib.js';
 import { state, set, useSel, openModal, closeModal, closePopover, toast, hasPerm, go, memberOf, addUsers } from '/js/store.js';
 import { Icon } from '/js/icons.js';
-import { Btn, Field, TextInput, Toggle, SettingRow, Section, Modal, MODALS, Avatar, ServerIcon, ColorSwatch, Dropdown, Empty, confirmDialog, useEscape, Spinner } from '/js/ui.js';
+import { Btn, Field, TextInput, Toggle, SettingRow, Section, Segmented, Modal, MODALS, Avatar, ServerIcon, ColorSwatch, Dropdown, Empty, confirmDialog, useEscape, Spinner, useSaveBar } from '/js/ui.js';
 import { api, upload } from '/js/api.js';
 import { act, errMsg } from '/js/actions.js';
 import { chooseAndUploadImage, uploadGifFrom, pickFile, cropImage } from '/js/imageutil.js';
@@ -34,6 +34,7 @@ function Overview({ server }) {
   }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });
   const save = async () => { setBusy(true); await act(api.patch(`/servers/${server.id}`, d), { success: 'Server updated' }); setBusy(false); };
   const texts = server.channels.filter((c) => c.type === 'text');
+  useSaveBar(dirty && can, { save, reset: () => setD(orig), busy });
   return html`<div class="s-page">
     <${Section} title=${t('Server overview')}>
       <div class="so-top"><div class="so-icon"><${ServerIcon} server=${{ ...server, ...d }} size=${96} class="so-ic" />
@@ -50,7 +51,6 @@ function Overview({ server }) {
     <//>
     ${server.ownerId === state.me.id ? html`<${Section} title=${t('Danger zone')}>
       <div class="danger-zone"><div class="btn-row"><${Btn} icon="crown" onClick=${() => openModal('transfer', { serverId: server.id })}>${t('Transfer ownership')}<//><${Btn} variant="danger" icon="trash" onClick=${() => deleteServer(server)}>${t('Delete server')}<//></div></div><//>` : null}
-    ${dirty && can ? html`<div class="save-bar slide-up"><span><${Icon} name="alert-triangle" size=${18} /> ${t('Careful — you have unsaved changes!')}</span><${Btn} variant="ghost" onClick=${() => setD(orig)}>${t('Reset')}<//><${Btn} variant="primary" loading=${busy} onClick=${save}>${t('Save Changes')}<//></div>` : null}
   </div>`;
 }
 MODALS.transfer = function Transfer({ id, serverId }) {
@@ -74,6 +74,7 @@ function Roles({ server }) {
   const toggle = (p) => setD((x) => ({ ...x, permissions: x.permissions.includes(p) ? x.permissions.filter((y) => y !== p) : [...x.permissions, p] }));
   const move = async (dir) => { const i = roles.findIndex((r) => r.id === role.id); const other = roles[i - dir]; if (!other || other.id === server.id) return; await act(Promise.all([api.patch(`/servers/${server.id}/roles/${role.id}`, { position: other.position }), api.patch(`/servers/${server.id}/roles/${other.id}`, { position: role.position })])); };
   const count = (rid) => rid === server.id ? server.members.length : server.members.filter((m) => m.roles.includes(rid)).length;
+  useSaveBar(dirty && can, { save, reset: () => setD({ name: role.name, color: role.color, hoist: role.hoist, permissions: role.permissions }), busy });
   return html`<div class="s-page roles-page">
     <div class="roles-list"><div class="rl-head"><b>${t('Roles')}</b>${can ? html`<${Btn} size="sm" variant="primary" icon="plus" onClick=${create}>${t('Create')}<//>` : null}</div>
       ${roles.map((r) => html`<button type="button" key=${r.id} class=${cx('role-item', sel === r.id && 'on')} onClick=${() => setSel(r.id)}><i style=${{ background: r.color || 'var(--text-3)' }}></i><span>${r.id === server.id ? '@everyone' : r.name}</span><small>${count(r.id)}</small></button>`)}</div>
@@ -85,7 +86,6 @@ function Roles({ server }) {
       <h4 class="s-sub">${t('Permissions')}</h4>
       <div class="perm-list">${PERM_ORDER.map((p) => html`<${SettingRow} key=${p} title=${PERM_INFO[p][0]} desc=${PERM_INFO[p][1]}><${Toggle} checked=${d.permissions.includes(p)} onChange=${() => toggle(p)} disabled=${!can} /><//>`)}</div>
     </div>
-    ${dirty && can ? html`<div class="save-bar slide-up"><span><${Icon} name="alert-triangle" size=${18} /> ${t('Careful — you have unsaved changes!')}</span><${Btn} variant="ghost" onClick=${() => setD({ name: role.name, color: role.color, hoist: role.hoist, permissions: role.permissions })}>${t('Reset')}<//><${Btn} variant="primary" loading=${busy} onClick=${save}>${t('Save Changes')}<//></div>` : null}
   </div>`;
 }
 
@@ -179,17 +179,36 @@ function Bans({ server }) {
   const [list, setList] = useState(null);
   const load = () => api.get(`/servers/${server.id}/bans`).then((l) => { addUsers(l); setList(l); }).catch(() => setList([]));
   useEffect(() => { load(); }, [server.id]);
-  return html`<div class="s-page"><${Section} title=${t('Bans')} desc=${t('Banning also blocks the person’s network, so they can’t simply make a new account and rejoin. Unbanning frees it again.')}>
+  return html`<div class="s-page"><${Section} title=${t('Bans')} desc=${t('Banning also blocks the person’s device and network and bans their other accounts (alts), so they can’t simply make a new account and rejoin. Unbanning frees them again.')}>
     ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : list.length ? html`<div class="mem-table">${list.map((u) => html`<div class="mem-row" key=${u.id}><${Avatar} user=${u} size=${36} /><div class="mem-name"><b>${u.displayName}</b><small>${u.username}${u.ban?.reason ? ` · ${u.ban.reason}` : ''}</small></div>
       <small class="mem-join">${u.ban?.by ? `${t('by')} ${u.ban.by}` : ''}${u.ban?.at ? ` · ${formatMemberSince(u.ban.at)}` : ''}</small>
-      ${u.ban?.ipBanned ? html`<span class="role-chip" data-tip=${t('Their network is blocked too')}><i style=${{ background: '#e5314f' }}></i>${t('IP ban')}</span>` : null}
+      ${u.ban?.altOf ? html`<span class="role-chip" data-tip=${t('Banned along with this person because they share a device or network')}><i style=${{ background: '#f59e0b' }}></i>${t('Alt of')} ${u.ban.altOf}</span>` : u.ban?.ipBanned ? html`<span class="role-chip" data-tip=${t('Their device and network are blocked too')}><i style=${{ background: '#e5314f' }}></i>${t('IP ban')}</span>` : null}
       <span class="chs-acts" style="opacity:1"><${Btn} size="sm" onClick=${async () => { await act(api.del(`/servers/${server.id}/bans/${u.id}`)); load(); }}>${t('Unban')}<//></span></div>`)}</div>` : html`<${Empty} icon="ban" title=${t('No bans')}>${t('Everyone here is behaving.')}<//>`}
   <//></div>`;
 }
 
+/* ------------------------------------------------------------------ safety */
+function Safety({ server }) {
+  const can = hasPerm(server.id, 'MANAGE_SERVER');
+  const orig = { profanity: server.safety?.profanity || 'off', blockedWords: (server.safety?.words || []).join(', ') };
+  const [d, setD] = useState(orig); const [busy, setBusy] = useState(false);
+  const dirty = JSON.stringify(d) !== JSON.stringify(orig);
+  const save = async () => { setBusy(true); await act(api.patch(`/servers/${server.id}`, d), { success: 'Safety settings saved' }); setBusy(false); };
+  useSaveBar(dirty && can, { save, reset: () => setD(orig), busy });
+  const MODES = [{ value: 'off', label: t('Off') }, { value: 'censor', label: t('Hide the words') }, { value: 'block', label: t('Block the message') }];
+  const desc = { off: t('Nothing is filtered.'), censor: t('Swear words are replaced with symbols (f∗∗∗) and the message is sent.'), block: t('A message with a swear word is not sent; the person is told why.') }[d.profanity];
+  return html`<div class="s-page">
+    <${Section} title=${t('Swearing protection')} desc=${t('Keeps the language in this server clean. It catches the usual tricks (extra letters, symbols between letters, look-alike characters) but never ordinary words. Off by default.')}>
+      <${SettingRow} title=${t('What happens to a swear word')} desc=${desc}><${Segmented} options=${MODES} value=${d.profanity} onChange=${(v) => setD({ ...d, profanity: v })} /><//>
+      <${Field} label=${t('Blocked words')} hint=${t('Your own words, separated by commas or new lines. They are treated like the built-in ones.')}><textarea class="textarea" rows="4" maxlength="1500" value=${d.blockedWords} disabled=${!can} onInput=${(e) => setD({ ...d, blockedWords: e.target.value })} placeholder=${t('pineapple pizza, heck …')}></textarea><//>
+      <p class="text-muted" style="font-size:13px;margin:6px 0 0">${t('Applies to messages, edits, polls and forum posts in this server — not to DMs. The owner and administrators are never filtered.')}</p>
+    <//>
+  </div>`;
+}
+
 /* ------------------------------------------------------------------ shell */
-const NAV = [['overview', 'server', 'Overview'], ['roles', 'tag', 'Roles'], ['channels', 'hash', 'Channels'], ['emoji', 'smile', 'Emoji'], ['stickers', 'sticker', 'Stickers'], ['members', 'users', 'Members'], ['invites', 'link', 'Invites'], ['bans', 'ban', 'Bans']];
-const PAGES = { overview: Overview, roles: Roles, channels: Channels, emoji: EmojiPage, stickers: StickerPage, members: Members, invites: Invites, bans: Bans };
+const NAV = [['overview', 'server', 'Overview'], ['roles', 'tag', 'Roles'], ['channels', 'hash', 'Channels'], ['emoji', 'smile', 'Emoji'], ['stickers', 'sticker', 'Stickers'], ['members', 'users', 'Members'], ['invites', 'link', 'Invites'], ['bans', 'ban', 'Bans'], ['safety', 'shield', 'Safety']];
+const PAGES = { overview: Overview, roles: Roles, channels: Channels, emoji: EmojiPage, stickers: StickerPage, members: Members, invites: Invites, bans: Bans, safety: Safety };
 export function ServerSettingsHost() {
   const ss = useSel((s) => s.serverSettings); const server = useSel((s) => (s.serverSettings ? s.servers[s.serverSettings.id] : null));
   useEscape(() => { if (!state.modals.length && !state.popover && !state.ctx) close(); }, !!ss);

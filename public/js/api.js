@@ -6,9 +6,18 @@ export class ApiError extends Error {
 }
 export const hooks = { unauthorized: () => {} };
 
+/** A random id for this browser, created once. The server keeps only a keyed hash of it, so a ban can follow a person to their other accounts. */
+const deviceId = (() => {
+  try {
+    let id = localStorage.getItem('orate:device');
+    if (!id || !/^[A-Za-z0-9_-]{16,64}$/.test(id)) { id = Array.from(crypto.getRandomValues(new Uint8Array(18)), (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 32); localStorage.setItem('orate:device', id); }
+    return id;
+  } catch { return null; }   // storage blocked: no device id, the network check still applies
+})();
+
 async function req(method, url, body, extra = {}) {
   const sentWith = state.token;
-  const headers = { ...(state.token ? { authorization: 'Bearer ' + state.token } : {}), ...(state.sessionId ? { 'x-conn': state.sessionId } : {}), ...extra.headers };
+  const headers = { ...(state.token ? { authorization: 'Bearer ' + state.token } : {}), ...(state.sessionId ? { 'x-conn': state.sessionId } : {}), ...(deviceId ? { 'x-orate-device': deviceId } : {}), ...extra.headers };
   let payload;
   if (body !== undefined && !(body instanceof Blob) && !(body instanceof ArrayBuffer)) { headers['content-type'] = 'application/json'; payload = JSON.stringify(body); } else payload = body;
   let res;

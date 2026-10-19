@@ -2,13 +2,15 @@
 import { html, useState, useEffect, useRef, cx, copyText, formatMemberSince, relTime, ls } from '/js/lib.js';
 import { state, set, useSel, closeModal, openModal, closePopover, setSetting, updateSettings, resetSettings, toast, updateLocal } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
-import { Btn, Field, TextInput, Toggle, SettingRow, Section, Segmented, Modal, MODALS, Avatar, ColorSwatch, Empty, confirmDialog, Dropdown, useEscape } from '/js/ui.js';
+import { Btn, Field, TextInput, Toggle, SettingRow, Section, Segmented, Modal, MODALS, Avatar, ColorSwatch, Empty, confirmDialog, Dropdown, useEscape, useSaveBar } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { act, errMsg, closeSettings, openSettings } from '/js/actions.js';
 import { logout } from '/js/events.js';
 import { chooseAndUploadImage, uploadGifFrom } from '/js/imageutil.js';
 import { openPicker } from '/js/pickers.js';
 import { ProfileCard, Banner } from '/js/profile.js';
+import { ProfileStyleEditor } from '/js/profile-style.js';
+import { CloakPage } from '/js/cloak.js';
 import { ThemePage, WallpaperPage, EffectsPage, FontsPage, ChatPage, SToggle, SSlider } from '/js/settings-appearance.js';
 import { VoicePage } from '/js/settings-voice.js';
 import { LANGUAGES, t } from '/js/i18n.js';
@@ -69,7 +71,7 @@ function AccountPage() {
 /* ------------------------------------------------------------------ profile */
 function ProfilePage() {
   const me = useSel((s) => s.me);
-  const orig = { displayName: me.displayName, pronouns: me.pronouns || '', bio: me.bio || '', avatar: me.avatar, banner: me.banner, bannerColor: me.bannerColor || '#6d28d9' };
+  const orig = { displayName: me.displayName, pronouns: me.pronouns || '', bio: me.bio || '', avatar: me.avatar, banner: me.banner, bannerColor: me.bannerColor || '#6d28d9', profile: me.profile || null };
   const [d, setD] = useState(orig); const [busy, setBusy] = useState(false); const [up, setUp] = useState(null);
   const dirty = JSON.stringify(d) !== JSON.stringify(orig);
   const up1 = (k, v) => setD((p) => ({ ...p, [k]: v }));
@@ -82,8 +84,17 @@ function ProfilePage() {
       setUp(null);
     },
   }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });
-  const save = async () => { setBusy(true); const r = await act(api.patch('/me', { displayName: d.displayName.trim() || me.displayName, pronouns: d.pronouns, bio: d.bio, avatar: d.avatar, banner: d.banner, bannerColor: d.bannerColor }), { success: 'Profile saved' }); setBusy(false); if (r) set({}); };
+  const gifBanner = (anchor) => openPicker(anchor, {
+    onGif: async (item) => {
+      closePopover(); setUp('banner');
+      try { up1('banner', await uploadGifFrom(item.full?.gif || item.preview?.gif || item.preview?.url, 'banner.gif')); } catch (e) { toast(errMsg(e), 'error'); }
+      setUp(null);
+    },
+  }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });
+  const changeProfile = (fn) => setD((p) => ({ ...p, profile: fn(p.profile || null) }));
+  const save = async () => { setBusy(true); const r = await act(api.patch('/me', { displayName: d.displayName.trim() || me.displayName, pronouns: d.pronouns, bio: d.bio, avatar: d.avatar, banner: d.banner, bannerColor: d.bannerColor, profile: d.profile }), { success: 'Profile saved' }); setBusy(false); if (r) set({}); };
   const preview = { ...me, ...d };
+  useSaveBar(dirty, { save, reset: () => setD(orig), busy });
   return html`<div class="s-page profile-edit">
     <div class="pe-form">
       <${Section} title=${t('Profile')} desc=${t('How you appear to everyone on Orate.')}>
@@ -97,11 +108,14 @@ function ProfilePage() {
       <//>
       <${Section} title=${t('Banner')}>
         <div class="pe-banner"><${Banner} user=${preview} height=${96} /></div>
-        <div class="pe-btns"><${Btn} variant="primary" loading=${up === 'banner'} icon="image" onClick=${() => img('banner', { aspect: 3, out: 960, title: 'Banner' })}>${t('Change Banner')}<//>${d.banner ? html`<${Btn} variant="ghost" onClick=${() => up1('banner', null)}>${t('Remove')}<//>` : null}<span class="pe-color"><${ColorSwatch} value=${d.bannerColor} onChange=${(c) => up1('bannerColor', c)} label="Banner color" size=${34} /><small>${t('Banner color')}</small></span></div>
+        <div class="pe-btns"><${Btn} variant="primary" loading=${up === 'banner'} icon="image" onClick=${() => img('banner', { aspect: 3, out: 960, title: 'Banner', allowGif: true })}>${t('Change Banner')}<//>${state.gifOk !== false ? html`<${Btn} icon="sticker" disabled=${up === 'banner'} onClick=${(e) => gifBanner(e.currentTarget)}>${t('Choose a GIF')}<//>` : null}${d.banner ? html`<${Btn} variant="ghost" onClick=${() => up1('banner', null)}>${t('Remove')}<//>` : null}<span class="pe-color"><${ColorSwatch} value=${d.bannerColor} onChange=${(c) => up1('bannerColor', c)} label="Banner color" size=${34} /><small>${t('Banner color')}</small></span></div>
+        <p class="text-muted" style="font-size:13px;margin:10px 0 0">${t('Upload a GIF or pick one from KLIPY — animated banners play everywhere.')}</p>
+      <//>
+      <${Section} title=${t('Profile style')} desc=${t('Colors, outline, fonts, name style and effects for your profile. The preview updates as you go.')}>
+        <${ProfileStyleEditor} value=${d.profile} change=${changeProfile} me=${me} />
       <//>
     </div>
     <div class="pe-preview"><h4 class="s-sub">${t('Preview')}</h4><div class="pop-card profile-pop"><${ProfileCard} userId=${me.id} userOverride=${preview} mode="modal" /></div></div>
-    ${dirty ? html`<div class="save-bar slide-up"><span><${Icon} name="alert-triangle" size=${18} /> ${t('Careful — you have unsaved changes!')}</span><${Btn} variant="ghost" onClick=${() => setD(orig)}>${t('Reset')}<//><${Btn} variant="primary" loading=${busy} onClick=${save}>${t('Save Changes')}<//></div>` : null}
   </div>`;
 }
 
@@ -196,9 +210,9 @@ function AdvancedPage() {
 const NAV = [
   { group: 'User Settings', items: [['account', 'user', 'My Account'], ['profile', 'smile', 'Profile']] },
   { group: 'Appearance', items: [['appearance', 'palette', 'Theme'], ['wallpaper', 'image', 'Wallpaper'], ['effects', 'cloud-rain', 'Rain & Glass'], ['fonts', 'type', 'Fonts'], ['chat', 'message', 'Chat']] },
-  { group: 'App Settings', items: [['access', 'eye', 'Accessibility'], ['voice', 'mic', 'Voice & Video'], ['notifications', 'bell', 'Notifications'], ['language', 'globe', 'Language & Time'], ['keybinds', 'keyboard', 'Keybinds'], ['privacy', 'shield', 'Privacy & Safety'], ['advanced', 'sliders', 'Advanced']] },
+  { group: 'App Settings', items: [['access', 'eye', 'Accessibility'], ['voice', 'mic', 'Voice & Video'], ['notifications', 'bell', 'Notifications'], ['language', 'globe', 'Language & Time'], ['keybinds', 'keyboard', 'Keybinds'], ['privacy', 'shield', 'Privacy & Safety'], ['cloak', 'monitor', 'Cloak'], ['advanced', 'sliders', 'Advanced']] },
 ];
-const PAGES = { account: AccountPage, profile: ProfilePage, appearance: ThemePage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, advanced: AdvancedPage };
+const PAGES = { account: AccountPage, profile: ProfilePage, appearance: ThemePage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, cloak: CloakPage, advanced: AdvancedPage };
 
 export function SettingsHost() {
   const page = useSel((s) => s.settingsPage);

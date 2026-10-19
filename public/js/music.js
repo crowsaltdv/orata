@@ -1,14 +1,19 @@
-// Orate — music: an Apple Music search + preview player (opened from the note icon above Home), a mini player, and the "Listening to" card shown on profiles.
+// Orate — music: the Music page (/music, opened from the note icon above Home) with Apple Music search, top-song categories and a preview player, a mini player, and the "Listening to" card shown on profiles.
 // The server talks to Apple Music (see server/music.js); the browser only plays the 30-second previews from our own /api/music/play links.
 import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
-import { state, set, useSel, toast, setSetting } from '/js/store.js';
+import { state, set, useSel, toast, setSetting, go } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Spinner, IconBtn, Toggle } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
 
 const setMusic = (patch) => set({ music: { ...state.music, ...patch } });
-export function toggleMusicPanel() { setMusic({ open: !state.music.open }); }
+export const openMusic = () => go('/music');
+/** The last tracks you played, newest first (kept in this browser). */
+function pushRecent(track) {
+  const recent = [track, ...(state.music.recent || []).filter((x) => x.id !== track.id)].slice(0, 20);
+  setMusic({ recent }); ls('musicRecent', null, recent);
+}
 
 /* ------------------------------------------------------------------ player */
 let audio = null; let reqId = 0; let lastSync = 0;
@@ -51,6 +56,7 @@ async function load(track, queue, index) {
   const id = ++reqId;
   teardown();
   setMusic({ track, queue: queue || state.music.queue, index: index ?? state.music.index, loading: true, playing: false, position: 0, duration: PREVIEW_SECONDS, error: null });
+  pushRecent(track);
   let src;
   try { src = await api.get(`/music/tracks/${encodeURIComponent(track.id)}/source`); } catch (e) { if (id === reqId) { fail(e.message); if (e.code === 'music_unavailable') setTimeout(() => id === reqId && next(true), 1500); } return; }   // a track Audiomack can't play is skipped; real problems (keys, network) are not retried down the list
   if (id !== reqId) return;
@@ -71,6 +77,17 @@ export const music = {
     reqId++; teardown();
     if (!silent) clearListening();
     setMusic({ track: null, queue: [], index: -1, playing: false, loading: false, position: 0, duration: 0, error: null });
+  },
+  async loadGenres() {
+    if (state.music.genres) return;
+    try { setMusic({ genres: (await api.get('/music/charts')).genres }); } catch { /* the page still works with just "Top Songs" */ }
+  },
+  async openChart(key, retry = false) {
+    setMusic({ category: key });
+    if (state.music.charts[key] && !retry) return;
+    setMusic({ chartLoading: true, chartError: null });
+    try { const r = await api.get(`/music/charts/${encodeURIComponent(key)}`); setMusic({ charts: { ...state.music.charts, [key]: r.tracks }, chartLoading: state.music.category === key ? false : state.music.chartLoading }); }
+    catch (e) { if (state.music.category === key) setMusic({ chartLoading: false, chartError: e.message }); }
   },
   async search(q) {
     const query = q.trim(); setMusic({ query });
@@ -113,53 +130,98 @@ function Controls({ big }) {
   </div>`;
 }
 
-function NowPlaying() {
+/** A square cover that scales with its grid cell. */
+function Cover({ src, playing }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [src]);
+  return html`<span class=${cx('m-art cover', playing && 'on')}>${src && !broken ? html`<img src=${src} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false" onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${34} />`}${playing ? html`<span class="eq"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
+}
+
+/** What is playing, big, with the controls. Shown above everything else on the page. */
+function Hero() {
   const track = useSel((s) => s.music.track); const playing = useSel((s) => s.music.playing); const volume = useSel((s) => s.music.volume);
   const show = useSel((s) => s.settings.privacy?.showActivity !== false);
-  if (!track) return null;
-  return html`<div class="m-now">
-    <${Art} src=${track.artwork} size=${96} playing=${playing} />
-    <div class="m-now-text"><b title=${track.title}>${track.title}</b>
-      <a href=${track.artistUrl || track.url} target="_blank" rel="noopener noreferrer">${track.artist}</a>
-      <span class="m-chip">${t('30-second preview')}</span></div>
-    <${Progress} />
-    <${Controls} big=${true} />
-    <div class="m-extra">
-      <label class="m-vol"><${Icon} name=${volume === 0 ? 'volume-x' : volume < 0.5 ? 'volume-1' : 'volume'} size=${18} />
-        <input type="range" min="0" max="1" step="0.01" value=${volume} style=${{ '--p': `${volume * 100}%` }} aria-label=${t('Volume')} onInput=${(e) => music.volume(Number(e.target.value))} /></label>
-      <label class="m-share" data-tip=${t('Show what you’re listening to on your profile')}><span>${t('Show on my profile')}</span><${Toggle} checked=${show} onChange=${(v) => { setSetting('privacy.showActivity', v); if (v) setTimeout(() => syncListening(true), 50); }} /></label>
+  if (!track) return html`<section class="mpg-hero empty"><span class="mpg-hero-ico"><${Icon} name="music" size=${34} sw=${1.6} /></span>
+    <div><h1>${t('Music')}</h1><p>${t('Search Apple Music or pick a category below and hear a 30-second preview. What you play can show on your profile.')}</p></div></section>`;
+  return html`<section class="mpg-hero" style=${track.artwork ? { '--cover': `url("${track.artwork}")` } : null}>
+    <div class="mpg-hero-art"><${Cover} src=${track.artwork} playing=${playing} /></div>
+    <div class="mpg-now">
+      <span class="m-chip">${t('30-second preview')}</span>
+      <h2 title=${track.title}>${track.title}</h2>
+      <a class="mpg-artist" href=${track.artistUrl || track.url} target="_blank" rel="noopener noreferrer">${track.artist}</a>
+      ${track.album ? html`<small class="mpg-album">${track.album}</small>` : null}
+      <${Progress} />
+      <${Controls} big=${true} />
+      <div class="m-extra">
+        <label class="m-vol"><${Icon} name=${volume === 0 ? 'volume-x' : volume < 0.5 ? 'volume-1' : 'volume'} size=${18} />
+          <input type="range" min="0" max="1" step="0.01" value=${volume} style=${{ '--p': `${volume * 100}%` }} aria-label=${t('Volume')} onInput=${(e) => music.volume(Number(e.target.value))} /></label>
+        <label class="m-share" data-tip=${t('Show what you’re listening to on your profile')}><span>${t('Show on my profile')}</span><${Toggle} checked=${show} onChange=${(v) => { setSetting('privacy.showActivity', v); if (v) setTimeout(() => syncListening(true), 50); }} /></label>
+      </div>
+      ${track.url ? html`<div class="m-credit"><a href=${track.url} target="_blank" rel="noopener noreferrer">${t('Get the full track on')} Apple Music <${Icon} name="external" size=${12} /></a></div>` : null}
     </div>
-    <div class="m-credit">${track.url ? html`<a href=${track.url} target="_blank" rel="noopener noreferrer">${t('Get the full track on')} Apple Music <${Icon} name="external" size=${12} /></a>` : null}</div>
-  </div>`;
+  </section>`;
 }
 
-function Results() {
-  const results = useSel((s) => s.music.results); const searching = useSel((s) => s.music.searching); const error = useSel((s) => s.music.error);
+/** Songs as a grid of covers; clicking one plays it (and queues the rest of the grid after it). */
+function TrackGrid({ tracks }) {
   const cur = useSel((s) => s.music.track?.id); const playing = useSel((s) => s.music.playing);
-  if (searching && !results) return html`<div class="pk-center"><${Spinner} /></div>`;
-  if (error && !results?.length) return html`<div class="m-empty"><${Icon} name="alert-circle" size=${28} /><p>${error}</p></div>`;
-  if (!results) return html`<div class="m-empty"><${Icon} name="music" size=${34} sw=${1.5} /><b>${t('Find something to listen to')}</b><p>${t('Search Apple Music for songs and artists and hear a 30-second preview. What you play can show on your profile.')}</p></div>`;
-  if (!results.length) return html`<div class="m-empty"><p>${t('Nothing found. Try another search.')}</p></div>`;
-  return html`<div class="m-results">${results.map((tr) => html`<button type="button" key=${tr.id} class=${cx('m-track', cur === tr.id && 'cur')} onClick=${() => (cur === tr.id ? music.toggle() : music.play(tr, results))}>
-    <${Art} src=${tr.artwork} size=${44} playing=${cur === tr.id && playing} />
-    <span class="m-t-text"><b>${tr.title}</b><small>${tr.artist}${tr.album ? ` · ${tr.album}` : ''}</small></span><span class="m-t-dur">${tr.duration ? clock(tr.duration / 1000) : ''}</span></button>`)}</div>`;
+  return html`<div class="mpg-grid">${tracks.map((tr) => html`<button type="button" key=${tr.id} class=${cx('mpg-card', cur === tr.id && 'cur')} onClick=${() => (cur === tr.id ? music.toggle() : music.play(tr, tracks))} title=${`${tr.title} — ${tr.artist}`}>
+    <span class="mpg-cover"><${Cover} src=${tr.artwork} playing=${cur === tr.id && playing} /><span class="mpg-play"><${Icon} name=${cur === tr.id && playing ? 'pause' : 'play'} size=${20} fill=${true} sw=${1} /></span></span>
+    <b>${tr.title}</b><small>${tr.artist}</small></button>`)}</div>`;
 }
 
-export function MusicPanel() {
-  const open = useSel((s) => s.music.open); const ok = useSel((s) => s.musicOk); const query = useSel((s) => s.music.query);
-  const [q, setQ] = useState(query); const timer = useRef(null); const input = useRef(null);
-  useEffect(() => { if (open) { const id = setTimeout(() => input.current?.focus(), 60); return () => clearTimeout(id); } return undefined; }, [open, ok]);
-  useEffect(() => { if (!open) return undefined; const h = (e) => { if (e.key === 'Escape' && !state.modals.length && !state.ctx && !state.popover) setMusic({ open: false }); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [open]);
-  if (!open) return null;
+function Categories() {
+  const genres = useSel((s) => s.music.genres); const cat = useSel((s) => s.music.category);
+  const list = genres || [{ key: 'top', name: 'Top Songs' }];
+  return html`<div class="mpg-chips" role="tablist" aria-label=${t('Categories')}>${list.map((g) => html`<button type="button" role="tab" key=${g.key} aria-selected=${cat === g.key} class=${cx('mpg-chip', cat === g.key && 'on')} onClick=${() => music.openChart(g.key)}>${g.name}</button>`)}</div>`;
+}
+
+function Chart() {
+  const cat = useSel((s) => s.music.category); const genres = useSel((s) => s.music.genres); const tracks = useSel((s) => s.music.charts[s.music.category]);
+  const loading = useSel((s) => s.music.chartLoading); const error = useSel((s) => s.music.chartError);
+  const name = genres?.find((g) => g.key === cat)?.name || t('Top Songs');
+  return html`<section class="mpg-section"><h3>${cat === 'top' ? name : `${t('Top')} ${name}`}</h3>
+    ${tracks?.length ? html`<${TrackGrid} tracks=${tracks} />` : loading || !error ? html`<div class="pk-center"><${Spinner} /></div>` : html`<div class="m-empty"><${Icon} name="alert-circle" size=${28} /><p>${error}</p><button type="button" class="link-btn" onClick=${() => music.openChart(cat, true)}>${t('Try again')}</button></div>`}
+  </section>`;
+}
+
+function Recent() {
+  const recent = useSel((s) => s.music.recent);
+  if (!recent?.length) return null;
+  return html`<section class="mpg-section"><h3>${t('Recently played')}</h3><${TrackGrid} tracks=${recent.slice(0, 12)} /></section>`;
+}
+
+function SearchResults() {
+  const results = useSel((s) => s.music.results); const searching = useSel((s) => s.music.searching); const error = useSel((s) => s.music.error); const query = useSel((s) => s.music.query);
+  return html`<section class="mpg-section"><h3>${t('Results for')} “${query}”</h3>
+    ${searching && !results ? html`<div class="pk-center"><${Spinner} /></div>`
+      : error && !results?.length ? html`<div class="m-empty"><${Icon} name="alert-circle" size=${28} /><p>${error}</p></div>`
+        : !results?.length ? html`<div class="m-empty"><p>${t('Nothing found. Try another search.')}</p></div>`
+          : html`<${TrackGrid} tracks=${results} />`}
+  </section>`;
+}
+
+/** The Music page (`/music`): search, what is playing, categories of top songs and what you played recently. */
+export function MusicPage() {
+  const ok = useSel((s) => s.musicOk); const query = useSel((s) => s.music.query);
+  const [q, setQ] = useState(query); const timer = useRef(null);
+  useEffect(() => { if (ok !== false) { music.loadGenres(); music.openChart(state.music.category || 'top'); } }, [ok]);
   const typing = (v) => { setQ(v); clearTimeout(timer.current); timer.current = setTimeout(() => music.search(v), 450); };
-  return html`<aside class="music-panel pop-card pop-in" aria-label=${t('Music')}>
-    <header><span class="mp-title"><${Icon} name="music" size=${20} /><b>${t('Music')}</b></span><span class="mp-by">${t('via')} <a href="https://music.apple.com" target="_blank" rel="noopener noreferrer">Apple Music</a></span>
-      <${IconBtn} icon="x" label=${t('Close')} glass=${null} onClick=${() => setMusic({ open: false })} /></header>
-    ${ok === false ? html`<div class="m-empty setup"><${Icon} name="music" size=${34} sw=${1.5} /><b>${t('Music is turned off on this server')}</b>
-      <p>${t('The server admin switched the music player off.')}</p></div>`
-      : html`<div class="mp-search"><div class="input-wrap"><${Icon} name="search" size=${17} /><input ref=${input} class="input" placeholder=${t('Search songs, artists…')} value=${q} onInput=${(e) => typing(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter') { clearTimeout(timer.current); music.search(q); } }} /></div></div>
-        <div class="mp-body"><${NowPlaying} /><${Results} /></div>`}
-  </aside>`;
+  const searching = !!query.trim();
+  return html`<main class="main panel music-page view-anim">
+    <header class="m-header">
+      <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
+      <div class="m-title"><${Icon} name="music" size=${23} /><span class="name">${t('Music')}</span></div>
+      <div class="m-topic">${t('via')} <a href="https://music.apple.com" target="_blank" rel="noopener noreferrer">Apple Music</a></div>
+    </header>
+    <div class="mpg-scroll">
+      ${ok === false ? html`<div class="m-empty setup"><${Icon} name="music" size=${34} sw=${1.5} /><b>${t('Music is turned off on this server')}</b><p>${t('The server admin switched the music player off.')}</p></div>` : html`
+        <div class="mpg-search"><div class="input-wrap"><${Icon} name="search" size=${18} /><input class="input" placeholder=${t('Search songs and artists…')} value=${q} onInput=${(e) => typing(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter') { clearTimeout(timer.current); music.search(q); } }} />
+          ${q ? html`<button type="button" class="mpg-clear" aria-label=${t('Clear')} onClick=${() => { setQ(''); clearTimeout(timer.current); music.search(''); }}><${Icon} name="x" size=${16} /></button>` : null}</div></div>
+        <${Hero} />
+        ${searching ? html`<${SearchResults} />` : html`<${Categories} /><${Chart} /><${Recent} />`}`}
+    </div>
+  </main>`;
 }
 
 /** The small player above the user bar while something is loaded. */
@@ -167,7 +229,7 @@ export function MiniPlayer() {
   const track = useSel((s) => s.music.track); const playing = useSel((s) => s.music.playing);
   if (!track) return null;
   return html`<div class="mini-player">
-    <button type="button" class="mp-open" onClick=${() => setMusic({ open: true })} aria-label=${t('Open music')}><${Art} src=${track.artwork} size=${34} playing=${playing} />
+    <button type="button" class="mp-open" onClick=${openMusic} aria-label=${t('Open music')}><${Art} src=${track.artwork} size=${34} playing=${playing} />
       <span class="mp-text"><b>${track.title}</b><small>${track.artist}</small></span></button>
     <${Controls} />
     <${IconBtn} icon="x" label=${t('Stop')} size=${16} glass=${null} onClick=${() => music.stop()} />

@@ -2,7 +2,7 @@
 import { html, useEffect, cx, ls, lsRemove } from '/js/lib.js';
 import { state, set, useSel, go, openModal, closeModal, unreadInfo, getChannel, dmName } from '/js/store.js';
 import { AuthScreen, Splash } from '/js/auth.js';
-import { ModalHost, ContextMenu, PopoverHost, ToastHost } from '/js/ui.js';
+import { ModalHost, ContextMenu, PopoverHost, ToastHost, SaveBarHost } from '/js/ui.js';
 import { ServerRail } from '/js/rail.js';
 import { DmSidebar, ChannelSidebar } from '/js/sidebar.js';
 import { UserBar } from '/js/userbar.js';
@@ -18,7 +18,7 @@ import '/js/pickers.js';
 import '/js/voice.js';
 import { markAllRead, ackChannel } from '/js/actions.js';
 import { VerifyScreen, VerifyGate, VerifyBanner } from '/js/verify.js';
-import { MusicPanel } from '/js/music.js';
+import { MusicPage } from '/js/music.js';
 import { ForumView } from '/js/forum.js';
 import '/js/polls.js';
 
@@ -29,6 +29,7 @@ function MainView() {
   const isVoice = chType === 'voice';
   switch (view) {
     case 'friends': return html`<${FriendsView} />`;
+    case 'music': return html`<${MusicPage} />`;
     case 'dm': return html`<${ChatView} key=${chId} />`;
     case 'channel': return chId ? (isVoice ? html`<${VoiceChannelView} key=${chId} />` : chType === 'forum' ? html`<${ForumView} key=${chId} />` : html`<${ChatView} key=${chId} />`) : html`<main class="main panel"></main>`;
     default: return html`<${FriendsView} />`;
@@ -43,7 +44,7 @@ function Shell() {
     let n = 0; for (const id of Object.keys(s.reads)) n += s.reads[id].mentions || 0; return n;
   });
   const anyUnread = useSel((s) => Object.keys(s.lastMsg).some((id) => { const c = s.channelIndex[id]; return c && (c.type === 'text' || c.type === 'dm' || c.type === 'group') && unreadInfo(id).unread && !s.settings.mutedChannels[id] && !(s.settings.mutedServers[c.serverId]); }));
-  const chName = useSel((s) => { const c = getChannel(s.route.channelId); return c ? (c.serverId ? (c.type === 'post' ? c.name : `#${c.name}`) : dmName(c)) : view === 'friends' ? 'Friends' : ''; });
+  const chName = useSel((s) => { const c = getChannel(s.route.channelId); return c ? (c.serverId ? (c.type === 'post' ? c.name : `#${c.name}`) : dmName(c)) : view === 'friends' ? 'Friends' : view === 'music' ? 'Music' : ''; });
   useEffect(() => { document.title = `${totalUnread ? `(${totalUnread}) ` : anyUnread ? '• ' : ''}${chName ? chName + ' | ' : ''}Orate`; }, [totalUnread, anyUnread, chName]);
 
   // pending invite after login
@@ -74,8 +75,7 @@ function Shell() {
       <${UserBar} />
     </div>
     <${MainView} />
-    ${view === 'friends' ? html`<${ActiveNow} />` : html`<${RightPanel} />`}
-    <${MusicPanel} />
+    ${view === 'friends' ? html`<${ActiveNow} />` : view === 'music' ? null : html`<${RightPanel} />`}
   </div>`;
 }
 function cycle(dir, unreadOnly) {
@@ -95,7 +95,7 @@ export function App() {
   useEffect(() => { if (phase !== 'ready') document.title = 'Orate'; }, [phase]);
   return html`<div class="app-root" key=${lang}>
     ${verifying ? html`<${VerifyScreen} />` : phase === 'auth' ? html`<${AuthScreen} />` : phase === 'ready' ? (gated ? html`<${VerifyGate} />` : html`<${Shell} />`) : html`<${Splash} />`}
-    ${phase === 'ready' && !gated && !verifying ? html`<${CallOverlay} /><${QuickSwitcher} /><${SettingsHost} /><${ServerSettingsHost} /><${VerifyBanner} />` : null}
+    ${phase === 'ready' && !gated && !verifying ? html`<${CallOverlay} /><${QuickSwitcher} /><${SettingsHost} /><${ServerSettingsHost} /><${SaveBarHost} /><${VerifyBanner} />` : null}
     <${Lightbox} /><${ModalHost} /><${ContextMenu} /><${PopoverHost} /><${ToastHost} />
   </div>`;
 }

@@ -5,6 +5,25 @@ import { Icon, Logo } from '/js/icons.js';
 import { STATUS_META } from '/js/defaults.js';
 import { t } from '/js/i18n.js';
 
+/**
+ * The "you have unsaved changes" bar. Pages call useSaveBar(dirty, { save, reset, busy }); one SaveBarHost at the app root draws it,
+ * so it always floats over the bottom of the screen however long the page is (a bar inside an animated page ends up at the page's end).
+ */
+export function useSaveBar(dirty, handlers) {
+  const ref = useRef(handlers); ref.current = handlers;
+  useEffect(() => {
+    if (!dirty) { if (state.saveBar?.owner === ref) set({ saveBar: null }); return undefined; }
+    set({ saveBar: { owner: ref, busy: !!handlers.busy, save: () => ref.current.save(), reset: () => ref.current.reset() } });
+    return undefined;
+  }, [dirty, !!handlers.busy]);
+  useEffect(() => () => { if (state.saveBar?.owner === ref) set({ saveBar: null }); }, []);
+}
+export function SaveBarHost() {
+  const bar = useSel((s) => s.saveBar);
+  if (!bar) return null;
+  return html`<div class="save-bar" role="status"><span><${Icon} name="alert-triangle" size=${18} /> ${t('Careful — you have unsaved changes!')}</span><${Btn} variant="ghost" onClick=${bar.reset}>${t('Reset')}<//><${Btn} variant="primary" loading=${bar.busy} onClick=${bar.save}>${t('Save Changes')}<//></div>`;
+}
+
 export const MODALS = {}; // kind -> Component, filled by feature modules
 export const POPOVERS = {};
 

@@ -8,7 +8,9 @@ import { initTooltips } from '/js/ui.js';
 import { App } from '/js/app.js';
 import { startPerfWatchdog } from '/js/perf.js';
 import { initFx } from '/js/fx.js';
+import { initCloak } from '/js/cloak.js';
 
+initCloak();   // a saved tab cloak (title + icon) applies before anything else shows
 initTheme();
 initTooltips();
 initFx();

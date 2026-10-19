@@ -30,7 +30,7 @@ app.use((req, res, next) => {
       "img-src * data: blob:",
       "media-src * data: blob:",
       "connect-src 'self' ws: wss: blob: data:",
-      "frame-src https://www.youtube-nocookie.com https://www.youtube.com",
+      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com",   // 'self': the about:blank cloak opens Orate in a frame
       "worker-src 'self' blob:",
       "object-src 'none'", "base-uri 'self'", "form-action 'self'",
     ].join('; '),

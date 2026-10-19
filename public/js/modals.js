@@ -162,14 +162,19 @@ MODALS['edit-channel'] = function EditChannel({ id, channelId, tab: startTab }) 
 /* ------------------------------------------------------------------ ban */
 MODALS.ban = function BanModal({ id, serverId, userId }) {
   const u = state.users[userId]; const server = state.servers[serverId];
-  const [reason, setReason] = useState(''); const [del, setDel] = useState(0); const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState(''); const [del, setDel] = useState(0); const [busy, setBusy] = useState(false); const [alts, setAlts] = useState(true);
   if (!u || !server) return null;
   const DEL = [{ value: 0, label: t('Don’t delete any') }, { value: 1, label: t('Previous hour') }, { value: 24, label: t('Previous 24 hours') }, { value: 168, label: t('Previous 7 days') }];
-  const go2 = async () => { setBusy(true); const r = await act(api.put(`/servers/${serverId}/bans/${userId}`, { reason: reason.trim(), deleteHours: del }), { success: `${u.displayName} was banned` }); setBusy(false); if (r) closeModal(id); };
-  return html`<${Modal} title=${`${t('Ban')} ${u.displayName}`} subtitle=${t('They are removed from the server and can’t rejoin — with this account or a new one from the same network — until you unban them.')} width=${460} onClose=${() => closeModal(id)}
+  const go2 = async () => {
+    setBusy(true); const r = await act(api.put(`/servers/${serverId}/bans/${userId}`, { reason: reason.trim(), deleteHours: del, alts }));
+    setBusy(false);
+    if (r) { toast(r.alts?.length ? `${u.displayName} and ${r.alts.length} other account${r.alts.length === 1 ? '' : 's'} (${r.alts.map((a) => a.displayName).join(', ')}) were banned` : `${u.displayName} was banned`, 'success', 4500); closeModal(id); }
+  };
+  return html`<${Modal} title=${`${t('Ban')} ${u.displayName}`} subtitle=${t('They are removed from the server and can’t rejoin — with this account or any other from the same device or network — until you unban them.')} width=${460} onClose=${() => closeModal(id)}
     footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="danger" icon="ban" loading=${busy} onClick=${go2}>${t('Ban')}<//>`}>
     <${Field} label=${t('Reason (only moderators see it)')}><${TextInput} value=${reason} onInput=${setReason} maxlength="200" placeholder=${t('Optional')} autofocus onKeyDown=${(e) => e.key === 'Enter' && go2()} /><//>
     <${Field} label=${t('Delete their recent messages')}><${Dropdown} value=${del} options=${DEL} onChange=${setDel} /><//>
+    <${SettingRow} title=${t('Also ban their other accounts')} desc=${t('Accounts that share their device or network (their alts) are banned too. Turn this off to ban just this one.')}><${Toggle} checked=${alts} onChange=${setAlts} /><//>
   <//>`;
 };
 

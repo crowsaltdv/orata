@@ -8,6 +8,7 @@ import { act, openDm } from '/js/actions.js';
 import { renderMarkdown } from '/js/markdown.js';
 import { t } from '/js/i18n.js';
 import { ListeningCard, myListening } from '/js/music.js';
+import { cardLook, CardDecor, NameText, useProfileFonts } from '/js/profile-style.js';
 
 const cache = new Map();
 function useProfile(userId) {
@@ -42,7 +43,10 @@ export function userMenu(userId, serverId) {
     if (hasPerm(serverId, 'MANAGE_NICKNAMES')) items.push({ label: t('Change Nickname'), icon: 'edit', onClick: () => openModal('nickname', { serverId, userId }) });
     if (canRoles && roles.length) items.push({ label: t('Roles'), icon: 'tag', submenu: roles.map((r) => ({ label: r.name, checked: member.roles.includes(r.id), onClick: () => act(member.roles.includes(r.id) ? api.del(`/servers/${serverId}/members/${userId}/roles/${r.id}`) : api.put(`/servers/${serverId}/members/${userId}/roles/${r.id}`)) })) });
     if (hasPerm(serverId, 'MODERATE_MEMBERS') && userId !== server.ownerId) {
-      const set = (minutes) => act(api.put(`/servers/${serverId}/members/${userId}/timeout`, { minutes }), { success: minutes ? `${u.displayName} was timed out` : 'Timeout removed' });
+      const set = async (minutes) => {
+        const r = await act(api.put(`/servers/${serverId}/members/${userId}/timeout`, { minutes }));
+        if (r) toast(minutes ? `${u.displayName} was timed out${r.alts ? `, along with ${r.alts} other account${r.alts === 1 ? '' : 's'} of theirs` : ''}` : `Timeout removed${r.alts ? ` (and for ${r.alts} other account${r.alts === 1 ? '' : 's'})` : ''}`, 'success', 3500);
+      };
       items.push({ label: t('Timeout'), icon: 'clock', submenu: [
         ...[[1, '60 seconds'], [5, '5 minutes'], [10, '10 minutes'], [60, '1 hour'], [1440, '1 day'], [10080, '1 week']].map(([m, l]) => ({ label: t(l), onClick: () => set(m) })),
         member.timeoutUntil > Date.now() && { label: t('Remove Timeout'), icon: 'x', onClick: () => set(0) },
@@ -69,6 +73,7 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
   const member = useSel((s) => (serverId ? s.servers[serverId]?.members.find((m) => m.id === userId) : null));
   const server = useSel((s) => (serverId ? s.servers[serverId] : null));
   const d = useProfile(userId); const [msg, setMsg] = useState('');
+  useProfileFonts(user?.profile);
   if (!user) return html`<div class="profile-card ${mode}"><div class="pk-center"><${Spinner} /></div></div>`;
   const self = userId === me.id; const nick = member?.nick;
   const roles = member && server ? server.roles.filter((r) => member.roles.includes(r.id)).sort((a, b) => b.position - a.position) : [];
@@ -77,7 +82,9 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
   const listening = userId === me.id ? (playingNow ? myListening() : null) : user.listening;
   const bio = user.bio ? renderMarkdown(user.bio, { serverId }) : '';
   const act2 = (fn) => async () => { await fn(); };
-  return html`<div class=${cx('profile-card', mode)}>
+  const look = cardLook(user.profile);
+  return html`<div class=${cx('profile-card', mode, ...look.cls)} style=${look.style}>
+    <${CardDecor} profile=${user.profile} />
     <div class="pc-top"><${Banner} user=${user} height=${mode === 'panel' ? 120 : 98} />
       <div class="pc-actions">
         ${mode === 'popout' || mode === 'panel' ? html`<${IconBtn} icon="more-h" label="More" glass=${null} onClick=${(e) => { const r = e.currentTarget.getBoundingClientRect(); openContext({ clientX: r.left, clientY: r.bottom + 4 }, userMenu(userId, serverId)); }} />` : null}
@@ -88,7 +95,7 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
       <${Avatar} user=${user} size=${mode === 'panel' ? 96 : 80} status=${user.status} class="pc-avatar" />
     </div>
     <div class="pc-body">
-      <div class="pc-name"><span>${nick || user.displayName}</span>${user.bot ? html`<span class="bot-tag">APP</span>` : null}</div>
+      <div class="pc-name"><${NameText} text=${nick || user.displayName} profile=${user.profile} />${user.bot ? html`<span class="bot-tag">APP</span>` : null}</div>
       <div class="pc-user">${user.username}${user.pronouns ? html`<i> • ${user.pronouns}</i>` : null}</div>
       ${cs ? html`<div class="pc-status"><span>${cs.emoji}</span>${cs.text}</div>` : null}
       ${listening ? html`<${ListeningCard} listening=${listening} />` : null}

@@ -8,7 +8,7 @@ import { api } from '/js/api.js';
 import { confirmDialog } from '/js/ui.js';
 import { copyText } from '/js/lib.js';
 import { t } from '/js/i18n.js';
-import { toggleMusicPanel } from '/js/music.js';
+import { openMusic } from '/js/music.js';
 
 /* ------------------------------------------------------------------ layout: servers and folders in one ordered list */
 /**
@@ -188,7 +188,7 @@ export function ServerRail() {
   const folders = useSel((s) => s.settings.serverFolders);
   const route = useSel((s) => s.route.serverId);
   const view = useSel((s) => s.route.view);
-  const musicOpen = useSel((s) => s.music.open); const playing = useSel((s) => s.music.playing);
+  const musicOpen = view === 'music'; const playing = useSel((s) => s.music.playing);
   const layout = useMemo(() => railLayout(servers, order, folders), [servers, order, folders]);
   const badges = useSel((s) => Object.keys(s.servers).map((id) => { const u = serverUnread(id); return `${id}:${u.unread ? 1 : 0}:${u.mentions}`; }).join('|'));
   const dmBadge = useSel((s) => Object.values(s.dms).reduce((n, c) => { const u = unreadInfo(c.id); return n + (u.mentions || (u.unread && !s.settings.mutedChannels[c.id] ? 1 : 0)); }, 0));
@@ -222,7 +222,7 @@ export function ServerRail() {
   return html`<nav class="rail panel" aria-label="Servers">
     <div class=${cx('rail-item', musicOpen && 'active')}>
       <span class="rail-pill"></span>
-      <button type="button" class=${cx('rail-btn music glass glass-rail', playing && 'playing')} data-tip=${t('Music')} data-tip-pos="right" aria-label=${t('Music')} aria-pressed=${musicOpen} onClick=${toggleMusicPanel}>
+      <button type="button" class=${cx('rail-btn music glass glass-rail', playing && 'playing')} data-tip=${t('Music')} data-tip-pos="right" aria-label=${t('Music')} aria-pressed=${musicOpen} onClick=${openMusic}>
         ${playing ? html`<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>` : html`<${Icon} name="music" size=${24} />`}</button>
     </div>
     <div class="rail-item ${route === '@me' && ['friends', 'dm'].includes(view) ? 'active' : ''}">

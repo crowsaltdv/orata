@@ -16,17 +16,19 @@ function Video({ stream, muted, mirror, screen }) {
   return html`<video ref=${ref} autoplay playsinline muted=${muted} class=${cx(mirror && 'mirror', screen && 'screen')}></video>`;
 }
 
-function Tile({ uid, kind, stream, expanded, onExpand }) {
+function Tile({ uid, kind, stream, expanded, onExpand, avatarSize = 84 }) {
   const u = useSel((s) => s.users[uid]);
   const st = useSel((s) => { for (const room of Object.values(s.voice.states)) if (room[uid]) return room[uid]; return null; });
   const speaking = useSel((s) => !!s.voice.speaking?.[uid]);
+  const link = useSel((s) => (uid === s.me.id || kind === 'screen' ? null : s.voice.links?.[uid] || null));
   const mirror = uid === state.me.id && kind === 'camera' && state.local.voice.mirrorVideo;
   const hasVideo = !!stream && stream.getVideoTracks().some((t) => t.readyState === 'live');
   const name = u?.displayName || '…';
   const menu = (e) => { e.preventDefault(); if (uid === state.me.id) return; openContext(e, [{ type: 'custom', render: () => html`<div class="vol-ctx"><small>${t('User volume')}</small><${Slider} value=${Math.round(getUserVolume(uid) * 100)} min=${0} max=${100} onChange=${(v) => setUserVolume(uid, v / 100)} format=${(v) => v + '%'} /></div>` }, { type: 'sep' }, { label: t('Profile'), icon: 'user', onClick: () => openProfile(uid) }]); void userMenu; };
   return html`<div class=${cx('tile', speaking && !st?.muted && kind !== 'screen' && 'speaking', expanded && 'expand')} onDblClick=${onExpand} onContextMenu=${menu}>
-    ${hasVideo ? html`<${Video} stream=${stream} muted=${uid === state.me.id} mirror=${mirror} screen=${kind === 'screen'} />` : html`<${Avatar} user=${u} size=${expanded ? 120 : 84} />`}
+    ${hasVideo ? html`<${Video} stream=${stream} muted=${uid === state.me.id} mirror=${mirror} screen=${kind === 'screen'} />` : html`<${Avatar} user=${u} size=${avatarSize} />`}
     <span class="tile-name">${kind === 'screen' ? html`<${Icon} name="monitor" size=${14} />` : null}${kind === 'screen' ? `${name}${t('’s screen')}` : name}${st?.muted && kind !== 'screen' ? html`<${Icon} name=${st.deafened ? 'headphones-off' : 'mic-off'} size=${14} />` : null}</span>
+    ${link && link !== 'connected' ? html`<span class=${cx('tile-link', link)} title=${link === 'failed' ? t('A direct link to this person isn’t possible on your networks — a TURN relay is needed.') : t('Setting up the audio and video link…')}>${link === 'failed' ? html`<${Icon} name="wifi" size=${13} /> ${t('Can’t connect')}` : html`<span class="spinner sm"></span> ${link === 'slow' ? t('Still connecting…') : t('Connecting…')}`}</span>` : null}
     ${kind !== 'screen' && st?.muted ? html`<span class="tile-muted"><${Icon} name=${st.deafened ? 'headphones-off' : 'mic-off'} size=${15} /></span>` : null}
   </div>`;
 }
@@ -46,6 +48,37 @@ export function Controls({ compact }) {
   </div>`;
 }
 
+/**
+ * The best number of columns and rows for `n` tiles in a w×h area: the arrangement whose tiles come out biggest while staying close to 16:9.
+ * Tiles then fill the area and change shape as people join or leave — nothing scrolls.
+ */
+export function fitGrid(n, w, h, gap = 12) {
+  if (n <= 1 || w < 40 || h < 40) return { cols: 1, rows: Math.max(1, n) };
+  const target = 16 / 9; let best = null; let fallback = null;
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols); const tw = (w - gap * (cols - 1)) / cols; const th = (h - gap * (rows - 1)) / rows;
+    const ar = tw / th; const closeness = Math.min(ar / target, target / ar);
+    const score = Math.min(tw, th * target) * (0.55 + 0.45 * closeness);
+    if (!fallback || score > fallback.score) fallback = { score, cols, rows };
+    if (tw >= 90 && th >= 64 && (!best || score > best.score)) best = { score, cols, rows };
+  }
+  return best || fallback;
+}
+
+/** Lays `tiles` out with fitGrid() in whatever space its container gets. */
+function FitGrid({ tiles, big, setBig, className }) {
+  const ref = useRef(null); const [box, setBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current; if (!el) return undefined;
+    const ro = new ResizeObserver(() => { const r = el.getBoundingClientRect(); setBox((b) => (Math.abs(b.w - r.width) < 1 && Math.abs(b.h - r.height) < 1 ? b : { w: r.width, h: r.height })); });
+    ro.observe(el); return () => ro.disconnect();
+  }, []);
+  const gap = 12; const { cols, rows } = fitGrid(tiles.length, box.w, box.h, gap);
+  const tw = (box.w - gap * (cols - 1)) / cols; const th = (box.h - gap * (rows - 1)) / rows;
+  const avatar = Math.round(Math.max(40, Math.min(150, Math.min(tw, th) * 0.4)) || 84);
+  return html`<div class=${cx('fit-grid', className)} ref=${ref} style=${{ '--cols': cols, '--rows': rows, '--gap': gap + 'px' }}>${tiles.map((x) => html`<${Tile} key=${x.key} uid=${x.uid} kind=${x.kind} stream=${x.stream} avatarSize=${avatar} expanded=${big === x.key} onExpand=${() => setBig(big === x.key ? null : x.key)} />`)}</div>`;
+}
+
 function Grid({ chId }) {
   const room = useSel((s) => s.voice.states[chId]); useSel((s) => s.voice.rev);
   const [big, setBig] = useState(null);
@@ -57,8 +90,14 @@ function Grid({ chId }) {
     tiles.push({ key: uid + ':cam', uid, kind: 'camera', stream: e.camera });
   }
   if (!tiles.length) return null;
-  const hasScreen = tiles.some((x) => x.kind === 'screen');
-  return html`<div class=${cx('stage-grid', (big || hasScreen) && 'focus')}>${tiles.map((x) => html`<${Tile} key=${x.key} uid=${x.uid} kind=${x.kind} stream=${x.stream} expanded=${big ? big === x.key : x.kind === 'screen'} onExpand=${() => setBig(big === x.key ? null : x.key)} />`)}</div>`;
+  // a shared screen (or a tile you double-clicked) takes the big area; everybody else sits in a strip below it
+  const main = big ? tiles.filter((x) => x.key === big) : tiles.filter((x) => x.kind === 'screen');
+  if (main.length) {
+    const rest = tiles.filter((x) => !main.includes(x));
+    return html`<div class="stage-grid focus"><${FitGrid} tiles=${main} big=${big} setBig=${setBig} className="fg-main" />
+      ${rest.length ? html`<div class="stage-strip">${rest.map((x) => html`<${Tile} key=${x.key} uid=${x.uid} kind=${x.kind} stream=${x.stream} avatarSize=${40} onExpand=${() => setBig(x.key)} />`)}</div>` : null}</div>`;
+  }
+  return html`<div class="stage-grid"><${FitGrid} tiles=${tiles} big=${big} setBig=${setBig} /></div>`;
 }
 
 /** Inline stage above the messages of a DM / group DM while a call is active. */
