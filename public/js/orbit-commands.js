@@ -29,7 +29,7 @@ export function parseDuration(s) {
 }
 /** 5400000 → "1 hour 30 minutes" (the two biggest parts). */
 export function formatDuration(ms) {
-  const parts = []; let left = Math.max(0, Math.round(ms / 1000));
+  const parts = []; let left = Math.max(0, Math.floor(ms / 1000));   // rounded down: "6 days 23 hours" left, not "1 week"
   for (const [n, s] of [['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60], ['second', 1]]) {
     const k = Math.floor(left / s); if (k) { parts.push(`${k} ${n}${k === 1 ? '' : 's'}`); left -= k * s; }
   }

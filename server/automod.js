@@ -4,7 +4,7 @@
 import { can, isOwner } from './core.js';
 
 const LINK = /\bhttps?:\/\/\S+|\bwww\.[a-z0-9-]+\.[a-z]{2,}\S*/i;
-const INVITE = /\/invite\/[A-Za-z0-9-]{4,}|discord(?:app)?\.(?:gg|com\/invite)\/\S+/i;
+const INVITE = /\/invite\/[A-Za-z0-9-]{3,}|discord(?:app)?\.(?:gg|com\/invite)\/\S+/i;
 const recent = new Map();   // `${serverId}:${userId}` -> [{ at, text }] for the last 30 seconds (spam)
 setInterval(() => { const old = Date.now() - 30_000; for (const [k, list] of recent) if (!list.some((x) => x.at > old)) recent.delete(k); }, 300_000).unref();
 

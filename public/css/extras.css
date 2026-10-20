@@ -433,3 +433,9 @@ html[data-mode="light"] .pc-badges { background: rgb(0 0 0 / .06); }
 .al-ic.bad { background: rgb(240 77 106 / .15); color: #ff7b93; }
 .al-text { flex: 1; min-width: 0; font-size: 14px; line-height: 1.4; display: flex; flex-direction: column; gap: 2px; } .al-text small { color: var(--text-3); font-size: 12.5px; } .al-ex { font-style: italic; overflow-wrap: anywhere; }
 .al-row time { flex: none; font-size: 12px; color: var(--text-3); white-space: nowrap; }
+
+/* ------------------------------------------------ custom invite link (Server Settings → Invites) */
+.vanity-box { margin-bottom: 12px; }
+.vanity-row { display: flex; align-items: center; gap: 0; } .vanity-row .btn { margin-left: 10px; }
+.vanity-prefix { height: 40px; display: inline-flex; align-items: center; padding: 0 4px 0 12px; border-radius: var(--radius-sm) 0 0 var(--radius-sm); background: var(--input-bg); color: var(--text-3); font-size: 14px; white-space: nowrap; }
+.vanity-input { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding-left: 2px; flex: 1; min-width: 120px; }

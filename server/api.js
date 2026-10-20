@@ -12,6 +12,7 @@ import {
   ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteDevice, deviceHashesOf, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView, isOwner, audit,
 } from './core.js';
 import { automodRule } from './automod.js';
+import { formatDuration } from '../public/js/orbit-commands.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 import { hasProfanity, censor, cleanBlockedWords } from './profanity.js';   // the same checker the browser uses
@@ -528,8 +529,9 @@ export function createApi() {
     res.json(serverView(server, req.user.id));
   }));
 
+  const findInvite = (code) => db.invites[code] || db.invites[String(code).toLowerCase()];   // a custom link works however it is typed
   r.get('/invites/:code', h(async (req, res) => {
-    const inv = db.invites[req.params.code]; if (!inv || (inv.expiresAt && inv.expiresAt < Date.now()) || (inv.maxUses && inv.uses >= inv.maxUses && !db.servers[inv.serverId]?.members[req.user.id])) throw notFound('This invite is invalid or has expired');
+    const inv = findInvite(req.params.code); if (!inv || (inv.expiresAt && inv.expiresAt < Date.now()) || (inv.maxUses && inv.uses >= inv.maxUses && !db.servers[inv.serverId]?.members[req.user.id])) throw notFound('This invite is invalid or has expired');
     const s = db.servers[inv.serverId]; if (!s) throw notFound('This invite is invalid or has expired');
     const ids = Object.keys(s.members);
     res.json({ code: inv.code, server: { id: s.id, name: s.name, icon: s.icon, banner: s.banner, accent: s.accent || null, createdAt: s.createdAt, description: s.description, memberCount: ids.length, onlineCount: ids.filter((id) => effectiveStatus(db.users[id]) !== 'offline').length }, inviter: publicUser(db.users[inv.inviterId]), joined: !!s.members[req.user.id] });
@@ -575,7 +577,7 @@ export function createApi() {
   }
   r.post('/invites/:code/join', limit('join', 20, 60_000), h(async (req, res) => {
     const code = String(req.params.code).split('/').pop();
-    const inv = db.invites[code]; if (!inv || (inv.expiresAt && inv.expiresAt < Date.now()) || (inv.maxUses && inv.uses >= inv.maxUses)) throw notFound('This invite is invalid or has expired');
+    const inv = findInvite(code); if (!inv || (inv.expiresAt && inv.expiresAt < Date.now()) || (inv.maxUses && inv.uses >= inv.maxUses)) throw notFound('This invite is invalid or has expired');
     const s = db.servers[inv.serverId]; if (!s) throw notFound('This invite is invalid or has expired');
     noteDevice(req.user, req);
     if (isBannedFrom(s, req.user, req)) throw forbidden('You are banned from this server');
@@ -898,12 +900,30 @@ export function createApi() {
   }));
   r.get('/servers/:id/invites', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_SERVER');
-    res.json(Object.values(db.invites).filter((i) => i.serverId === s.id && (!i.expiresAt || i.expiresAt > Date.now())));
+    res.json(Object.values(db.invites).filter((i) => i.serverId === s.id && !i.vanity && (!i.expiresAt || i.expiresAt > Date.now())));   // the custom link has its own section
   }));
   r.delete('/invites/:code', h(async (req, res) => {
     const inv = db.invites[req.params.code]; if (!inv) throw notFound();
     const s = db.servers[inv.serverId]; if (!s || (inv.inviterId !== req.user.id && !can(s, req.user.id, 'MANAGE_SERVER'))) throw forbidden();
+    if (inv.vanity) throw forbidden('The custom invite link can only be changed in Server Settings → Invites');
     delete db.invites[inv.code]; audit(s, req.user.id, 'invite_delete', { code: inv.code }); save(); res.json({ ok: true });
+  }));
+
+  /* ---- a server's custom invite link (<site>/invite/<name>): one per server, set by admins, changeable once every 7 days ---- */
+  const VANITY = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/; const VANITY_WAIT = 7 * 86400_000;
+  r.put('/servers/:id/vanity', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'ADMINISTRATOR');
+    const code = String(req.body?.code || '').trim().toLowerCase();
+    if (!VANITY.test(code)) throw bad('Use 3–32 letters, numbers or dashes (not at the start or end)', 'code');
+    if (code === s.vanity?.code) return res.json(s.vanity);
+    const left = (s.vanity?.changedAt || 0) + VANITY_WAIT - Date.now();
+    if (left > 0) throw new ApiError(429, `The custom link can be changed once every 7 days. Try again in ${formatDuration(left)}.`, 'vanity_wait');
+    if (Object.keys(db.invites).some((k) => k.toLowerCase() === code)) throw bad('That link is already taken', 'code');
+    if (db.invites[s.vanity?.code]?.vanity) delete db.invites[s.vanity.code];   // the old link stops working
+    db.invites[code] = { code, serverId: s.id, inviterId: req.user.id, createdAt: Date.now(), uses: 0, maxUses: 0, expiresAt: null, vanity: true };
+    audit(s, req.user.id, 'vanity_update', { code, old: s.vanity?.code || null });
+    s.vanity = { code, changedAt: Date.now() };
+    save(); pushServerUpdate(s); res.json(s.vanity);
   }));
 
   /* ---- custom emoji & stickers (a server's "expressions") ---- */

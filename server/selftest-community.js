@@ -575,6 +575,26 @@ async function main() {
   ok(kickE.actorId === A.user.id && kickE.target === CO.user.id && kickE.reason === 'spamming' && r.body.entries.find((e) => e.action === 'automod_block').actorId === null, '… with who did it, to whom and why (AutoMod for its own blocks)');
   r = await api('GET', `/servers/${BG.id}/audit-log?action=automod`, A.token); ok(r.body.entries.length >= 4 && r.body.entries.every((e) => e.action === 'automod_block'), '… and it can be filtered');
 
+  /* ---------------------------------------------------------------- custom invite link */
+  console.log('\nCustom invite link');
+  const mgr = (await api('POST', `/servers/${BG.id}/roles`, A.token, { name: 'Managers', permissions: ['MANAGE_SERVER'] })).body;
+  await api('PUT', `/servers/${BG.id}/members/${PL.user.id}/roles/${mgr.id}`, A.token);
+  r = await api('PUT', `/servers/${BG.id}/vanity`, PL.token, { code: 'bot-guild' }); ok(r.status === 403, 'only admins can set the custom invite link (Manage Server isn’t enough)');
+  r = await api('PUT', `/servers/${BG.id}/vanity`, A.token, { code: '-bad' }); ok(r.status === 400, 'it must be 3–32 letters, numbers or dashes');
+  r = await api('PUT', `/servers/${BG.id}/vanity`, A.token, { code: 'Bot-Guild' }); ok(r.status === 200 && r.body.code === 'bot-guild', 'an admin sets it (it is stored in lower case)');
+  r = await api('GET', '/invites/BOT-GUILD', MB.token); ok(r.status === 200 && r.body.server.id === BG.id, 'the link works however it is typed');
+  r = await api('POST', '/invites/bot-guild/join', MB.token); ok(r.status === 200 && r.body.id === BG.id, 'and anyone can join with it');
+  r = await api('PUT', `/servers/${BG.id}/vanity`, A.token, { code: 'bot-guild-2' }); ok(r.status === 429 && r.body.code === 'vanity_wait' && /6 days/.test(r.body.error), 'it can only be changed once every 7 days');
+  r = await api('PUT', `/servers/${CG.id}/vanity`, A.token, { code: 'bot-guild' }); ok(r.status === 400 && /taken/.test(r.body.error), 'two servers can’t have the same link');
+  r = await api('DELETE', '/invites/bot-guild', A.token); ok(r.status === 403, 'it can’t be deleted like an ordinary invite');
+  r = await api('GET', `/servers/${BG.id}/invites`, A.token); ok(!r.body.some((i) => i.code === 'bot-guild'), 'it isn’t listed with the ordinary invites');
+  await stopServer();
+  const vj = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8')); vj.servers[BG.id].vanity.changedAt -= 8 * 86400_000;
+  fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(vj)); startServer(); await ready();
+  r = await api('PUT', `/servers/${BG.id}/vanity`, A.token, { code: 'bot-guild-2' }); ok(r.status === 200 && r.body.code === 'bot-guild-2', 'a week later it can be changed');
+  r = await api('GET', '/invites/bot-guild', MB.token); ok(r.status === 404, '… and the old link stops working');
+  r = await api('GET', `/servers/${BG.id}/audit-log?action=vanity_`, A.token); ok(r.body.entries.length === 2 && r.body.entries[0].details.old === 'bot-guild', 'changes are in the audit log');
+
   /* ---------------------------------------------------------------- accounts per browser */
   console.log('\nAccounts per browser');
   await stopServer(); startServer({ ACCOUNTS_PER_BROWSER: '', ACCOUNTS_PER_HOUR: '' }); await ready();   // the real limits: 3 and 3

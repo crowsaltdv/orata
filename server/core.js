@@ -403,7 +403,7 @@ export function serverView(server, userId) {
     description: server.description || '', ownerId: server.ownerId, coOwners: server.coOwners || [], createdAt: server.createdAt,
     accent: server.accent || null, roles: server.roles, channels: chans,
     orbitId: server.orbitId && server.members[server.orbitId] ? server.orbitId : null, orbitRoles: server.orbit?.roles || {},   // this server's Orbit (server/orbit.js)
-    automod: server.automod || null, onboarding: server.onboarding || null,
+    automod: server.automod || null, onboarding: server.onboarding || null, vanity: server.vanity || null,
     members: Object.entries(server.members).map(([id, m]) => memberView(id, m)),
     perms: [...permsOf(server, userId)], systemChannelId: server.systemChannelId || null,
     emojis: server.emojis || [], stickers: server.stickers || [],

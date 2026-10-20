@@ -15,6 +15,7 @@ import { PERM_INFO, PERM_ORDER } from '/js/perms.js';
 import '/js/orbit.js';   // Orbit's settings dialog
 import { OnboardingPage } from '/js/onboarding.js';
 import { AuditLog } from '/js/audit-log.js';
+import { formatDuration } from '/js/orbit-commands.js';
 
 export function openServerSettings(id, page = 'overview') { set({ serverSettings: { id, page }, ctx: null, popover: null }); }
 const close = () => set({ serverSettings: null });
@@ -173,11 +174,27 @@ const EmojiPage = ({ server }) => html`<${Expressions} server=${server} kind="em
 const StickerPage = ({ server }) => html`<${Expressions} server=${server} kind="stickers" />`;
 
 /* ------------------------------------------------------------------ invites + bans */
+/** The server's one custom invite link (<site>/invite/<name>): admins set it, at most once every 7 days. */
+const VANITY_WAIT = 7 * 86400_000;
+function Vanity({ server }) {
+  const me = state.me.id; const admin = server.ownerId === me || server.coOwners?.includes(me) || server.perms.includes('ADMINISTRATOR');
+  const cur = server.vanity?.code || ''; const [v, setV] = useState(cur); const [busy, setBusy] = useState(false);
+  const left = server.vanity ? server.vanity.changedAt + VANITY_WAIT - Date.now() : 0;
+  if (!admin && !cur) return null;
+  const save = async () => { setBusy(true); await act(api.put(`/servers/${server.id}/vanity`, { code: v }), { success: t('Custom invite link saved') }); setBusy(false); };
+  return html`<${Section} title=${t('Custom invite link')} desc=${t('One easy link for the whole server that never expires. Only admins can set it, and it can be changed once every 7 days.')}>
+    ${cur ? html`<div class="il-box vanity-box"><span class="il-url">${inviteUrl(cur)}</span><${Btn} size="sm" variant="primary" icon="copy" onClick=${async () => { await copyText(inviteUrl(cur)); toast('Link copied', 'success', 1400); }}>${t('Copy')}<//></div>` : null}
+    ${admin ? html`<div class="vanity-row"><span class="vanity-prefix">${location.host}/invite/</span><input class="input vanity-input" value=${v} maxlength="32" placeholder="my-server" aria-label=${t('Custom invite link')} disabled=${left > 0}
+        onInput=${(e) => setV(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))} onKeyDown=${(e) => e.key === 'Enter' && v && v !== cur && left <= 0 && save()} />
+      <${Btn} variant="primary" loading=${busy} disabled=${v.length < 3 || v === cur || left > 0} onClick=${save}>${cur ? t('Change') : t('Save')}<//></div>
+      <p class="field-hint">${left > 0 ? `${t('You can change it again in')} ${formatDuration(left)}.` : t('3–32 letters, numbers or dashes. Once you save, you have to wait 7 days to change it again, so pick carefully.')}</p>` : null}
+  <//>`;
+}
 function Invites({ server }) {
   const [list, setList] = useState(null); const users = useSel((s) => s.users);
   const load = () => api.get(`/servers/${server.id}/invites`).then(setList).catch(() => setList([]));
   useEffect(() => { load(); }, [server.id]);
-  return html`<div class="s-page"><${Section} title=${t('Invites')} action=${html`<${Btn} size="sm" variant="primary" icon="plus" onClick=${() => openModal('invite', { serverId: server.id })}>${t('Create invite')}<//>`}>
+  return html`<div class="s-page"><${Vanity} server=${server} /><${Section} title=${t('Invites')} action=${html`<${Btn} size="sm" variant="primary" icon="plus" onClick=${() => openModal('invite', { serverId: server.id })}>${t('Create invite')}<//>`}>
     ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : list.length ? html`<div class="mem-table">${list.map((i) => html`<div class="mem-row" key=${i.code}><span class="ss-ic"><${Icon} name="link" size=${20} /></span><div class="mem-name"><b class="mono">${i.code}</b><small>${users[i.inviterId]?.displayName || '—'}</small></div><small class="mem-roles">${i.uses}${i.maxUses ? ' / ' + i.maxUses : ''} ${t('uses')} · ${i.expiresAt ? t('expires') + ' ' + new Date(i.expiresAt).toLocaleString() : t('never expires')}</small>
       <span class="chs-acts"><button type="button" data-tip="Copy link" onClick=${async () => { await copyText(inviteUrl(i.code)); toast('Link copied', 'success', 1400); }}><${Icon} name="copy" size=${16} /></button><button type="button" class="danger" data-tip="Revoke" onClick=${async () => { await act(api.del(`/invites/${i.code}`)); load(); }}><${Icon} name="trash" size=${16} /></button></span></div>`)}</div>` : html`<${Empty} icon="link" title=${t('No active invites')}>${t('Create one to bring friends in.')}<//>`}
   <//></div>`;

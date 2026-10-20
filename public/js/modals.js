@@ -75,6 +75,7 @@ MODALS.invite = function InviteModal({ id, serverId }) {
     <div class="invite-link"><div class="il-label">${t('Or send a server invite link to a friend')}</div>
       <div class=${cx('il-box', copied && 'copied')}><span class="il-url">${inv ? inviteUrl(inv.code) : '…'}</span><${Btn} variant=${copied ? 'success' : 'primary'} size="sm" disabled=${!inv} loading=${busy} onClick=${copy}>${copied ? t('Copied') : t('Copy')}<//></div>
       <div class="il-meta">${inv ? (inv.expiresAt ? `${t('Your invite link expires in')} ${Math.round((inv.expiresAt - Date.now()) / 3600000)}h.` : t('Your invite link never expires.')) : ''} <button type="button" class="link-btn" onClick=${() => setEdit(!edit)}>${t('Edit invite link')}</button></div>
+      ${server.vanity ? html`<div class="il-meta">${t('Or share the server’s custom link:')} <button type="button" class="link-btn" onClick=${async () => { await copyText(inviteUrl(server.vanity.code)); toast('Link copied', 'success', 1400); }}>${inviteUrl(server.vanity.code)}</button></div>` : null}
       ${edit ? html`<div class="il-edit slide-down"><${Field} label=${t('Expire after')}><${Dropdown} value=${maxAge} options=${EXPIRES} onChange=${(v) => { setMaxAge(v); gen(v, maxUses); }} /><//><${Field} label=${t('Max number of uses')}><${Dropdown} value=${maxUses} options=${USES} onChange=${(v) => { setMaxUses(v); gen(maxAge, v); }} /><//></div>` : null}
     </div>
   <//>`;

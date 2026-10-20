@@ -11,7 +11,7 @@ export function inviteCodeOf(url) {
   try {
     const u = new URL(url);
     if (u.origin !== location.origin) return null;
-    return u.pathname.match(/^\/invite\/([A-Za-z0-9]{4,24})\/?$/)?.[1] || null;
+    return u.pathname.match(/^\/invite\/([A-Za-z0-9-]{3,32})\/?$/)?.[1] || null;   // (custom links have dashes)
   } catch { return null; }
 }
 
