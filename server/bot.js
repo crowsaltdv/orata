@@ -11,11 +11,15 @@ export const JOKES = [
 ];
 export const BALL = ['It is certain.', 'Without a doubt.', 'Ask again later.', 'Don’t count on it.', 'My sources say no.', 'Signs point to yes.', 'Very doubtful.', 'Outlook good.'];
 
+const TICKS = '`​`​`';   // looks like ``` but isn't read as one
 const HELP = [
   '**Hey, I’m Orbit!** Here’s what you can do in Orate:',
   '• Create or join a **server** with the **+** in the server rail',
   '• Press **Ctrl+K** to jump to any chat, **Ctrl+/** for shortcuts',
-  '• Format with `**bold**`, `*italic*`, `~~strike~~`, `||spoiler||` and fenced code',
+  '• Format with `**bold**`, `*italic*`, `~~strike~~`, `||spoiler||` and `` `inline code` ``',
+  '• **Code blocks**: put three backticks on their own line before and after your code. Add a language like `js` or `py` after the first three for colors:',
+  // the example's backticks have invisible zero-width spaces between them, or they would turn into a real code block instead of showing how to type one
+  `\`\`\`md\n${TICKS}js\nconsole.log("hi")\n${TICKS}\n\`\`\``,
   '• Drop in **GIFs**, **stickers**, **emojis** and files — drag & drop works too',
   '• Make it yours in **User Settings → Appearance**: wallpapers, rain, glass buttons, fonts & colors',
   '',
