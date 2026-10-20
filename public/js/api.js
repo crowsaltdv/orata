@@ -16,7 +16,7 @@ const deviceId = (() => {
   const id = stored || cookie || Array.from(crypto.getRandomValues(new Uint8Array(18)), (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 32);
   try { if (stored !== id) localStorage.setItem('orate:device', id); saved = true; } catch { /* storage blocked */ }
   try { if (cookie !== id) document.cookie = `orate_dev=${id}; max-age=63072000; path=/; samesite=lax${location.protocol === 'https:' ? '; secure' : ''}`; if (document.cookie.includes('orate_dev=' + id)) saved = true; } catch { /* cookies blocked */ }
-  return saved ? id : null;   // nowhere to keep it: no device id (a fresh one on every load would only crowd out the real one); the network check still applies
+  return saved ? id : null;   // nowhere to keep it: no device id (a fresh one on every load would only crowd out the real one)
 })();
 
 async function req(method, url, body, extra = {}) {

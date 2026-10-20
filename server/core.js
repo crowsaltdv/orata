@@ -5,7 +5,6 @@ import crypto from 'node:crypto';
 
 import { ROOT, ENV, loadEnv } from './env.js';
 import { PgStore, ConflictError, isSafeFileName } from './storage.js';
-import net from 'node:net';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 export { ROOT, ENV, loadEnv };
 export const DATA_DIR = process.env.ORATE_DATA || path.join(ROOT, 'data');
@@ -23,34 +22,9 @@ export function randomAvatarBg() {
   return { a: hex(h, 70 + Math.random() * 15, 52 + Math.random() * 8), b: hex(h2, 68 + Math.random() * 17, 44 + Math.random() * 10), angle: Math.floor(Math.random() * 24) * 15 };
 }
 
-/* ---------------------------------------------------------------- hashed IP addresses
- * Orate never keeps a readable IP address. For ban evasion checks only, each account remembers a few keyed hashes (HMAC) of the networks it has
- * signed in from; they are never sent to clients. Loopback / private / link-local addresses are ignored (so a laptop or a LAN never bans itself),
- * and IPv6 is reduced to its /64 prefix, which is what one connection controls. */
-const expandV6 = (a) => {
-  const [h, t] = String(a).split('%')[0].split('::');
-  const hs = h ? h.split(':') : []; const ts = t === undefined ? null : (t ? t.split(':') : []);
-  const parts = ts === null ? hs : [...hs, ...Array(Math.max(0, 8 - hs.length - ts.length)).fill('0'), ...ts];
-  return parts.map((x) => x.padStart(4, '0'));
-};
-/** The visitor's address: the header named by CLIENT_IP_HEADER when the host sets one that can't be forged (e.g. CF-Connecting-IP), else what Express resolved. */
-const IP_HEADER = String(ENV.CLIENT_IP_HEADER || '').trim().toLowerCase();
-export const clientIp = (req) => (IP_HEADER && String(req?.headers?.[IP_HEADER] || '').split(',')[0].trim()) || req?.ip;
-export function ipHash(ip) {
-  let a = String(ip || '').trim(); if (a.startsWith('::ffff:')) a = a.slice(7);
-  let key;
-  if (net.isIPv4(a)) {
-    const p = a.split('.').map(Number);
-    if (p[0] === 10 || p[0] === 127 || p[0] === 0 || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || (p[0] === 169 && p[1] === 254) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127)) return null;
-    key = a;
-  } else if (net.isIPv6(a)) {
-    const g = expandV6(a);
-    if (g.join('') === '0'.repeat(32) || g.join('') === '0'.repeat(31) + '1' || /^f[cd]/i.test(g[0]) || /^fe[89ab]/i.test(g[0])) return null;
-    key = 'v6:' + g.slice(0, 4).join(':');
-  } else return null;
-  if (!db.ipSecret) { db.ipSecret = crypto.randomBytes(24).toString('hex'); save(); }
-  return crypto.createHmac('sha256', db.ipSecret).update(key).digest('hex').slice(0, 24);
-}
+/* ---------------------------------------------------------------- browser ids, for bans
+ * Orate keeps no IP addresses and ignores the network entirely: two people on one connection (a school, a café, a family) are strangers. To make bans
+ * stick, each account remembers a few keyed hashes (HMAC) of the random ids of the browsers it was used from; they are never sent to clients. */
 /** A keyed hash of the random id each browser sends (x-orate-device): a much stronger sign of "same person" than a shared network. */
 export function deviceHash(id) {
   const v = String(id || ''); if (!/^[A-Za-z0-9_-]{16,64}$/.test(v)) return null;
@@ -69,21 +43,20 @@ const remember = (user, field, h, max) => {
   if (hit) { if (now - hit.at > 6 * 3600_000) { hit.at = now; save(); } return; }
   list.unshift({ h, at: now }); if (list.length > max) list.length = max; save();
 };
-/** Remembers (as hashes) the network and the browser this account just used; at most 8 + 8, refreshed at most every 6 hours. Used only to find ban evaders and alts. */
-export function noteIp(user, req) {
+/** Remembers (as hashes) the browser this account just used; at most 8, refreshed at most every 6 hours. Used only to find ban evaders and alts. */
+export function noteDevice(user, req) {
   if (!user) return;
-  const h = ipHash(clientIp(req)); if (h) remember(user, 'ips', h, 8);
   for (const d of deviceHashes(req)) remember(user, 'devs', d, 8);
 }
-/** Everything that links an account to others: its recent networks and browsers (plus `extra`, e.g. the one it is using right now). */
-export const userIpHashes = (user, extra = null) => {
+/** Everything that links an account to others: the browsers it was recently used from (plus `extra`, e.g. the one it is using right now). */
+export const deviceHashesOf = (user, extra = null) => {
   const now = Date.now(); const fresh = (x) => now - x.at < 180 * 86400_000;
-  const out = new Set([...(user?.ips || []).filter(fresh), ...(user?.devs || []).filter(fresh)].map((x) => x.h));
+  const out = new Set((user?.devs || []).filter(fresh).map((x) => x.h));
   for (const e of [].concat(extra || [])) if (e) out.add(e);
   return out;
 };
-/** The hashes of the connection this request came on: its network and its browser. */
-export const requestHashes = (req) => [ipHash(clientIp(req)), ...deviceHashes(req)].filter(Boolean);
+/** The hashes of the browser this request came from. */
+export const requestHashes = (req) => deviceHashes(req);
 
 /* ---------------------------------------------------------------- db: files in data/ (default) or PostgreSQL (DATABASE_URL) */
 export const pg = ENV.DATABASE_URL ? new PgStore(ENV.DATABASE_URL, ENV) : null;
@@ -336,6 +309,16 @@ function migrateDb() {
   if (!db.avatarBgDone) {   // once: every account gets its own random gradient behind the default avatar's logo
     for (const u of Object.values(db.users)) if (!u.avatarBg) u.avatarBg = randomAvatarBg();
     db.avatarBgDone = true; changed = true;
+  }
+  // bans no longer follow networks: forget the network hashes kept for that, keep the browser ones
+  for (const u of Object.values(db.users)) if (u.ips) { delete u.ips; changed = true; }
+  for (const s of Object.values(db.servers)) {
+    if (s.bannedIps) {
+      s.bannedDevices ||= {};
+      for (const [h, id] of Object.entries(s.bannedIps)) if (h.startsWith('dv')) s.bannedDevices[h] = id;
+      delete s.bannedIps; changed = true;
+    }
+    if (s.timeoutLinks) { s.timeoutLinks = s.timeoutLinks.map((l) => ({ ...l, hashes: (l.hashes || []).filter((h) => String(h).startsWith('dv')) })).filter((l) => l.hashes.length); changed = true; }
   }
   if (changed) save();
 }

@@ -179,10 +179,10 @@ function Bans({ server }) {
   const [list, setList] = useState(null);
   const load = () => api.get(`/servers/${server.id}/bans`).then((l) => { addUsers(l); setList(l); }).catch(() => setList([]));
   useEffect(() => { load(); }, [server.id]);
-  return html`<div class="s-page"><${Section} title=${t('Bans')} desc=${t('Banning also blocks the person’s device and network and bans their other accounts (alts), so they can’t simply make a new account and rejoin. Unbanning frees them again.')}>
+  return html`<div class="s-page"><${Section} title=${t('Bans')} desc=${t('Banning also blocks the person’s browser and bans their other accounts (alts), so they can’t simply make a new account and rejoin. Unbanning frees them again.')}>
     ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : list.length ? html`<div class="mem-table">${list.map((u) => html`<div class="mem-row" key=${u.id}><${Avatar} user=${u} size=${36} /><div class="mem-name"><b>${u.displayName}</b><small>${u.username}${u.ban?.reason ? ` · ${u.ban.reason}` : ''}</small></div>
       <small class="mem-join">${u.ban?.by ? `${t('by')} ${u.ban.by}` : ''}${u.ban?.at ? ` · ${formatMemberSince(u.ban.at)}` : ''}</small>
-      ${u.ban?.altOf ? html`<span class="role-chip" data-tip=${t('Banned along with this person because they share a device or network')}><i style=${{ background: '#f59e0b' }}></i>${t('Alt of')} ${u.ban.altOf}</span>` : u.ban?.ipBanned ? html`<span class="role-chip" data-tip=${t('Their device and network are blocked too')}><i style=${{ background: '#e5314f' }}></i>${t('IP ban')}</span>` : null}
+      ${u.ban?.altOf ? html`<span class="role-chip" data-tip=${t('Banned along with this person because they share a browser')}><i style=${{ background: '#f59e0b' }}></i>${t('Alt of')} ${u.ban.altOf}</span>` : u.ban?.deviceBanned ? html`<span class="role-chip" data-tip=${t('Their browser is blocked too')}><i style=${{ background: '#e5314f' }}></i>${t('Browser ban')}</span>` : null}
       <span class="chs-acts" style="opacity:1"><${Btn} size="sm" onClick=${async () => { await act(api.del(`/servers/${server.id}/bans/${u.id}`)); load(); }}>${t('Unban')}<//></span></div>`)}</div>` : html`<${Empty} icon="ban" title=${t('No bans')}>${t('Everyone here is behaving.')}<//>`}
   <//></div>`;
 }

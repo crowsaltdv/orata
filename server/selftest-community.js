@@ -1,5 +1,5 @@
 // Orate community-features self-test (runs after the other suites):  npm test
-// Optional emails at sign-up, bans that also block the person's network (hashed, never shown), ban reasons, timeouts, GIF icons / banners,
+// Optional emails at sign-up, bans that follow the person's browser (hashed, never shown; networks are ignored), ban reasons, timeouts, GIF icons / banners,
 // custom emoji and stickers, forum channels and polls.
 import { spawn } from 'node:child_process';
 import http from 'node:http';
@@ -49,8 +49,8 @@ function connect(token) {
   });
 }
 let n = 0;
-const register = async (username, { email, ip } = {}) => {
-  const r = await api('POST', '/auth/register', null, { ...(email !== undefined ? { email } : {}), username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, ip ? { 'x-forwarded-for': ip } : {});
+const register = async (username, { email, ip, dev } = {}) => {
+  const r = await api('POST', '/auth/register', null, { ...(email !== undefined ? { email } : {}), username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, { ...(ip ? { 'x-forwarded-for': ip } : {}), ...(dev ? { 'x-orate-device': dev } : {}) });
   return { token: r.body?.token, user: r.body?.user, res: r };
 };
 
@@ -71,53 +71,58 @@ async function main() {
   r = await api('POST', '/auth/login', null, { login: 'alice@comm.dev', password: 'password123' }); ok(r.status === 401, 'a removed email no longer signs in');
   r = await api('POST', '/auth/resend-verification', A.token); ok(r.status === 400, 'there is nothing to verify without an email');
 
-  /* ---------------------------------------------------------------- bans that also block the network */
+  /* ---------------------------------------------------------------- bans that follow the browser (and never the network) */
   console.log('\nBans');
   r = await api('POST', '/servers', A.token, { name: 'Ban Guild', template: 'gaming' }); const S = r.body;
   const text = S.channels.find((c) => c.type === 'text');
   r = await api('POST', `/servers/${S.id}/invites`, A.token, {}); const code = r.body.code;
-  await api('POST', `/invites/${code}/join`, A.token, null, { 'x-forwarded-for': '203.0.113.50' });   // the owner's own network
-  const M = await register('mallory', { ip: '203.0.113.7' });
-  r = await api('POST', `/invites/${code}/join`, M.token, null, { 'x-forwarded-for': '203.0.113.7' }); ok(r.status === 200, 'mallory joins');
+  const hdr = (dev, ip) => ({ ...(ip ? { 'x-forwarded-for': ip } : {}), ...(dev ? { 'x-orate-device': dev } : {}) });
+  const devOwner = 'device-oooooooooooooooo'; const devM = 'device-mmmmmmmmmmmmmmmm'; const devCarol = 'device-carolcarolcarol'; const devFar = 'device-farfarfarfarfar';
+  const joinWith = (tok, dev, ip) => api('POST', `/invites/${code}/join`, tok, null, hdr(dev, ip));
+  await joinWith(A.token, devOwner, '203.0.113.50');   // the owner's own browser
+  const M = await register('mallory', { dev: devM, ip: '203.0.113.7' });
+  r = await joinWith(M.token, devM, '203.0.113.7'); ok(r.status === 200, 'mallory joins');
   await api('POST', `/channels/${text.id}/messages`, M.token, { content: 'spam one' }); await api('POST', `/channels/${text.id}/messages`, M.token, { content: 'spam two' });
   await api('POST', `/channels/${text.id}/messages`, A.token, { content: 'a normal message' });
   r = await api('PUT', `/servers/${S.id}/bans/${M.user.id}`, A.token, { reason: 'spamming', deleteHours: 1 }); ok(r.status === 200, 'the owner bans her with a reason and clears her last hour');
   r = await api('GET', `/channels/${text.id}/messages?limit=50`, A.token); ok(!r.body.messages.some((x) => x.authorId === M.user.id && x.type === 'default') && r.body.messages.some((x) => x.content === 'a normal message'), 'her recent messages are gone, other people’s stay');
   r = await api('GET', `/servers/${S.id}/bans`, A.token);
-  ok(r.body.length === 1 && r.body[0].ban.reason === 'spamming' && r.body[0].ban.by === 'Alice' && r.body[0].ban.ipBanned === true && typeof r.body[0].ban.at === 'number', 'the ban list shows who, why, when and that her network is blocked');
-  r = await api('POST', `/invites/${code}/join`, M.token, null, { 'x-forwarded-for': '203.0.113.7' }); ok(r.status === 403, 'she cannot rejoin');
-  r = await api('POST', `/invites/${code}/join`, M.token, null, { 'x-forwarded-for': '198.51.100.99' }); ok(r.status === 403, 'not even from another network (account ban)');
-  const M2 = await register('mallory2', { ip: '203.0.113.7' });
-  r = await api('POST', `/invites/${code}/join`, M2.token, null, { 'x-forwarded-for': '203.0.113.7' }); ok(r.status === 403, 'a NEW account from her network is turned away too');
-  r = await api('POST', `/invites/${code}/join`, M2.token, null, { 'x-forwarded-for': '198.51.100.99' }); ok(r.status === 403, '… even if it tries from another network later (it was seen on hers)');
-  const clean = await register('carol', { ip: '198.51.100.20' });
-  r = await api('POST', `/invites/${code}/join`, clean.token, null, { 'x-forwarded-for': '198.51.100.20' }); ok(r.status === 200, 'a stranger on a different network joins fine');
-  const sameV6 = await register('v6user', { ip: '2001:db8:1:2:aaaa::1' });
-  await api('POST', `/invites/${code}/join`, sameV6.token, null, { 'x-forwarded-for': '2001:db8:1:2:aaaa::1' });
-  r = await api('PUT', `/servers/${S.id}/bans/${sameV6.user.id}`, A.token, {}); ok(r.status === 200, 'an IPv6 user is banned');
-  const v6b = await register('v6other', { ip: '2001:db8:1:2:bbbb::9' });
-  r = await api('POST', `/invites/${code}/join`, v6b.token, null, { 'x-forwarded-for': '2001:db8:1:2:bbbb::9' }); ok(r.status === 403, 'IPv6 is matched by /64 (what one connection controls)');
-  const v6c = await register('v6far', { ip: '2001:db8:9:9:bbbb::9' });
-  r = await api('POST', `/invites/${code}/join`, v6c.token, null, { 'x-forwarded-for': '2001:db8:9:9:bbbb::9' }); ok(r.status === 200, '… and a different /64 is unaffected');
-  const priv = await register('lanuser', { ip: '10.0.0.5' });
-  await api('POST', `/invites/${code}/join`, priv.token, null, { 'x-forwarded-for': '10.0.0.5' });
-  r = await api('PUT', `/servers/${S.id}/bans/${priv.user.id}`, A.token, {}); ok(r.status === 200, 'someone on a private network is banned');
-  const priv2 = await register('lanuser2', { ip: '10.0.0.5' });
-  r = await api('POST', `/invites/${code}/join`, priv2.token, null, { 'x-forwarded-for': '10.0.0.5' }); ok(r.status === 200, 'private / loopback addresses are never used to ban (a whole LAN would be locked out)');
-  const ownerNet = await register('bob', { ip: '203.0.113.50' });
-  await api('POST', `/invites/${code}/join`, ownerNet.token, null, { 'x-forwarded-for': '203.0.113.50' });
-  r = await api('PUT', `/servers/${S.id}/bans/${ownerNet.user.id}`, A.token, {}); ok(r.status === 200, 'someone who shares the owner’s network is banned');
-  const ownerNet2 = await register('bob2', { ip: '203.0.113.50' });
-  r = await api('POST', `/invites/${code}/join`, ownerNet2.token, null, { 'x-forwarded-for': '203.0.113.50' }); ok(r.status === 200, 'the owner’s own network is never blocked');
+  ok(r.body.length === 1 && r.body[0].ban.reason === 'spamming' && r.body[0].ban.by === 'Alice' && r.body[0].ban.deviceBanned === true && typeof r.body[0].ban.at === 'number', 'the ban list shows who, why, when and that her browser is blocked');
+  r = await joinWith(M.token, devM, '203.0.113.7'); ok(r.status === 403, 'she cannot rejoin');
+  r = await joinWith(M.token, devFar, '198.51.100.99'); ok(r.status === 403, 'not even from another browser (account ban)');
+  const M2 = await register('mallory2', { dev: devM, ip: '198.51.100.30' });
+  r = await joinWith(M2.token, devM, '198.51.100.30'); ok(r.status === 403, 'a NEW account from her browser is turned away too');
+  r = await joinWith(M2.token, devFar, '198.51.100.31'); ok(r.status === 403, '… even if it tries from another browser later (it was seen on hers)');
+  const carol = await register('carol', { dev: devCarol, ip: '203.0.113.7' });
+  r = await joinWith(carol.token, devCarol, '203.0.113.7'); ok(r.status === 200, 'a stranger on mallory’s own network, in another browser, joins fine — networks are ignored');
+  const noDev = await register('nodevice', { ip: '203.0.113.7' });
+  r = await joinWith(noDev.token, null, '203.0.113.7'); ok(r.status === 200, '… and so does a visitor that sends no browser id at all');
+  const ownerBr = await register('bob', { dev: devOwner });
+  await joinWith(ownerBr.token, devOwner);
+  r = await api('PUT', `/servers/${S.id}/bans/${ownerBr.user.id}`, A.token, {}); ok(r.status === 200, 'someone who uses the owner’s browser is banned');
+  const ownerBr2 = await register('bob2', { dev: devOwner });
+  r = await joinWith(ownerBr2.token, devOwner); ok(r.status === 200, 'the owner’s own browser is never blocked');
   r = await api('DELETE', `/servers/${S.id}/bans/${M.user.id}`, A.token); ok(r.status === 200, 'unban mallory');
-  r = await api('POST', `/invites/${code}/join`, M2.token, null, { 'x-forwarded-for': '203.0.113.7' }); ok(r.status === 200, 'unbanning frees her network again');
+  r = await joinWith(M2.token, devM, '198.51.100.30'); ok(r.status === 200, 'unbanning frees her browser again');
   r = await api('GET', `/servers/${S.id}/bans`, M.token); ok(r.status === 404 || r.status === 403, 'only members with Ban Members can read the list');
+  const BT = await register('banme', { dev: 'device-bantestbantest1' }); await joinWith(BT.token, 'device-bantestbantest1');
+  r = await api('PUT', `/servers/${S.id}/bans/${BT.user.id}`, A.token, {}); ok(r.status === 200, 'ban one more person (used for the upgrade check below)');
   const blob = JSON.stringify([(await api('GET', '/me', A.token)).body, (await api('GET', '/me/sessions', A.token)).body, (await api('GET', `/servers/${S.id}/bans`, A.token)).body, (await api('GET', '/ready', A.token)).body]);
-  ok(!/203\.0\.113|198\.51\.100|2001:db8|10\.0\.0\.5/.test(blob), 'no address appears in anything the API returns');
+  ok(!/203\.0\.113|198\.51\.100|device-mmmm|device-bantest/.test(blob), 'no address and no browser id appears in anything the API returns');
   await stopServer();
-  const raw = fs.readFileSync(path.join(data, 'db.json'), 'utf8');
-  ok(!/203\.0\.113|198\.51\.100|2001:db8|10\.0\.0\.5/.test(raw) && /"ips":\[\{"h":"[0-9a-f]{24}"/.test(raw), 'only keyed hashes are stored, never a readable address');
+  let raw = fs.readFileSync(path.join(data, 'db.json'), 'utf8');
+  ok(!/203\.0\.113|198\.51\.100|device-mmmm|device-bantest/.test(raw) && /"devs":\[\{"h":"dv[0-9a-f]{22}"/.test(raw) && !/"ips"/.test(raw), 'only keyed browser hashes are stored — no address, no readable id, no network hashes at all');
+  // a database from before this change: network hashes on accounts and in the ban list, mixed with the browser ones
+  const old = JSON.parse(raw); const oldS = old.servers[S.id];
+  for (const u of Object.values(old.users)) u.ips = [{ h: '0123456789abcdef01234567', at: Date.now() }];
+  oldS.bannedIps = { ...oldS.bannedDevices, '0123456789abcdef01234567': BT.user.id, fedcba987654321012345678: BT.user.id }; delete oldS.bannedDevices;
+  fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(old));
+  startServer(); await ready(); await sleep(1200); await stopServer();
+  const up = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8')); const upS = up.servers[S.id];
+  ok(!Object.values(up.users).some((u) => u.ips) && !upS.bannedIps, 'upgrading forgets every network hash');
+  ok(Object.keys(upS.bannedDevices || {}).length >= 1 && Object.keys(upS.bannedDevices).every((k) => k.startsWith('dv')), '… and keeps the browser bans');
   startServer(); await ready();
+  const BT2 = await register('banme2', { dev: 'device-bantestbantest1', ip: '192.0.2.1' }); r = await joinWith(BT2.token, 'device-bantestbantest1', '192.0.2.1'); ok(r.status === 403, 'a browser ban made before the upgrade still holds');
 
   /* ---------------------------------------------------------------- timeouts */
   console.log('\nTimeouts');
@@ -152,7 +157,7 @@ async function main() {
   ok(r.status === 200 && r.body.alts.length === 1 && r.body.alts[0].id === P2.user.id, 'banning one account bans the other account on the same browser, even from another network');
   let ids = await memberIds(); ok(!ids.includes(P1.user.id) && !ids.includes(P2.user.id) && ids.includes(P3.user.id), '… and only those two leave; an unrelated account stays');
   r = await api('GET', `/servers/${S.id}/bans`, A.token); const altRow = r.body.find((x) => x.id === P2.user.id);
-  ok(altRow?.ban.altOf === 'alt_p1' && altRow.ban.reason.startsWith('Alt of alt_p1') && altRow.ban.ipBanned === true, 'the ban list says it is an alt, and of whom');
+  ok(altRow?.ban.altOf === 'alt_p1' && altRow.ban.reason.startsWith('Alt of alt_p1') && altRow.ban.deviceBanned === true, 'the ban list says it is an alt, and of whom');
   r = await api('POST', `/invites/${code}/join`, P2.token, null, P2.h); ok(r.status === 403, 'the alt cannot come back');
   const P4 = await mk('alt_p4', '198.51.100.4', devA); ok(P4.joined === 403, 'a brand-new account on that browser is turned away');
   const P5 = await mk('alt_p5', '198.51.100.5', devB); ok(P5.joined === 200, 'a new account from a different browser and network is fine');
@@ -161,7 +166,7 @@ async function main() {
   const Q1 = await mk('alt_q1', '198.51.100.11', 'device-qqqqqqqqqqqqqqqq'); const Q2 = await mk('alt_q2', '198.51.100.12', 'device-qqqqqqqqqqqqqqqq');
   r = await api('PUT', `/servers/${S.id}/bans/${Q1.user.id}`, A.token, { alts: false }); ids = await memberIds(); ok(r.status === 200 && r.body.alts.length === 0 && ids.includes(Q2.user.id), 'a moderator can choose to ban just the one account');
   const N1 = await mk('alt_n1', '203.0.113.77'); const N2 = await mk('alt_n2', '203.0.113.77');
-  r = await api('PUT', `/servers/${S.id}/bans/${N1.user.id}`, A.token, {}); ok(r.status === 200 && r.body.alts.some((x) => x.id === N2.user.id), 'accounts that share only a network are alts too');
+  r = await api('PUT', `/servers/${S.id}/bans/${N1.user.id}`, A.token, {}); ids = await memberIds(); ok(r.status === 200 && r.body.alts.length === 0 && ids.includes(N2.user.id), 'accounts that share only a network are NOT alts — networks are ignored');
   const U1 = await mk('alt_u1', '198.51.100.21', 'device-uuuuuuuuuuuuuuuu'); const U2 = await mk('alt_u2', '198.51.100.22', 'device-uuuuuuuuuuuuuuuu');
   await api('PUT', `/servers/${S.id}/members/${MOD.user.id}/roles/${modRole.id}`, A.token);
   r = await api('PUT', `/servers/${S.id}/members/${U1.user.id}/timeout`, MOD.token, { minutes: 5 });
@@ -367,19 +372,6 @@ async function main() {
   r = await api('POST', `/channels/${text.id}/messages`, A.token, { theme: 'dark' }); ok(r.status === 400, '… and so is anything that is not a theme');
   r = await api('POST', `/channels/${text.id}/messages`, A.token, { theme: { data: { bg: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`k${i}`, 'x'.repeat(280)])) } } }); ok(r.status === 400, 'an oversized theme is refused');
   r = await api('PATCH', `/channels/${text.id}/messages/${tm.id}`, A.token, { content: 'changed' }); ok(r.status === 403, 'a shared theme cannot be edited');
-
-  /* ---------------------------------------------------------------- a host-controlled header decides the address */
-  console.log('\nCLIENT_IP_HEADER (behind a proxy that forwards a header the visitor cannot forge)');
-  await stopServer(); startServer({ CLIENT_IP_HEADER: 'CF-Connecting-IP' }); await ready();
-  const reg2 = async (username, headers) => (await api('POST', '/auth/register', null, { username, displayName: username, password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, headers)).body;
-  const join2 = (tok, headers) => api('POST', `/invites/${code}/join`, tok, null, headers);
-  const h1H = { 'cf-connecting-ip': '203.0.113.99' }; const h1 = await reg2('hdr1', h1H);
-  r = await join2(h1.token, h1H); ok(r.status === 200, 'a visitor behind the proxy joins');
-  r = await api('PUT', `/servers/${S.id}/bans/${h1.user.id}`, A.token, {}); ok(r.status === 200, '… and is banned');
-  const h2H = { 'cf-connecting-ip': '203.0.113.99', 'x-forwarded-for': '8.8.8.8' }; const h2 = await reg2('hdr2', h2H);
-  r = await join2(h2.token, h2H); ok(r.status === 403, 'a new account is matched by the trusted header, whatever X-Forwarded-For claims');
-  const h3H = { 'cf-connecting-ip': '198.51.100.77', 'x-forwarded-for': '203.0.113.99' }; const h3 = await reg2('hdr3', h3H);
-  r = await join2(h3.token, h3H); ok(r.status === 200, 'a forged X-Forwarded-For cannot be used to frame someone else’s network');
 
   /* ---------------------------------------------------------------- default avatar gradients */
   console.log('\nDefault avatar');

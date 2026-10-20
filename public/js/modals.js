@@ -171,11 +171,11 @@ MODALS.ban = function BanModal({ id, serverId, userId }) {
     setBusy(false);
     if (r) { toast(r.alts?.length ? `${u.displayName} and ${r.alts.length} other account${r.alts.length === 1 ? '' : 's'} (${r.alts.map((a) => a.displayName).join(', ')}) were banned` : `${u.displayName} was banned`, 'success', 4500); closeModal(id); }
   };
-  return html`<${Modal} title=${`${t('Ban')} ${u.displayName}`} subtitle=${t('They are removed from the server and can’t rejoin — with this account or any other from the same device or network — until you unban them.')} width=${460} onClose=${() => closeModal(id)}
+  return html`<${Modal} title=${`${t('Ban')} ${u.displayName}`} subtitle=${t('They are removed from the server and can’t rejoin — with this account or any other from the same browser — until you unban them.')} width=${460} onClose=${() => closeModal(id)}
     footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="danger" icon="ban" loading=${busy} onClick=${go2}>${t('Ban')}<//>`}>
     <${Field} label=${t('Reason (only moderators see it)')}><${TextInput} value=${reason} onInput=${setReason} maxlength="200" placeholder=${t('Optional')} autofocus onKeyDown=${(e) => e.key === 'Enter' && go2()} /><//>
     <${Field} label=${t('Delete their recent messages')}><${Dropdown} value=${del} options=${DEL} onChange=${setDel} /><//>
-    <${SettingRow} title=${t('Also ban their other accounts')} desc=${t('Accounts that share their device or network (their alts) are banned too. Turn this off to ban just this one.')}><${Toggle} checked=${alts} onChange=${setAlts} /><//>
+    <${SettingRow} title=${t('Also ban their other accounts')} desc=${t('Accounts that share their browser (their alts) are banned too. Turn this off to ban just this one.')}><${Toggle} checked=${alts} onChange=${setAlts} /><//>
   <//>`;
 };
 

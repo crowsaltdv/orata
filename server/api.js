@@ -9,7 +9,7 @@ import {
   db, save, newId, cmpId, sha, ENV, DATA_DIR, UPLOAD_DIR, ROOT, ApiError, bad, forbidden, notFound, byUsername, byEmail,
   conns, emitTo, can, need, permsOf, permsIn, canIn, needIn, listedFor, isSynced, overwritesOf, sanitizeOverwrites, topRolePos, canView, audienceOf, serverAudience, channelsOfServer, publicUser, selfUser,
   serverView, channelView, messageView, relatedUserIds, broadcastPresence, readStateFor, systemMessage, randomCode, RESERVED,
-  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteIp, ipHash, clientIp, userIpHashes, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView,
+  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteDevice, deviceHashesOf, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView,
 } from './core.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
@@ -53,7 +53,7 @@ function str(v, min, max, name) {
 }
 const uploadRef = (v) => (v === null || v === '' ? null : (/^\/uploads\/[A-Za-z0-9_.-]+$/.test(String(v)) ? String(v) : undefined));
 
-const newSession = (user, req) => { noteIp(user, req); return createSession(user.id, req.headers['user-agent']); };   // sessions keep no IP; the account keeps a few hashes for ban checks (see core.js)
+const newSession = (user, req) => { noteDevice(user, req); return createSession(user.id, req.headers['user-agent']); };   // sessions keep no IP; the account keeps a few hashes for ban checks (see core.js)
 
 function getChannel(req, id) {
   const ch = db.channels[id];
@@ -241,9 +241,9 @@ export function createApi() {
       emailVerified: true,   // new accounts are verified: either verification is off, or they typed the emailed code
     };
     db.users[id] = user; byUsername.set(username, id); if (email) byEmail.set(email, id);
-    noteIp(user, req);   // the browser and network this account starts on: the ban check below needs them
+    noteDevice(user, req);   // the browser this account starts on: the ban check below needs it
 
-    // First user owns the shared community server; everybody after joins it — unless they are banned there from this browser (or network).
+    // First user owns the shared community server; everybody after joins it — unless they are banned there from this browser.
     let community = db.defaultServerId && db.servers[db.defaultServerId]; let inCommunity = true;
     if (!community) {
       community = createServer(user, { name: 'Orate Community', template: 'community' });
@@ -253,7 +253,7 @@ export function createApi() {
       inCommunity = false;
     } else {
       addMember(community, user);
-      linkedTimeout(community, id, userIpHashes(user, requestHashes(req)));   // someone timed out there stays timed out on a new account
+      linkedTimeout(community, id, deviceHashesOf(user, requestHashes(req)));   // someone timed out there stays timed out on a new account
     }
     // welcome DM from Orbit
     const bot = ensureBot();
@@ -322,7 +322,7 @@ export function createApi() {
     if (!user || user.deleted) throw new ApiError(401, 'Not signed in', 'unauthorized');
     req.user = user; req.session = found.rec; req.sessionId = found.hash;
     touchSession(found.hash, found.rec);
-    noteIp(user, req);   // the network and browser this account uses (hashed; only ever compared, to find ban evaders and alts)
+    noteDevice(user, req);   // the browser this account uses (hashed; only ever compared, to find ban evaders and alts)
     next();
   }));
 
@@ -345,7 +345,7 @@ export function createApi() {
   mountMusic(r, { h, limit });
 
   r.post('/auth/logout', h(async (req, res) => { await endSession(req.sessionId); res.json({ ok: true }); }));
-  r.get('/ready', (req, res) => { noteIp(req.user, req); res.json(buildReady(req.user)); });   // (also remembers the network and browser, for the alt checks)
+  r.get('/ready', (req, res) => { noteDevice(req.user, req); res.json(buildReady(req.user)); });   // (also remembers the browser, for the alt checks)
 
   /* --------------------------- me --------------------------- */
   r.get('/me', (req, res) => res.json(selfUser(req.user)));
@@ -520,30 +520,30 @@ export function createApi() {
     if (mode === 'block') throw new ApiError(400, 'That contains language this server doesn’t allow', 'profanity');
     return censor(text, words);
   }
-  /** Banned by account, or by network: a new account from the same connection as someone banned here is turned away too. */
+  /** Banned by account, or by browser: a new account from the same browser as someone banned here is turned away too. */
   function isBannedFrom(s, user, req) {
     if (s.bans?.includes(user.id)) return true;
-    const ips = s.bannedIps; if (!ips || !Object.keys(ips).length) return false;
-    for (const h of userIpHashes(user, requestHashes(req))) if (ips[h] && ips[h] !== user.id) return true;
+    const banned = s.bannedDevices; if (!banned || !Object.keys(banned).length) return false;
+    for (const h of deviceHashesOf(user, requestHashes(req))) if (banned[h] && banned[h] !== user.id) return true;
     return false;
   }
-  /** Other accounts that share a network or a browser with `uid` (never the server owner, the moderator acting, or anything those two share). */
+  /** Other accounts that share a browser with `uid` (never the server owner, the moderator acting, or any browser those two use). */
   function altAccounts(s, uid, actorId, req) {
-    const safe = new Set([...userIpHashes(db.users[s.ownerId]), ...userIpHashes(db.users[actorId], requestHashes(req))]);
-    const mine = userIpHashes(db.users[uid]); for (const h of safe) mine.delete(h);
+    const safe = new Set([...deviceHashesOf(db.users[s.ownerId]), ...deviceHashesOf(db.users[actorId], requestHashes(req))]);
+    const mine = deviceHashesOf(db.users[uid]); for (const h of safe) mine.delete(h);
     if (!mine.size) return { alts: [], mine, safe };
-    const alts = Object.values(db.users).filter((u) => u.id !== uid && u.id !== s.ownerId && u.id !== actorId && !u.bot && !u.deleted && [...userIpHashes(u)].some((h) => mine.has(h))).map((u) => u.id);
+    const alts = Object.values(db.users).filter((u) => u.id !== uid && u.id !== s.ownerId && u.id !== actorId && !u.bot && !u.deleted && [...deviceHashesOf(u)].some((h) => mine.has(h))).map((u) => u.id);
     return { alts, mine, safe };
   }
   r.post('/invites/:code/join', limit('join', 20, 60_000), h(async (req, res) => {
     const code = String(req.params.code).split('/').pop();
     const inv = db.invites[code]; if (!inv || (inv.expiresAt && inv.expiresAt < Date.now()) || (inv.maxUses && inv.uses >= inv.maxUses)) throw notFound('This invite is invalid or has expired');
     const s = db.servers[inv.serverId]; if (!s) throw notFound('This invite is invalid or has expired');
-    noteIp(req.user, req);
+    noteDevice(req.user, req);
     if (isBannedFrom(s, req.user, req)) throw forbidden('You are banned from this server');
     if (!s.members[req.user.id]) {
       addMember(s, req.user); inv.uses++;
-      linkedTimeout(s, req.user.id, userIpHashes(req.user, requestHashes(req)));   // someone who is timed out here can't dodge it with another account
+      linkedTimeout(s, req.user.id, deviceHashesOf(req.user, requestHashes(req)));   // someone who is timed out here can't dodge it with another account
       save();
       emitTo(serverAudience(s).filter((id) => id !== req.user.id), 'member_add', { serverId: s.id, member: { id: req.user.id, roles: [], nick: null, joinedAt: Date.now() }, user: publicUser(req.user) });
       emitTo([req.user.id], 'server_create', { server: serverView(s, req.user.id), users: usersFor(Object.keys(s.members)) });
@@ -981,15 +981,15 @@ export function createApi() {
     if (uid === s.ownerId || uid === req.user.id) throw forbidden('You can’t ban that member');
     if (s.members[uid] && topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
     const b = req.body || {};
-    // remember why and by whom, and which networks and browsers the person used — they can't come back with another account from those,
+    // remember why and by whom, and which browsers the person used — they can't come back with another account from those,
     // and the accounts they already have on them (their alts) are banned along with them
-    s.banInfo ||= {}; s.bannedIps ||= {}; s.bans ||= [];
+    s.banInfo ||= {}; s.bannedDevices ||= {}; s.bans ||= [];
     const { alts: found, safe } = altAccounts(s, uid, req.user.id, req);
     const alts = b.alts === false ? [] : found.filter((id) => !(s.members[id] && topRolePos(s, req.user.id) <= topRolePos(s, id)));
     const hours = clampInt(b.deleteHours, 0, 168, 0); const reason = String(b.reason || '').trim().slice(0, 200); const at = Date.now();
     for (const target of [uid, ...alts]) {
       s.banInfo[target] = { reason: target === uid ? reason : `Alt of ${db.users[uid].displayName}${reason ? ` — ${reason}` : ''}`.slice(0, 200), by: req.user.id, at, ...(target === uid ? {} : { altOf: uid }) };
-      for (const h of userIpHashes(db.users[target])) if (!safe.has(h)) s.bannedIps[h] = uid;
+      for (const h of deviceHashesOf(db.users[target])) if (!safe.has(h)) s.bannedDevices[h] = uid;
       if (s.members[target]) removeMember(s, target, true); else if (!s.bans.includes(target)) s.bans.push(target);
       purgeMessages(s, target, hours);
     }
@@ -1011,10 +1011,10 @@ export function createApi() {
   }
   r.get('/servers/:id/bans', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'BAN_MEMBERS');
-    const ipBanned = new Set(Object.values(s.bannedIps || {}));
+    const deviceBanned = new Set(Object.values(s.bannedDevices || {}));
     res.json((s.bans || []).map((id) => {
       const u = publicUser(db.users[id]); if (!u) return null; const info = s.banInfo?.[id] || {};
-      return { ...u, ban: { reason: info.reason || '', by: info.by ? (db.users[info.by]?.displayName || null) : null, at: info.at || null, ipBanned: ipBanned.has(id) || !!info.altOf, altOf: info.altOf ? (db.users[info.altOf]?.displayName || null) : null } };
+      return { ...u, ban: { reason: info.reason || '', by: info.by ? (db.users[info.by]?.displayName || null) : null, at: info.at || null, deviceBanned: deviceBanned.has(id) || !!info.altOf, altOf: info.altOf ? (db.users[info.altOf]?.displayName || null) : null } };
     }).filter(Boolean));
   }));
   r.delete('/servers/:id/bans/:uid', h(async (req, res) => {
@@ -1023,8 +1023,8 @@ export function createApi() {
     // unbanning the person frees their alts too; unbanning one alt on its own frees just what only that account used
     const targets = [uid, ...Object.entries(s.banInfo || {}).filter(([, i]) => i.altOf === uid).map(([id]) => id)];
     for (const t of targets) { s.bans = (s.bans || []).filter((id) => id !== t); if (s.banInfo) delete s.banInfo[t]; }
-    for (const [h, id] of Object.entries(s.bannedIps || {})) if (id === uid) delete s.bannedIps[h];   // their networks are free again
-    if (info?.altOf) { const main = userIpHashes(db.users[info.altOf]); for (const h of userIpHashes(db.users[uid])) if (!main.has(h) && s.bannedIps?.[h] === info.altOf) delete s.bannedIps[h]; }
+    for (const [h, id] of Object.entries(s.bannedDevices || {})) if (id === uid) delete s.bannedDevices[h];   // their browsers are free again
+    if (info?.altOf) { const main = deviceHashesOf(db.users[info.altOf]); for (const h of deviceHashesOf(db.users[uid])) if (!main.has(h) && s.bannedDevices?.[h] === info.altOf) delete s.bannedDevices[h]; }
     save(); res.json({ ok: true, freed: targets.length - 1 });
   }));
 
@@ -1043,12 +1043,12 @@ export function createApi() {
     let hit = 0;
     if (until) {
       for (const id of alts) { if (id === s.ownerId || can(s, id, 'ADMINISTRATOR') || (s.members[id] && topRolePos(s, req.user.id) <= topRolePos(s, id))) continue; if (apply(id, uid)) hit++; }
-      if (mine.size) s.timeoutLinks.push({ uid, until, hashes: [...mine] });   // an account made (or joined) later on the same network or browser gets it too
+      if (mine.size) s.timeoutLinks.push({ uid, until, hashes: [...mine] });   // an account made (or joined) later on the same browser gets it too
     } else { for (const [id, mm] of Object.entries(s.members)) if (mm.timeoutAlt === uid) { apply(id, null); hit++; } }
     save(); pushServerUpdate(s); revalidateVoice(s);
     res.json({ ok: true, timeoutUntil: m.timeoutUntil || null, alts: hit });
   }));
-  /** A new member whose network or browser matches someone currently timed out here is timed out for the rest of that time. */
+  /** A new member whose browser matches someone currently timed out here is timed out for the rest of that time. */
   function linkedTimeout(s, userId, hashes) {
     const now = Date.now(); s.timeoutLinks = (s.timeoutLinks || []).filter((l) => l.until > now);
     const m = s.members[userId]; if (!m || userId === s.ownerId) return;
