@@ -154,6 +154,12 @@ export async function restoreUpload(name) {
   const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, f.data); fs.renameSync(tmp, file);
   return true;
 }
+/** Deletes an upload everywhere it is kept (used when an audio message expires). */
+export function removeUpload(name) {
+  if (!isSafeFileName(name)) return;
+  try { fs.unlinkSync(path.join(UPLOAD_DIR, name)); } catch { /* already gone */ }
+  if (pg) pg.deleteFile(name).catch((e) => console.error('[orate] could not delete an expired upload:', e.message));
+}
 export const storageSummary = () => (pg ? `PostgreSQL (${pg.host})` : `local files (${path.relative(ROOT, DATA_DIR) || '.'}/)`);
 
 let lastId = 0;
@@ -164,7 +170,7 @@ export const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 /* indexes (rebuilt on load) */
 export const byUsername = new Map();
 export const byEmail = new Map();
-for (const u of Object.values(db.users)) { byUsername.set(u.username, u.id); if (u.email) byEmail.set(u.email, u.id); delete u.tag; delete u.decoration; }   // tags and avatar decorations no longer exist
+for (const u of Object.values(db.users)) { if (!u.serverBot) byUsername.set(u.username, u.id); if (u.email) byEmail.set(u.email, u.id); delete u.tag; delete u.decoration; }   // tags and avatar decorations no longer exist
 export const inviteCodes = db.invites;
 
 /* ------------------------------------------------------------- errors */
@@ -389,6 +395,7 @@ export function serverView(server, userId) {
     id: server.id, name: server.name, icon: server.icon || null, banner: server.banner || null,
     description: server.description || '', ownerId: server.ownerId, coOwners: server.coOwners || [], createdAt: server.createdAt,
     accent: server.accent || null, roles: server.roles, channels: chans,
+    orbitId: server.orbitId && server.members[server.orbitId] ? server.orbitId : null, orbitRoles: server.orbit?.roles || {},   // this server's Orbit (server/orbit.js)
     members: Object.entries(server.members).map(([id, m]) => memberView(id, m)),
     perms: [...permsOf(server, userId)], systemChannelId: server.systemChannelId || null,
     emojis: server.emojis || [], stickers: server.stickers || [],
@@ -466,7 +473,7 @@ export function messageView(m) {
     id: m.id, channelId: m.channelId, authorId: m.authorId, content: m.content, createdAt: m.createdAt, editedAt: m.editedAt || null,
     attachments: m.attachments || [], gif: m.gif || null, sticker: m.sticker || null, reactions: m.reactions || {},
     replyTo: m.replyTo || null, reply, mentions: m.mentions || [], mentionRoles: m.mentionRoles || [],
-    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
+    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
   };
 }
 

@@ -25,12 +25,13 @@ MODALS['add-server'] = function AddServer({ id }) {
   const [step, setStep] = useState('choose'); const [dir, setDir] = useState(1);
   const [tpl, setTpl] = useState('default'); const [name, setName] = useState(`${state.me.displayName}'s server`); const [icon, setIcon] = useState(null);
   const [code, setCode] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null); const [uploading, setUploading] = useState(false);
+  const [orbit, setOrbit] = useState(true);   // add the server's own Orbit (server/orbit.js)
   const go2 = (s, d = 1) => { setDir(d); setStep(s); setErr(null); };
   const close = () => closeModal(id);
   const create = async () => {
     if (name.trim().length < 2) { setErr('Server name must be at least 2 characters'); return; }
     setBusy(true);
-    try { const s = await api.post('/servers', { name: name.trim(), template: tpl, icon }); close(); goChannel(s.id, null); } catch (e) { setErr(errMsg(e)); setBusy(false); }
+    try { const s = await api.post('/servers', { name: name.trim(), template: tpl, icon, orbit }); close(); goChannel(s.id, null); } catch (e) { setErr(errMsg(e)); setBusy(false); }
   };
   const join = async () => {
     const c = code.trim().split('/').pop(); if (!c) return; setBusy(true); setErr(null);
@@ -46,6 +47,8 @@ MODALS['add-server'] = function AddServer({ id }) {
       : step === 'template' ? html`<div class="tpl-grid">${TEMPLATES.map((x) => html`<button type="button" class=${cx('tpl', tpl === x.id && 'sel')} onClick=${() => { setTpl(x.id); go2('customize'); }}><span class="tpl-ic">${x.icon}</span><b>${x.name}</b><small>${x.sub}</small></button>`)}</div><div class="step-foot"><${Btn} variant="ghost" onClick=${() => go2('choose', -1)}>${t('Back')}<//></div>`
         : step === 'customize' ? html`<div class="cs-icon-row"><button type="button" class="icon-drop" onClick=${pickIcon} aria-label="Upload icon">${icon ? html`<img src=${icon} alt="" />` : html`<span class="id-ring"><${Icon} name="camera" size=${26} /><small>${t('UPLOAD')}</small></span>`}${uploading ? html`<span class="id-busy"><${Spinner} size=${22} /></span>` : null}<span class="id-plus"><${Icon} name="plus" size=${14} sw=${3} /></span></button></div>
           <${Field} label=${t('Server name')} error=${err}><${TextInput} value=${name} onInput=${setName} maxlength="100" autofocus onKeyDown=${(e) => e.key === 'Enter' && create()} /><//>
+          <label class="orbit-check"><input type="checkbox" checked=${orbit} onChange=${(e) => setOrbit(e.target.checked)} /><span class="box"><${Icon} name="check" size=${14} sw=${3} /></span>
+            <span><b>${t('Add Orbit, the helper bot')}</b><small>${t('Slash commands like /help, /remind and /roll, plus /kick, /ban and /timeout for moderators. Rename it or change its picture with /settings.')}</small></span></label>
           <div class="step-foot"><${Btn} variant="ghost" onClick=${() => go2('template', -1)}>${t('Back')}<//><${Btn} variant="primary" loading=${busy} onClick=${create}>${t('Create')}<//></div>`
           : html`<${Field} label=${t('Invite link or code')} error=${err}><${TextInput} value=${code} onInput=${setCode} placeholder=${`${location.origin}/invite/aBcD1234`} autofocus onKeyDown=${(e) => e.key === 'Enter' && join()} icon="link" /><//>
             <div class="step-foot"><${Btn} variant="ghost" onClick=${() => go2('choose', -1)}>${t('Back')}<//><${Btn} variant="primary" loading=${busy} disabled=${!code.trim()} onClick=${join}>${t('Join Server')}<//></div>`}

@@ -12,6 +12,7 @@ import { deleteServer } from '/js/rail.js';
 import { deleteChannel } from '/js/sidebar.js';
 import { t } from '/js/i18n.js';
 import { PERM_INFO, PERM_ORDER } from '/js/perms.js';
+import '/js/orbit.js';   // Orbit's settings dialog
 
 export function openServerSettings(id, page = 'overview') { set({ serverSettings: { id, page }, ctx: null, popover: null }); }
 const close = () => set({ serverSettings: null });
@@ -49,6 +50,10 @@ function Overview({ server }) {
     <${Section} title=${t('System messages')}>
       <${SettingRow} title=${t('Join messages channel')} desc=${t('Where “member joined” notices appear.')}><${Dropdown} width=${200} value=${d.systemChannelId} options=${texts.map((c) => ({ value: c.id, label: '# ' + c.name }))} onChange=${(v) => setD({ ...d, systemChannelId: v })} /><//>
     <//>
+    ${can ? html`<${Section} title=${t('Orbit')} desc=${t('This server’s helper bot. It answers slash commands like /help, /remind and /kick here.')}>
+      <div class="btn-row">${server.orbitId ? html`<${Btn} icon="settings" onClick=${() => openModal('orbit-settings', { serverId: server.id })}>${t('Orbit settings')}<//><${Btn} variant="ghost" onClick=${() => act(api.del(`/servers/${server.id}/orbit`), { success: t('Orbit left the server') })}>${t('Remove Orbit')}<//>`
+        : html`<${Btn} variant="primary" icon="plus" onClick=${() => act(api.put(`/servers/${server.id}/orbit`), { success: t('Orbit joined the server') })}>${t('Add Orbit')}<//>`}</div>
+    <//>` : null}
     ${server.ownerId === state.me.id ? html`<${Section} title=${t('Danger zone')}>
       <div class="danger-zone"><div class="btn-row"><${Btn} icon="crown" onClick=${() => openModal('transfer', { serverId: server.id })}>${t('Transfer ownership')}<//><${Btn} variant="danger" icon="trash" onClick=${() => deleteServer(server)}>${t('Delete server')}<//></div></div><//>` : null}
   </div>`;

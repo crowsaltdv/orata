@@ -12,11 +12,30 @@ import { t } from '/js/i18n.js';
 import { fx } from '/js/fx.js';
 import { shareTheme } from '/js/theme-card.js';
 import { cloakAsDesmos } from '/js/cloak.js';
+import { orbitCommand, ORBIT_COMMANDS } from '/js/orbit-commands.js';
+import { mayUseOrbit, orbitSays } from '/js/orbit.js';
 
 const drafts = new Map(); // channelId -> text
 /** How a custom emoji reads in the message box: `:name:` (turned into the real token when sent) unless another server has one with the same name. */
 const emojiText = (e, serverId) => { const tok = `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`; return customToken(e.name, serverId) === tok ? `:${e.name}:` : tok; };
 export const composerApi = { insert: () => {}, focus: () => {}, setText: () => {} };
+
+/* ---- audio messages: recorded with the mic button, or an audio file dropped in; at most 3 minutes (they delete themselves after a day) ---- */
+const MAX_AUDIO = 180;
+const AUDIO_EXT = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac', weba: 'audio/webm' };
+const audioType = (f) => (f.type.startsWith('audio/') ? f.type : AUDIO_EXT[(/\.([a-z0-9]+)$/i.exec(f.name || '')?.[1] || '').toLowerCase()] || null);
+export const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+/** How long an audio file plays, in seconds (null when the browser can't tell). Files whose length isn't in their header are sought to the end to find it. */
+function audioLength(f) {
+  return new Promise((resolve) => {
+    const a = new Audio(); const u = URL.createObjectURL(f); let over = false;
+    const done = (d) => { if (over) return; over = true; URL.revokeObjectURL(u); a.removeAttribute('src'); resolve(Number.isFinite(d) && d > 0 ? d : null); };
+    a.preload = 'metadata'; a.onerror = () => done(null);
+    a.onloadedmetadata = () => { if (Number.isFinite(a.duration)) done(a.duration); else { a.ontimeupdate = () => { a.ontimeupdate = null; done(a.duration); }; a.currentTime = 1e101; } };
+    setTimeout(() => done(null), 8000);
+    a.src = u;
+  });
+}
 
 const COMMANDS = [
   { name: 'shrug', desc: 'Appends ¯\\_(ツ)_/¯ to your message', arg: 'message' },
@@ -47,7 +66,7 @@ function getTrigger(text, caret) {
   const before = text.slice(0, caret);
   let m = /(^|[\s(])([@#])([^\s@#]{0,32})$/.exec(before); if (m) return { kind: m[2], query: m[3], start: caret - m[3].length - 1 };
   m = /(^|[\s(]):([a-z0-9_+-]{2,32})$/i.exec(before); if (m) return { kind: ':', query: m[2], start: caret - m[2].length - 1 };
-  if (/^\/[a-z]*$/i.test(before) && before.length === text.length) return { kind: '/', query: before.slice(1), start: 0 };
+  if (/^\/[a-z0-9]*$/i.test(before) && before.length === text.length) return { kind: '/', query: before.slice(1), start: 0 };
   return null;
 }
 
@@ -66,6 +85,7 @@ export function Composer({ chId }) {
   const [ac, setAc] = useState(null); const [acIdx, setAcIdx] = useState(0);
   const [ping, setPing] = useState(true);
   const ta = useRef(null); const file = useRef(null); const dragDepth = useRef(0);
+  const [rec, setRec] = useState(null); const recRef = useRef(null);   // an audio message being recorded
   const server = ch?.serverId ? state.servers[ch.serverId] : null;
   const lockedPost = ch?.type === 'post' && ch.locked && !hasChannelPerm(ch, 'MANAGE_MESSAGES') && ch.ownerId !== state.me.id;
   const timeoutUntil = server?.members.find((m) => m.id === state.me.id)?.timeoutUntil || 0;
@@ -73,6 +93,7 @@ export function Composer({ chId }) {
   const canSend = (!server || hasChannelPerm(ch, 'SEND_MESSAGES')) && !lockedPost;
   const canAttach = !server || hasChannelPerm(ch, 'ATTACH_FILES');
   const canGif = !server || hasChannelPerm(ch, 'SEND_GIFS');
+  const orbitOn = !!server?.orbitId;
 
   // swap drafts when the channel changes
   useEffect(() => { setText(drafts.get(chId) || ''); setAtts([]); setMedia(null); setAc(null); setPing(true); if (matchMedia('(pointer:fine)').matches) setTimeout(() => ta.current?.focus(), 30); }, [chId]);
@@ -91,7 +112,8 @@ export function Composer({ chId }) {
   };
 
   /* ---- attachments ---- */
-  const addFiles = async (files) => {
+  // `recorded` is the length of a recording made with the mic button (a browser's own recordings don't always say how long they are)
+  const addFiles = async (files, recorded) => {
     if (!canAttach) { toast('You don’t have permission to upload files here', 'error'); return; }
     const list = [...files].filter((f) => f.size >= 0).slice(0, 10 - atts.length);
     if (!list.length) return;
@@ -99,7 +121,13 @@ export function Composer({ chId }) {
     const staged = [];
     for (const f of list) {
       if (f.size > max) { toast(`${f.name} is too large (max ${fileSize(max)})`, 'error'); continue; }
-      const a = { id: uid(), file: f, name: f.name || 'pasted-file', size: f.size, type: f.type || 'application/octet-stream', preview: isImageType(f.type) || f.type.startsWith('video/') ? URL.createObjectURL(f) : null, progress: 0, status: 'uploading', spoiler: /^SPOILER_/i.test(f.name) };
+      const aType = audioType(f); let duration = null;
+      if (aType) {   // every audio file becomes an audio message, so it must be 3 minutes or less
+        duration = recorded || await audioLength(f);
+        if (!duration) { toast(`Orate can’t tell how long ${f.name} is, so it can’t be an audio message`, 'error'); continue; }
+        if (duration > MAX_AUDIO + 0.5) { toast(`${f.name} is ${clock(duration)} long. Audio messages can be at most 3 minutes.`, 'error', 6000); continue; }
+      }
+      const a = { id: uid(), file: f, name: f.name || 'pasted-file', size: f.size, type: aType || f.type || 'application/octet-stream', preview: isImageType(f.type) || f.type.startsWith('video/') ? URL.createObjectURL(f) : null, progress: 0, status: 'uploading', spoiler: /^SPOILER_/i.test(f.name), ...(aType ? { voice: true, duration } : {}) };
       if (isImageType(f.type)) { try { const bmp = await createImageBitmap(f); a.width = bmp.width; a.height = bmp.height; bmp.close?.(); } catch { /* ignore */ } }
       const handle = {}; a.handle = handle;
       a.promise = upload(f, (p) => setAtts((cur) => cur.map((x) => (x.id === a.id ? { ...x, progress: p } : x))), handle)
@@ -113,6 +141,35 @@ export function Composer({ chId }) {
   };
   const removeAtt = (a) => { a.handle?.abort?.(); setAtts((cur) => cur.filter((x) => x.id !== a.id)); if (a.preview) setTimeout(() => URL.revokeObjectURL(a.preview), 4000); };
 
+  /* ---- recording an audio message (up to 3 minutes; it lands in the tray like a dropped file) ---- */
+  const stopRec = (keep) => { const r = recRef.current; if (!r) return; r.keep = keep; if (r.mr.state !== 'inactive') r.mr.stop(); else r.mr.onstop?.(); };
+  const startRec = async () => {
+    if (!canAttach) { toast('You don’t have permission to upload files here', 'error'); return; }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { toast('This browser can’t record audio', 'error'); return; }
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { toast('Orate can’t use your microphone. Allow it for this site and try again.', 'error', 6000); return; }
+    const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm'].find((x) => MediaRecorder.isTypeSupported?.(x)) || '';
+    const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const r = { mr, chunks: [], start: Date.now(), keep: false };
+    mr.ondataavailable = (e) => { if (e.data.size) r.chunks.push(e.data); };
+    mr.onstop = () => {
+      mr.onstop = null; clearInterval(r.timer); stream.getTracks().forEach((x) => x.stop()); recRef.current = null; setRec(null);
+      const secs = Math.min(MAX_AUDIO, (Date.now() - r.start) / 1000);
+      if (!r.keep || secs < 0.5 || !r.chunks.length) return;
+      const type = (mr.mimeType || mime || 'audio/webm').split(';')[0]; const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+      addFiles([new File(r.chunks, `audio-message.${ext}`, { type })], secs);
+    };
+    r.timer = setInterval(() => { const s = (Date.now() - r.start) / 1000; setRec({ secs: s }); if (s >= MAX_AUDIO) stopRec(true); }, 200);
+    recRef.current = r; mr.start(250); setRec({ secs: 0 });
+  };
+  useEffect(() => () => stopRec(false), [chId]);   // leaving the channel throws a recording away
+
+  /* ---- Orbit's commands (when this server has Orbit): run by the server; replies meant only for you appear here and nowhere else ---- */
+  const runOrbit = async (name, arg) => {
+    if (name === 'settings') { if (mayUseOrbit(server, orbitCommand('settings'))) openModal('orbit-settings', { serverId: server.id }); else orbitSays(chId, server, '❌ You can’t change Orbit’s settings here.'); return; }
+    try { const r = await api.post(`/channels/${chId}/command`, { name, args: encodeMentions(arg, ch) }); if (r?.ephemeral) orbitSays(chId, server, r.ephemeral); }
+    catch (e) { orbitSays(chId, server, `❌ ${e.message}`); }
+  };
+
   /* ---- sending ---- */
   const submit = async () => {
     if (!canSend || !ch) return;
@@ -120,7 +177,10 @@ export function Composer({ chId }) {
     const ready = atts.filter((a) => a.status !== 'error');
     if (!v.trim() && !ready.length && !media) return;
     // slash commands
-    const cm = /^\/([a-z]+)(?:\s+([\s\S]*))?$/i.exec(v);
+    const cm = /^\/([a-z0-9]+)(?:\s+([\s\S]*))?$/i.exec(v);
+    if (cm && orbitOn && orbitCommand(cm[1]) && !COMMANDS.some((c) => c.name === cm[1].toLowerCase())) {
+      setText(''); drafts.delete(chId); setAc(null); await runOrbit(cm[1].toLowerCase(), (cm[2] || '').trim()); return;
+    }
     if (cm && COMMANDS.some((c) => c.name === cm[1].toLowerCase())) {
       const cmd = cm[1].toLowerCase(); const arg = (cm[2] || '').trim();
       if (cmd === 'shrug') v = `${arg} ¯\\_(ツ)_/¯`.trim();
@@ -136,10 +196,10 @@ export function Composer({ chId }) {
     }
     v = encodeMentions(v.replace(/:([a-z0-9_+-]+):/gi, (all, code) => (customToken(code, server?.id) ? all : shortcodeEmoji(code.toLowerCase()) || all)), ch);
     const pending = ready.filter((a) => a.status === 'uploading');
-    const attachments = ready.map((a) => ({ id: a.id, url: a.preview || a.result?.url, name: a.name, size: a.size, type: a.type, width: a.width, height: a.height, spoiler: a.spoiler }));
+    const attachments = ready.map((a) => ({ id: a.id, url: a.preview || a.result?.url, name: a.name, size: a.size, type: a.type, width: a.width, height: a.height, spoiler: a.spoiler, voice: a.voice, duration: a.duration }));
     const wait = pending.length || ready.length ? async () => {
       const done = await Promise.all(ready.map((a) => a.promise));
-      return done.map((r, i) => ({ ...r, width: ready[i].width, height: ready[i].height, spoiler: ready[i].spoiler, name: ready[i].spoiler && !/^SPOILER_/i.test(r.name) ? 'SPOILER_' + r.name : r.name }));
+      return done.map((r, i) => ({ ...r, type: ready[i].voice ? ready[i].type : r.type, width: ready[i].width, height: ready[i].height, spoiler: ready[i].spoiler, voice: ready[i].voice, duration: ready[i].duration, name: ready[i].spoiler && !/^SPOILER_/i.test(r.name) ? 'SPOILER_' + r.name : r.name }));
     } : null;
     const reply = replyTo; const doPing = ping; const m = media;
     setText(''); setAtts([]); setMedia(null); setAc(null); drafts.delete(chId); set({ replyTo: null });
@@ -169,6 +229,7 @@ export function Composer({ chId }) {
       items = [...cust, ...searchEmoji(q, 8).map((e) => ({ type: 'emoji', id: e.char, label: `:${e.code || e.label}:`, sub: '', insert: e.char + ' ', char: e.char }))].slice(0, 8);
     } else if (trig.kind === '/') {
       items = COMMANDS.filter((c) => c.name.startsWith(q) && (!c.server || server)).map((c) => ({ type: 'cmd', id: c.name, label: '/' + c.name, sub: c.desc, insert: '/' + c.name + ' ' }));
+      if (orbitOn) items = [...ORBIT_COMMANDS.filter((c) => c.name.startsWith(q) && mayUseOrbit(server, c) && !COMMANDS.some((x) => x.name === c.name)).map((c) => ({ type: 'cmd', id: 'orbit-' + c.name, label: '/' + c.name, sub: c.arg ? `${c.desc} · ${c.arg}` : c.desc, insert: '/' + c.name + ' ', icon: 'sparkles' })), ...items];   // this server's Orbit first
     }
     if (!items.length) { setAc(null); return; }
     setAc({ items, trig }); setAcIdx(0);
@@ -200,7 +261,7 @@ export function Composer({ chId }) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setAcIdx((acIdx + 1) % ac.items.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setAcIdx((acIdx - 1 + ac.items.length) % ac.items.length); return; }
       // a command with nothing to fill in (/cloak) runs as soon as it is typed out; otherwise Enter completes the highlighted suggestion
-      if (e.key === 'Enter' && !e.shiftKey && ac.trig.kind === '/' && COMMANDS.some((c) => c.noArg && text.trim().toLowerCase() === '/' + c.name)) { e.preventDefault(); setAc(null); submit(); return; }
+      if (e.key === 'Enter' && !e.shiftKey && ac.trig.kind === '/' && (COMMANDS.some((c) => c.noArg && text.trim().toLowerCase() === '/' + c.name) || (orbitOn && orbitCommand(text.trim().slice(1)) && !orbitCommand(text.trim().slice(1)).arg))) { e.preventDefault(); setAc(null); submit(); return; }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); pick(ac.items[acIdx]); return; }
       if (e.key === 'Escape') { e.preventDefault(); setAc(null); return; }
     }
@@ -259,11 +320,16 @@ export function Composer({ chId }) {
           <div class="att-meta" title=${media.title}>${media.title}</div>
           <div class="att-acts"><button type="button" class="del" data-tip=${t('Remove')} aria-label="Remove" onClick=${() => setMedia(null)}><${Icon} name="trash" size=${15} /></button></div></div>` : null}
         ${atts.map((a) => html`<div class=${cx('att-chip', a.status)} key=${a.id}>
-        <div class="att-thumb">${a.preview && a.type.startsWith('image/') ? html`<img src=${a.preview} alt="" class=${a.spoiler ? 'blur' : ''} />` : a.preview ? html`<video src=${a.preview} muted></video>` : html`<${Icon} name=${a.type.startsWith('audio/') ? 'music' : 'file'} size=${34} sw=${1.5} />`}
+        <div class="att-thumb">${a.preview && a.type.startsWith('image/') ? html`<img src=${a.preview} alt="" class=${a.spoiler ? 'blur' : ''} />` : a.preview ? html`<video src=${a.preview} muted></video>` : html`<${Icon} name=${a.voice ? 'mic' : 'file'} size=${34} sw=${1.5} />`}
           ${a.status === 'uploading' ? html`<div class="att-prog"><i style=${{ width: a.progress * 100 + '%' }}></i></div>` : null}${a.status === 'error' ? html`<div class="att-err"><${Icon} name="alert-circle" size=${22} /></div>` : null}</div>
-        <div class="att-meta" title=${a.name}>${a.name}</div>
+        <div class="att-meta" title=${a.name}>${a.voice ? `${t('Audio message')} · ${clock(a.duration)}` : a.name}</div>
         <div class="att-acts"><button type="button" data-tip=${a.spoiler ? 'Unmark spoiler' : 'Mark as spoiler'} onClick=${() => setAtts((cur) => cur.map((x) => (x.id === a.id ? { ...x, spoiler: !x.spoiler } : x)))} class=${a.spoiler ? 'on' : ''}><${Icon} name="eye-off" size=${15} /></button><button type="button" class="del" data-tip="Remove" onClick=${() => removeAtt(a)}><${Icon} name="trash" size=${15} /></button></div></div>`)}</div>` : null}
-      <div class="composer-row">
+      ${rec ? html`<div class="composer-row rec-row" role="status">
+        <span class="rec-dot"></span><span class="rec-time">${clock(rec.secs)} <small>/ 3:00</small></span><span class="rec-label">${t('Recording an audio message…')}</span>
+        <div class="comp-right"><button type="button" class="comp-btn" data-tip=${t('Throw it away')} data-tip-pos="top" aria-label=${t('Throw the recording away')} onClick=${() => stopRec(false)}><${Icon} name="trash" size=${20} /></button>
+          <button type="button" class="comp-btn send ready" data-tip=${t('Done')} data-tip-pos="top" aria-label=${t('Stop recording')} onClick=${() => stopRec(true)}><${Icon} name="check" size=${20} sw=${2.6} /></button></div>
+      </div>` : null}
+      <div class="composer-row" hidden=${!!rec}>
         <button type="button" class="comp-btn plus" data-tip=${t('Upload a File')} data-tip-pos="top" aria-label="Upload a file" onClick=${(e) => { const r = e.currentTarget.getBoundingClientRect(); openContext({ clientX: r.left, clientY: r.top - 4 }, [{ label: t('Upload a File'), icon: 'upload', onClick: () => file.current?.click(), disabled: !canAttach }, { label: t('Create Poll'), icon: 'bar-chart', onClick: () => openModal('create-poll', { channelId: chId }) }]); }}><${Icon} name="plus" size=${22} sw=${2.4} /></button>
         <input type="file" multiple hidden ref=${file} onChange=${(e) => { addFiles(e.target.files); e.target.value = ''; }} />
         <textarea ref=${ta} class="composer-input" rows="1" value=${text} placeholder=${placeholder} maxlength="4000" spellcheck="true" aria-label=${placeholder} onInput=${onInput} onKeyDown=${onKeyDown} onPaste=${onPaste} onBlur=${() => setTimeout(() => setAc(null), 120)} onClick=${(e) => computeAc(text, e.target.selectionStart)}></textarea>
@@ -271,6 +337,7 @@ export function Composer({ chId }) {
           ${canGif ? html`<button type="button" class="comp-btn gif-btn" data-tip="GIF" data-tip-pos="top" aria-label="Open GIF picker" onClick=${(e) => openPickerFor(e.currentTarget, 'gif')}><span>GIF</span></button>` : null}
           ${canGif ? html`<button type="button" class="comp-btn hide-sm" data-tip="Stickers" data-tip-pos="top" aria-label="Open sticker picker" onClick=${(e) => openPickerFor(e.currentTarget, 'stickers')}><${Icon} name="sticker" size=${22} /></button>` : null}
           <button type="button" class="comp-btn emoji-btn" data-tip="Emoji" data-tip-pos="top" aria-label="Open emoji picker" onClick=${(e) => openPickerFor(e.currentTarget, 'emoji')} onMouseEnter=${(e) => e.currentTarget.classList.add('wiggle')} onMouseLeave=${(e) => e.currentTarget.classList.remove('wiggle')}><${Icon} name="smile" size=${22} /></button>
+          ${canAttach ? html`<button type="button" class="comp-btn mic-btn" data-tip=${t('Record an audio message')} data-tip-pos="top" aria-label=${t('Record an audio message')} onClick=${startRec}><${Icon} name="mic" size=${21} /></button>` : null}
           <button type="button" class=${cx('comp-btn send', hasContent && 'ready')} data-tip=${t('Send')} data-tip-pos="top" aria-label="Send message" onClick=${submit}><${Icon} name="send" size=${20} /></button>
         </div>
       </div>

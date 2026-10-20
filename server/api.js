@@ -21,6 +21,7 @@ import { createSession, findSession, touchSession, endSession, endUserSessions, 
 import { mountMusic, mountMusicPublic, musicConfigured } from './music.js';
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 import { mountBadges } from './badges.js';
+import { mountOrbit, addOrbit } from './orbit.js';
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -206,6 +207,7 @@ export function createApi() {
     let age = now.getFullYear() - born.getFullYear();
     if (now < new Date(now.getFullYear(), born.getMonth(), born.getDate())) age--;
     if (age < 13) throw bad('You must be at least 13 years old to use Orate', 'dob');
+    checkAccountLimits(req);
 
     ensureBot();
     const { salt, hash } = await hashPassword(password);
@@ -231,8 +233,25 @@ export function createApi() {
     res.json({ ok: true, mode: out.mode, expiresIn: out.expiresIn, resendIn: out.resendIn });
   }));
 
+  /**
+   * One browser may have at most ACCOUNTS_PER_BROWSER accounts at a time (default 3) and make at most ACCOUNTS_PER_HOUR an hour (default 3).
+   * "Its" accounts are the ones it has been used with (the browser id kept for bans, see noteDevice); a deleted account frees its place but still counts for the hour.
+   */
+  function checkAccountLimits(req) {
+    const mine = new Set(requestHashes(req)); if (!mine.size) return;
+    const perBrowser = Number(ENV.ACCOUNTS_PER_BROWSER) || 3; const perHour = Number(ENV.ACCOUNTS_PER_HOUR) || 3;
+    const seen = Object.values(db.users).filter((u) => !u.bot && [...deviceHashesOf(u)].some((x) => mine.has(x)));
+    const recent = seen.map((u) => u.createdAt).filter((t) => t > Date.now() - 3600_000).sort((a, b) => a - b);
+    if (recent.length >= perHour) {
+      const mins = Math.max(1, Math.ceil((recent[recent.length - perHour] + 3600_000 - Date.now()) / 60_000));
+      throw new ApiError(429, `You can only create ${perHour} accounts an hour. Wait ${mins} minute${mins === 1 ? '' : 's'} to create more.`, 'account_wait');
+    }
+    if (seen.filter((u) => !u.deleted).length >= perBrowser) throw new ApiError(403, `This browser already has ${perBrowser} Orate accounts, the most it can have at one time.`, 'account_limit');
+  }
+
   /** Creates the user, joins the community server, sets up the welcome DM and returns { token, user }. */
   async function createAccount({ email, username, displayName, salt, hash, dob }, req) {
+    checkAccountLimits(req);   // again: a verified sign-up only creates the account when the emailed code is typed
     ensureBot();
     const id = newId();
     const hues = ['#8b5cf6', '#ec4899', '#f97316', '#10b981', '#06b6d4', '#3b82f6', '#ef4444', '#eab308'];
@@ -345,6 +364,7 @@ export function createApi() {
 
   mountMusic(r, { h, limit });
   mountBadges(r, { h });
+  mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdate, guardText, kickMember, banMember, timeoutMember });
 
   r.post('/auth/logout', h(async (req, res) => { await endSession(req.sessionId); res.json({ ok: true }); }));
   r.get('/ready', (req, res) => { noteDevice(req.user, req); res.json(buildReady(req.user)); });   // (also remembers the browser, for the alt checks)
@@ -502,7 +522,8 @@ export function createApi() {
     if (Object.values(db.servers).filter((s) => s.ownerId === req.user.id).length >= 20) throw bad('You can own at most 20 servers');
     const icon = b.icon ? uploadRef(b.icon) : null; if (icon === undefined) throw bad('Invalid icon');
     const server = createServer(req.user, { name: str(b.name, 2, 100, 'Server name'), icon, template: b.template });
-    emitTo([req.user.id], 'server_create', { server: serverView(server, req.user.id), users: [publicUser(req.user)] });
+    const orbit = b.orbit ? addOrbit(server) : null;   // "Add Orbit" ticked when the server was made
+    emitTo([req.user.id], 'server_create', { server: serverView(server, req.user.id), users: [publicUser(req.user), ...(orbit ? [publicUser(orbit)] : [])] });
     res.json(serverView(server, req.user.id));
   }));
 
@@ -571,6 +592,7 @@ export function createApi() {
     for (const c of channelsOfServer(s.id)) { delete db.channels[c.id]; delete db.messages[c.id]; voice.delete(c.id); }
     for (const [code, inv] of Object.entries(db.invites)) if (inv.serverId === s.id) delete db.invites[code];
     delete db.servers[s.id];
+    if (db.users[s.orbitId]) db.users[s.orbitId].deleted = true;   // its own Orbit goes with it
     if (db.defaultServerId === s.id) db.defaultServerId = null;
     emitTo(aud, 'server_delete', { serverId: s.id });
     save();
@@ -970,19 +992,27 @@ export function createApi() {
     emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: uid });
     for (const set of [...(conns.get(uid) || [])]) if (set.voice && db.channels[set.voice]?.serverId === s.id) set.leaveVoice?.('kicked');
   };
-  r.delete('/servers/:id/members/:uid', h(async (req, res) => {
-    const s = getServer(req, req.params.id); need(s, req.user.id, 'KICK_MEMBERS');
-    const uid = req.params.uid; if (!s.members[uid]) throw notFound('Unknown member');
+  // kick, ban and timeout are shared by their routes and Orbit's /kick, /ban and /timeout (server/orbit.js): req.user is the moderator
+  function kickMember(req, s, uid) {
+    need(s, req.user.id, 'KICK_MEMBERS');
+    if (!s.members[uid]) throw notFound('Unknown member');
     if (uid === s.ownerId || uid === req.user.id) throw forbidden('You can’t kick that member');
     if (topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
-    removeMember(s, uid, false); res.json({ ok: true });
+    removeMember(s, uid, false);
+  }
+  r.delete('/servers/:id/members/:uid', h(async (req, res) => {
+    kickMember(req, getServer(req, req.params.id), req.params.uid); res.json({ ok: true });
   }));
   r.put('/servers/:id/bans/:uid', h(async (req, res) => {
-    const s = getServer(req, req.params.id); need(s, req.user.id, 'BAN_MEMBERS');
-    const uid = req.params.uid; if (!db.users[uid]) throw notFound('Unknown user');
+    const alts = banMember(req, getServer(req, req.params.id), req.params.uid, req.body || {});
+    res.json({ ok: true, alts: alts.map((id) => ({ id, displayName: db.users[id].displayName })) });
+  }));
+  /** Bans `uid` (with { reason, deleteHours, alts }); returns the ids of the alt accounts banned along with them. */
+  function banMember(req, s, uid, b = {}) {
+    need(s, req.user.id, 'BAN_MEMBERS');
+    if (!db.users[uid]) throw notFound('Unknown user');
     if (uid === s.ownerId || uid === req.user.id) throw forbidden('You can’t ban that member');
     if (s.members[uid] && topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
-    const b = req.body || {};
     // remember why and by whom, and which browsers the person used — they can't come back with another account from those,
     // and the accounts they already have on them (their alts) are banned along with them
     s.banInfo ||= {}; s.bannedDevices ||= {}; s.bans ||= [];
@@ -996,8 +1026,8 @@ export function createApi() {
       purgeMessages(s, target, hours);
     }
     save();
-    res.json({ ok: true, alts: alts.map((id) => ({ id, displayName: db.users[id].displayName })) });
-  }));
+    return alts;
+  }
   /** Deletes what a person posted in this server during the last `hours` hours (0 = nothing). */
   function purgeMessages(s, uid, hours) {
     if (!hours) return;
@@ -1032,11 +1062,15 @@ export function createApi() {
 
   /* ---- timeouts: a member can read but not talk, react or join voice until it runs out ---- */
   r.put('/servers/:id/members/:uid/timeout', h(async (req, res) => {
-    const s = getServer(req, req.params.id); need(s, req.user.id, 'MODERATE_MEMBERS');
-    const uid = req.params.uid; const m = s.members[uid]; if (!m) throw notFound('Unknown member');
+    res.json({ ok: true, ...timeoutMember(req, getServer(req, req.params.id), req.params.uid, (req.body || {}).minutes) });
+  }));
+  /** Times `uid` out for `minutes` (0 lifts it), along with their alts; returns { timeoutUntil, alts } (how many alts). */
+  function timeoutMember(req, s, uid, minutesIn) {
+    need(s, req.user.id, 'MODERATE_MEMBERS');
+    const m = s.members[uid]; if (!m) throw notFound('Unknown member');
     if (uid === s.ownerId || uid === req.user.id || can(s, uid, 'ADMINISTRATOR')) throw forbidden('You can’t time out that member');
     if (topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
-    const minutes = clampInt((req.body || {}).minutes, 0, 28 * 24 * 60, 0);
+    const minutes = clampInt(minutesIn, 0, 28 * 24 * 60, 0);
     const until = minutes ? Date.now() + minutes * 60_000 : 0;
     const { alts, mine } = altAccounts(s, uid, req.user.id, req);
     const apply = (id, by) => { const mm = s.members[id]; if (!mm) return false; if (until) { mm.timeoutUntil = until; if (by) mm.timeoutAlt = by; } else { delete mm.timeoutUntil; delete mm.timeoutAlt; } return true; };
@@ -1048,8 +1082,8 @@ export function createApi() {
       if (mine.size) s.timeoutLinks.push({ uid, until, hashes: [...mine] });   // an account made (or joined) later on the same browser gets it too
     } else { for (const [id, mm] of Object.entries(s.members)) if (mm.timeoutAlt === uid) { apply(id, null); hit++; } }
     save(); pushServerUpdate(s); revalidateVoice(s);
-    res.json({ ok: true, timeoutUntil: m.timeoutUntil || null, alts: hit });
-  }));
+    return { timeoutUntil: m.timeoutUntil || null, alts: hit };
+  }
   /** A new member whose browser matches someone currently timed out here is timed out for the rest of that time. */
   function linkedTimeout(s, userId, hashes) {
     const now = Date.now(); s.timeoutLinks = (s.timeoutLinks || []).filter((l) => l.until > now);

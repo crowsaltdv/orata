@@ -1,7 +1,10 @@
 // Orate — message creation shared by the REST API and the built-in bot.
-import { db, newId, save, emitTo, audienceOf, messageView, publicUser, canIn, channelView, customEmojisIn, postView } from './core.js';
+import { db, newId, save, emitTo, audienceOf, messageView, publicUser, canIn, channelView, customEmojisIn, postView, removeUpload } from './core.js';
 
 export const hooks = { onMessage: [] };
+/** Audio messages (recorded, or an audio file dropped in) are at most 3 minutes long and delete themselves a day after they are sent. */
+export const VOICE_MAX_SECONDS = 180;
+export const VOICE_TTL = 86400_000;
 
 const URL_HOSTS_OK = /^https:\/\/([a-z0-9-]+\.)*klipy\.com\//i;
 const SAFE_UPLOAD = /^\/uploads\/[A-Za-z0-9_.-]+$/;
@@ -23,11 +26,13 @@ export function sanitizeAttachments(list, fs, path, uploadDir) {
     if (!a || !SAFE_UPLOAD.test(String(a.url || ''))) continue;
     const file = path.join(uploadDir, path.basename(a.url));
     let st; try { st = fs.statSync(file); } catch { continue; }
+    const type = String(a.type || 'application/octet-stream').slice(0, 100);
+    const voice = !!a.voice && type.startsWith('audio/'); const secs = Number(a.duration);
+    if (voice && !(secs > 0 && secs <= VOICE_MAX_SECONDS + 1)) continue;   // longer than 3 minutes: not an audio message
     out.push({
-      id: String(a.id || path.basename(a.url)).slice(0, 40), url: a.url, name: String(a.name || 'file').slice(0, 200), size: st.size,
-      type: String(a.type || 'application/octet-stream').slice(0, 100),
+      id: String(a.id || path.basename(a.url)).slice(0, 40), url: a.url, name: String(a.name || 'file').slice(0, 200), size: st.size, type,
       width: a.width ? clampInt(a.width, 1, 20000, undefined) : undefined, height: a.height ? clampInt(a.height, 1, 20000, undefined) : undefined,
-      spoiler: !!a.spoiler,
+      spoiler: !!a.spoiler, ...(voice ? { voice: true, duration: Math.round(secs * 10) / 10 } : {}),
     });
   }
   return out;
@@ -64,6 +69,7 @@ export function postMessage(ch, authorId, { content = '', attachments = [], gif 
   const emojis = customEmojisIn(content, authorId); if (emojis) msg.emojis = emojis;
   if (poll) msg.poll = poll;
   if (theme) msg.theme = theme;
+  if (attachments.some((a) => a.voice)) { msg.expiresAt = msg.createdAt + VOICE_TTL; expiring.set(msg.id, { channelId: ch.id, at: msg.expiresAt }); }
   (db.messages[ch.id] ||= []).push(msg);
   if (ch.type === 'post') { ch.lastActivity = msg.createdAt; emitTo(audienceOf(ch), 'post_update', { post: postView(ch) }); }   // keeps the forum list's "last activity" and reply counts live
   // keep memory bounded per channel (oldest are dropped from the live window; they remain on disk until next save)
@@ -82,3 +88,26 @@ export function postMessage(ch, authorId, { content = '', attachments = [], gif 
   for (const fn of hooks.onMessage) { try { fn(ch, msg); } catch (e) { console.error('[hook]', e); } }
   return msg;
 }
+
+/* ---------------------------------------------------------------- audio messages expire */
+const expiring = new Map();   // message id -> { channelId, at } for every audio message still waiting to expire
+for (const [chId, list] of Object.entries(db.messages)) for (const m of list || []) if (m.expiresAt) expiring.set(m.id, { channelId: chId, at: m.expiresAt });
+/** A day after it was sent the audio is deleted (the file too); the message goes with it unless it also holds text or other things. */
+function sweepExpired() {
+  const now = Date.now();
+  for (const [id, x] of expiring) {
+    if (x.at > now) continue;
+    expiring.delete(id);
+    const list = db.messages[x.channelId]; const m = list?.find((y) => y.id === id); const ch = db.channels[x.channelId];
+    if (!m || !ch) continue;
+    for (const a of (m.attachments || []).filter((y) => y.voice)) removeUpload(a.url.split('/').pop());
+    m.attachments = (m.attachments || []).filter((y) => !y.voice); delete m.expiresAt;
+    if (!m.content?.trim() && !m.attachments.length && !m.gif && !m.sticker && !m.poll && !m.theme) {
+      list.splice(list.indexOf(m), 1);
+      emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: id });
+    } else emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
+    save();
+  }
+}
+setTimeout(sweepExpired, 2000).unref();
+setInterval(sweepExpired, 60_000).unref();

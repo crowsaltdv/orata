@@ -156,6 +156,11 @@ export class PgStore {
     const r = await this.q('SELECT type, data FROM orate_files WHERE name = $1', [name]);
     return r.rows.length ? { type: r.rows[0].type, data: r.rows[0].data } : null;
   }
+  async deleteFile(name) {
+    if (!isSafeFileName(name)) return;
+    const r = await this.q('DELETE FROM orate_files WHERE name = $1 RETURNING size', [name]);
+    if (r.rows.length) this.filesUsed = Math.max(0, this.filesUsed - Number(r.rows[0].size));
+  }
   async listFiles() { return (await this.q('SELECT name, size FROM orate_files ORDER BY name')).rows.map((r) => ({ name: r.name, size: Number(r.size) })); }
 
   /** Copies every file of a local uploads folder into the database (skipping ones already there). Resolves { added, skipped, bytes }. */

@@ -104,6 +104,7 @@ function RegisterForm({ go, onPending }) {
     } catch (er) {
       setBusy(false);
       if (['email', 'username', 'password', 'dob'].includes(er.code)) setErrs({ [er.code]: er.message }); else setErrs({ general: er.message });
+      if (er.code === 'account_wait' || er.code === 'account_limit') toast(er.message, 'error', 9000);   // the per-browser account limits pop up too
     }
   };
   return html`<div class="auth-form">

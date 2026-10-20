@@ -33,6 +33,7 @@ npm run reset-password <user>    # forgot a password? prints a new one
 | `HOST` | `0.0.0.0` | Interface to listen on (`127.0.0.1` = this machine only) |
 | `KLIPY_API_KEY` | – | Enables the GIF and sticker pickers (proxied server-side; the key never reaches the browser) |
 | `MAX_UPLOAD_MB` | `25` | Largest file upload |
+| `ACCOUNTS_PER_BROWSER` / `ACCOUNTS_PER_HOUR` | `3` / `3` | How many accounts one browser may have at a time, and make in an hour |
 | `HTTPS_KEY` / `HTTPS_CERT` | – | Paths to a TLS key/cert to serve HTTPS directly |
 | `TRUST_PROXY` | – | Set to `1` when running behind a reverse proxy |
 | `STUN_URLS` | Google public STUN | Comma-separated STUN servers for voice & video |
@@ -207,6 +208,12 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 
 **Channel & category permissions** — right-click a channel or category → *Edit Permissions*. Pick a role or a member and set each permission to **Allow**, **Deny** or **Inherit**, exactly like Discord: the order is server permissions → @everyone → the member's roles → the member themselves, an Allow from a role beats a Deny from another role, and a channel you can't *View* grants nothing (that is also how private channels work; the *Private Channel* switch is a shortcut for it). Channels inside a category are **synced** with it — change the category and every synced channel follows. Changing a synced channel's permissions **unsyncs** it (the banner shows *Not synced*); *Sync Now* re-adopts the category's, *Unsync* detaches a copy. Only people with *Manage Permissions* can edit, they can't grant what they don't have, and they can't touch roles at or above their own. Everything is enforced on the server (messages, reactions, attachments, @everyone, voice) and the member list of a channel updates live.
 
+**Audio messages** — the mic button in the message box records an audio message of up to **3 minutes** (it stops by itself at 3:00; throw it away or keep it, then send). Dropping or picking an audio file (MP3, WAV, OGG, M4A, FLAC…) turns it into an audio message too, and one longer than 3 minutes isn't allowed. Audio messages play in a little player and **delete themselves a day after they are sent** — the audio file is deleted from the server as well; a message that also had text keeps the text.
+
+**Account limits** — one browser can have at most **3 accounts at a time** and make at most **3 an hour**; the 4th in an hour is told how many minutes to wait. "One browser" is the browser id Orate already keeps for bans (never the network, so a shared school or home connection doesn't block anyone). Both numbers can be changed (`ACCOUNTS_PER_BROWSER`, `ACCOUNTS_PER_HOUR`).
+
+**Orbit in your server** — tick *Add Orbit* when you create a server (or use *Server Settings → Overview → Orbit* later) and the server gets its own Orbit that answers slash commands: `/help`, `/ping`, `/roll 2d6`, `/flip`, `/8ball`, `/choose a | b`, `/joke`, `/remind 10m stretch`, and for moderators `/say`, `/kick @member [reason]`, `/ban @member [reason]` and `/timeout @member 10m [reason]` (a member can be an @mention, a username or an ID). `/help`, `/ping`, reminders being set and any error are shown **only to you** ("Only you can see this"); everything else is posted for the channel. `/settings` (Manage Server) changes that server's Orbit's **name, picture and about text** — it is its own bot, so everyone's DM Orbit stays the same — and **which roles may use each command**: by default a command needs its permission (Kick, Ban, Timeout Members, Manage Messages for `/say`), and picking roles narrows it to them; owners and admins can always use everything.
+
 **Badges** — profiles show badges next to the name (hover one for its name): Orate Developer, Orate Staff, Moderator, Early Supporter, Bug Hunter, Verified, Artist and Partner are built in. Whoever has the *Orate Developer* badge is a developer: right-click anyone → *Edit Badges* to give or take their badges, or make a custom badge (a name, an icon or an emoji, and a color) — deleting a custom badge takes it from everyone. A developer can't take the developer badge from themselves, so there is always one. The first developers are `oratedev` and Orate_dev (set once when the server starts, `server/badges.js`).
 
 **Co-owners** — a server can have co-owners (`coOwners` on the server): they get the crown in the member list and every permission, sit above every role, and can't be kicked, banned or timed out; deleting or transferring the server stays the owner's alone. Orate_dev co-owns the Orate Community server.
@@ -270,6 +277,7 @@ server/
   sessions.js   sign-in sessions (never expire; in their own Postgres table when DATABASE_URL is set)
   music.js      Apple Music (iTunes Search API) search + preview relay + "listening to" status
   badges.js     profile badges: the catalog, developers (the "dev" badge) and their routes
+  orbit.js      a server's own Orbit: its slash commands (shared list: public/js/orbit-commands.js), /settings and reminders
 public/
   js/           Preact + htm (vendored, no build step), ES modules (rain.js, fx.js: rain, button particles; voice.js / stageview.js: calls and stages)
   css/          base · layout · chat · ui · features · settings · auth · extras

@@ -24,7 +24,8 @@ const GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA
 let child = null;
 function startServer(extra = {}) {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
-    env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '', TRUST_PROXY: '1', ...extra },
+    // the ban tests make many accounts on one browser, so the per-browser account limits are raised except where they are tested
+    env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '', TRUST_PROXY: '1', ACCOUNTS_PER_BROWSER: '1000', ACCOUNTS_PER_HOUR: '1000', ...extra },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
 }
@@ -454,6 +455,79 @@ async function main() {
   r = await api('PUT', `/servers/${CG.id}/members/${CO.user.id}/timeout`, A.token, { minutes: 5 }); ok(r.status === 403, '… or timed out');
   r = await api('DELETE', `/servers/${CG.id}`, CO.token); ok(r.status === 403, 'deleting the server stays the owner’s');
   r = await api('POST', `/servers/${CG.id}/transfer`, CO.token, { userId: CO.user.id }); ok(r.status === 403, '… and so does transferring it');
+
+  /* ---------------------------------------------------------------- audio messages */
+  console.log('\nAudio messages');
+  const ach = (await api('GET', '/ready', A.token)).body.servers.find((s) => s.id === CG.id).channels.find((c) => c.type === 'text');
+  const aud = async () => (await upload(A.token, Buffer.from('not-really-opus-' + Math.random()), 'audio/webm', 'audio-message.webm')).url;
+  const AU1 = await aud(); const AU2 = await aud();
+  r = await api('POST', `/channels/${ach.id}/messages`, A.token, { attachments: [{ url: AU1, name: 'audio-message.webm', type: 'audio/webm', voice: true, duration: 42.3 }] }); const VM1 = r.body;
+  ok(r.status === 200 && VM1.attachments[0].voice === true && VM1.attachments[0].duration === 42.3 && VM1.expiresAt - VM1.createdAt === 86400_000, 'an audio message keeps its length and is set to delete itself after a day');
+  r = await api('POST', `/channels/${ach.id}/messages`, A.token, { content: 'too long', attachments: [{ url: await aud(), type: 'audio/webm', voice: true, duration: 181.6 }] });
+  ok(r.status === 200 && !r.body.attachments.length && !r.body.expiresAt, 'audio longer than 3 minutes is not accepted as an audio message');
+  r = await api('POST', `/channels/${ach.id}/messages`, A.token, { content: 'listen to this', attachments: [{ url: AU2, type: 'audio/mpeg', voice: true, duration: 9 }] }); const VM2 = r.body;
+
+  /* ---------------------------------------------------------------- Orbit in a server */
+  console.log('\nOrbit in a server');
+  r = await api('POST', '/servers', A.token, { name: 'Bot Guild', orbit: true }); const BG = r.body;
+  ok(BG.orbitId && BG.members.some((m) => m.id === BG.orbitId), 'a server made with “Add Orbit” ticked has its own Orbit');
+  const bgText = BG.channels.find((c) => c.type === 'text');
+  const bgCode = (await api('POST', `/servers/${BG.id}/invites`, A.token, {})).body.code;
+  for (const x of [PL, CO]) await api('POST', `/invites/${bgCode}/join`, x.token);
+  const cmd = (tok, name, args = '') => api('POST', `/channels/${bgText.id}/command`, tok, { name, args });
+  const bgMsgs = async () => (await api('GET', `/channels/${bgText.id}/messages?limit=20`, A.token)).body.messages;
+  r = await cmd(PL.token, 'ping'); ok(r.status === 200 && /Pong/.test(r.body.ephemeral) && !(await bgMsgs()).some((m) => /Pong/.test(m.content)), '/ping answers only the person who asked');
+  r = await cmd(PL.token, 'help'); ok(r.body.ephemeral.includes('/roll') && !r.body.ephemeral.includes('/kick'), '/help lists only the commands you can use');
+  r = await cmd(A.token, 'help'); ok(r.body.ephemeral.includes('/kick') && r.body.ephemeral.includes('/settings'), '… and moderators see theirs');
+  r = await cmd(PL.token, 'roll', '2d6'); ok(r.status === 200 && (await bgMsgs()).some((m) => m.authorId === BG.orbitId && m.content.includes('🎲')), 'fun commands answer in the channel, for everyone');
+  r = await cmd(PL.token, 'say', 'hello'); ok(r.status === 403, 'a member can’t make Orbit /say things');
+  r = await cmd(A.token, 'say', 'Welcome everyone'); ok(r.status === 200 && (await bgMsgs()).some((m) => m.authorId === BG.orbitId && m.content === 'Welcome everyone'), '… a moderator can');
+  r = await cmd(PL.token, 'kick', `<@${CO.user.id}>`); ok(r.status === 403, 'a member without Kick Members can’t /kick');
+  r = await cmd(A.token, 'timeout', `<@${CO.user.id}>`); ok(r.status === 400, '/timeout needs a duration');
+  r = await cmd(A.token, 'timeout', `${CO.user.id} 10m being loud`);
+  const coIn = async () => (await api('GET', '/ready', A.token)).body.servers.find((s) => s.id === BG.id).members.find((m) => m.id === CO.user.id);
+  ok(r.status === 200 && (await coIn()).timeoutUntil > Date.now() + 9 * 60_000, '/timeout works with an ID and a duration');
+  r = await cmd(A.token, 'kick', '@cowner spamming'); ok(r.status === 200 && !(await coIn()), '/kick works with an @username');
+  await api('POST', `/invites/${bgCode}/join`, CO.token);
+  r = await cmd(A.token, 'ban', `<@${CO.user.id}> rude`); ok(r.status === 200 && (await api('GET', `/servers/${BG.id}/bans`, A.token)).body.some((x) => x.id === CO.user.id), '/ban works with an @mention');
+  const gamer = (await api('POST', `/servers/${BG.id}/roles`, A.token, { name: 'Gamer' })).body;
+  r = await api('PATCH', `/servers/${BG.id}/orbit`, PL.token, { displayName: 'Hacked' }); ok(r.status === 403, 'only people with Manage Server can change Orbit’s settings');
+  r = await api('PATCH', `/servers/${BG.id}/orbit`, A.token, { displayName: 'Helper', bio: 'At your service', roles: { roll: [gamer.id, 'nope'] } });
+  ok(r.status === 200 && r.body.user.displayName === 'Helper' && r.body.roles.roll.join() === gamer.id, '/settings renames this server’s Orbit and narrows a command to a role');
+  r = await cmd(PL.token, 'roll'); ok(r.status === 403, '… so a member without that role can’t use it');
+  await api('PUT', `/servers/${BG.id}/members/${PL.user.id}/roles/${gamer.id}`, A.token); r = await cmd(PL.token, 'roll'); ok(r.status === 200, '… and one with it can');
+  const dmOrbit = (await api('GET', '/ready', A.token)).body.botId;
+  ok((await api('GET', `/users/${dmOrbit}`, A.token)).body.user.displayName === 'Orbit', 'everyone’s DM Orbit keeps its name');
+  r = await cmd(PL.token, 'remind', 'soon stretch'); ok(r.status === 400, '/remind needs a time');
+  r = await cmd(PL.token, 'remind', '5m stretch your legs'); ok(r.status === 200 && /5 minutes/.test(r.body.ephemeral), '/remind confirms only to you');
+  r = await api('POST', `/channels/${ach.id}/command`, A.token, { name: 'ping' }); ok(r.status === 400, 'a server without Orbit has no commands');
+
+  // a day later: the audio is gone (and its file), and the reminder is due
+  await stopServer();
+  const xj = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8'));
+  for (const m of xj.messages[ach.id]) if (m.expiresAt) m.expiresAt = Date.now() - 1000;
+  for (const x of xj.reminders) x.at = Date.now() - 1000;
+  fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(xj)); startServer(); await ready(); await sleep(2800);
+  const left = (await api('GET', `/channels/${ach.id}/messages?limit=20`, A.token)).body.messages;
+  ok(!left.some((m) => m.id === VM1.id), 'an audio message deletes itself after a day');
+  ok(left.find((m) => m.id === VM2.id)?.content === 'listen to this' && !left.find((m) => m.id === VM2.id).attachments.length, '… and one with text keeps the text');
+  ok((await fetch(base + AU1)).status === 404, '… and the audio file is deleted too');
+  ok((await bgMsgs()).some((m) => m.authorId === BG.orbitId && m.content.includes('stretch your legs') && m.mentions.includes(PL.user.id)), 'Orbit pings the person in the channel when a reminder is due');
+
+  /* ---------------------------------------------------------------- accounts per browser */
+  console.log('\nAccounts per browser');
+  await stopServer(); startServer({ ACCOUNTS_PER_BROWSER: '', ACCOUNTS_PER_HOUR: '' }); await ready();   // the real limits: 3 and 3
+  const lim = (n) => register(`limit${n}`, { dev: 'device-limitlimitlimit1', ip: `192.0.2.${220 + n}` });
+  const L1 = await lim(1); const L2 = await lim(2); const L3 = await lim(3);
+  ok(L1.token && L2.token && L3.token, 'a browser can make 3 accounts');
+  const L4 = await lim(4); ok(L4.res.status === 429 && L4.res.body.code === 'account_wait' && /Wait (59|60) minutes/.test(L4.res.body.error), 'a 4th in the same hour is told how many minutes to wait');
+  ok((await register('limitother', { dev: 'device-otherotherother1', ip: '192.0.2.230' })).token, '… while another browser on the same network still can');
+  await stopServer();
+  const lj = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8'));
+  for (const x of [L1, L2, L3]) lj.users[x.user.id].createdAt -= 2 * 3600_000;
+  fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(lj)); startServer({ ACCOUNTS_PER_BROWSER: '', ACCOUNTS_PER_HOUR: '' }); await ready();
+  r = (await lim(4)).res; ok(r.status === 403 && r.body.code === 'account_limit', 'an hour later it still can’t have more than 3 at once');
+  r = await api('DELETE', '/me', L1.token, { password: 'password123' }); ok(r.status === 200 && (await lim(4)).token, '… until one of them is deleted');
 
   /* ---------------------------------------------------------------- hosted TURN relays (calls need one when two networks can't link directly) */
   console.log('\nHosted TURN relays');

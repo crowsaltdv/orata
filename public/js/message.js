@@ -1,5 +1,5 @@
 // Orate — a single chat message (header, markdown body, attachments, GIFs, embeds, reactions, toolbar).
-import { html, useState, useEffect, useRef, memo, cx, formatStamp, formatClock, formatFull, fileSize, copyText, isImageType, shallowEq } from '/js/lib.js';
+import { html, useState, useEffect, useRef, useMemo, memo, cx, formatStamp, formatClock, formatFull, fileSize, copyText, isImageType, shallowEq } from '/js/lib.js';
 import { state, set, useSel, nameOf, roleColor, openContext, openPopover, openModal, toast, getChannel, hasPerm, hasChannelPerm, dmName, goChannel, goDm, go, emojiById } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, IconBtn } from '/js/ui.js';
@@ -14,6 +14,7 @@ import { InviteCard, inviteCodeOf } from '/js/invite-card.js';
 import { PollView } from '/js/polls.js';
 import { ThemeCard } from '/js/theme-card.js';
 import { useFavGifs, toggleFavGif, gifFromMessage } from '/js/gif-favs.js';
+import { dismissEphemeral } from '/js/orbit.js';
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -53,6 +54,26 @@ function LinkEmbed({ url, onImage }) {
 }
 
 /* ------------------------------------------------------------------ attachments */
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+/** An audio message: play / pause, a bar you can click to seek, its length, and how long until it deletes itself. */
+function VoiceMessage({ a, expiresAt }) {
+  const ref = useRef(null); const [playing, setPlaying] = useState(false); const [at, setAt] = useState(0);
+  const total = a.duration || 0;
+  const bars = useMemo(() => {   // a made-up but steady waveform, seeded by the file
+    let x = 0; for (const c of String(a.url)) x = (x * 31 + c.charCodeAt(0)) >>> 0;
+    return Array.from({ length: 40 }, () => { x = (Math.imul(x, 1103515245) + 12345) >>> 0; return 0.2 + ((x >>> 16) % 1000) / 1250; });
+  }, [a.url]);
+  const toggle = () => { const el = ref.current; if (el.paused) el.play().catch(() => {}); else el.pause(); };
+  const seek = (e) => { const r = e.currentTarget.getBoundingClientRect(); const el = ref.current; const len = total || el.duration || 0; el.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * len; setAt(el.currentTime); };
+  const left = expiresAt ? expiresAt - Date.now() : null; const done = total ? at / total : 0;
+  return html`<div class=${cx('voice-msg', playing && 'playing')}>
+    <button type="button" class="vm-play" aria-label=${playing ? t('Pause') : t('Play')} onClick=${toggle}><${Icon} name=${playing ? 'pause' : 'play'} size=${16} sw=${0} fill=${true} /></button>
+    <div class="vm-wave" onClick=${seek} role="slider" tabindex="0" aria-label=${t('Seek')} aria-valuemin="0" aria-valuemax=${Math.round(total)} aria-valuenow=${Math.round(at)}>${bars.map((hgt, i) => html`<i key=${i} class=${(i + 0.5) / bars.length <= done ? 'on' : ''} style=${{ height: hgt * 100 + '%' }}></i>`)}</div>
+    <span class="vm-time">${clock(playing || at ? at : total)}</span>
+    ${left !== null && left > 0 ? html`<span class="vm-exp" data-tip=${t('Audio messages delete themselves a day after they are sent')}><${Icon} name="clock" size=${12} />${left > 3600_000 ? `${Math.floor(left / 3600_000)}h` : `${Math.max(1, Math.ceil(left / 60_000))}m`}</span>` : null}
+    <audio ref=${ref} src=${a.url} preload="none" onPlay=${() => setPlaying(true)} onPause=${() => setPlaying(false)} onEnded=${() => { setPlaying(false); setAt(0); }} onTimeUpdate=${(e) => setAt(e.target.currentTime)}></audio>
+  </div>`;
+}
 function Attachment({ a, onImage }) {
   const [revealed, setRevealed] = useState(!a.spoiler);
   const isImg = isImageType(a.type) || /\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(a.name || '');
@@ -181,16 +202,16 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
   const onImage = (a) => { const imgs = (m.attachments || []).filter((x) => isImageType(x.type)).map((x) => ({ url: x.url, name: x.name })); const i = imgs.findIndex((x) => x.url === a.url); set({ lightbox: { items: i >= 0 ? imgs : [a], index: Math.max(0, i) } }); };
   const name = nick || author?.displayName || 'Unknown User';
   const open = (e) => openProfile(m.authorId, e.currentTarget);
-  const onCtx = (e) => { if (e.target.closest('a, .mention')) return; openContext(e, messageMenu(m, ch)); };
+  const onCtx = (e) => { if (m.ephemeral || e.target.closest('a, .mention')) return; openContext(e, messageMenu(m, ch)); };
   const timeEl = html`<time class="msg-time" title=${formatFull(m.createdAt)}>${formatStamp(m.createdAt, hour12)}</time>`;
-  const toolbar = !m.pending && !m.failed ? html`<div class="msg-toolbar glass glass-toolbar">
+  const toolbar = !m.pending && !m.failed && !m.ephemeral ? html`<div class="msg-toolbar glass glass-toolbar">
       ${frequentEmoji().slice(0, 2).concat(frequentEmoji().length < 2 ? ['👍', '😂'].slice(frequentEmoji().length) : []).map((e) => html`<button type="button" class="tb-emoji" data-tip=${`React with ${e}`} onClick=${() => toggleReaction(ch, m, e)}>${e}</button>`)}
       <${IconBtn} icon="smile-plus" label=${t('Add Reaction')} size=${18} glass=${null} onClick=${(e) => openPicker(e.currentTarget, (emoji) => toggleReaction(ch, m, emoji), { emojiOnly: true })} />
       <${IconBtn} icon="reply" label=${t('Reply')} size=${18} glass=${null} onClick=${() => set({ replyTo: { channelId: ch.id, id: m.id } })} />
       ${m.authorId === me ? html`<${IconBtn} icon="edit" label=${t('Edit')} size=${18} glass=${null} onClick=${() => set({ editing: m.id })} />` : null}
       <${IconBtn} icon="more-h" label=${t('More')} size=${18} glass=${null} onClick=${(e) => { const r = e.currentTarget.getBoundingClientRect(); openContext({ clientX: r.left, clientY: r.bottom + 4 }, messageMenu(m, ch)); }} />
     </div>` : null;
-  return html`<div class=${cx('msg', head ? 'head' : 'cont', mentioned && 'mentioned', m.pending && 'pending', m.failed && 'failed', editing && 'editing', replyingTo && 'replying', m.pinned && 'is-pinned')} data-mid=${m.id} onContextMenu=${onCtx}>
+  return html`<div class=${cx('msg', head ? 'head' : 'cont', mentioned && 'mentioned', m.pending && 'pending', m.failed && 'failed', editing && 'editing', replyingTo && 'replying', m.pinned && 'is-pinned', m.ephemeral && 'ephemeral')} data-mid=${m.id} onContextMenu=${onCtx}>
     ${m.reply ? html`<div class="msg-reply" onClick=${() => m.reply.id && !m.reply.deleted && jumpToMessage(ch.id, m.reply.id)}>
       <span class="reply-hook"></span>
       ${m.reply.deleted ? html`<span class="reply-deleted"><${Icon} name="reply" size=${13} /> Original message was deleted</span>`
@@ -207,10 +228,11 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
         ${m.sticker ? html`<img class="msg-sticker" src=${m.sticker.url} alt=${m.sticker.title || 'sticker'} title=${m.sticker.title} loading="lazy" />` : null}
         ${m.poll ? html`<${PollView} m=${m} ch=${ch} />` : null}
         ${m.theme ? html`<${ThemeCard} m=${m} />` : null}
-        ${m.attachments?.length ? html`<div class="attachments">${m.attachments.map((a) => html`<${Attachment} key=${a.id || a.url} a=${a} onImage=${onImage} />`)}</div>` : null}
+        ${m.attachments?.length ? html`<div class="attachments">${m.attachments.map((a) => (a.voice ? html`<${VoiceMessage} key=${a.id || a.url} a=${a} expiresAt=${m.expiresAt} />` : html`<${Attachment} key=${a.id || a.url} a=${a} onImage=${onImage} />`))}</div>` : null}
         ${invites.map((c) => html`<${InviteCard} key=${c} code=${c} mine=${m.authorId === me} />`)}
         ${urls.map((u) => html`<${LinkEmbed} key=${u} url=${u} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />`)}
         <${Reactions} m=${m} ch=${ch} />
+        ${m.ephemeral ? html`<div class="msg-eph"><${Icon} name="eye" size=${14} />${t('Only you can see this')} · <a role="button" onClick=${() => dismissEphemeral(ch.id, m.id)}>${t('Dismiss message')}</a></div>` : null}
         ${m.failed ? html`<div class="msg-fail"><${Icon} name="alert-circle" size=${14} /> ${m.error || 'Message failed to send.'} <a role="button" onClick=${() => retryMessage(ch, m)}>Retry</a> · <a role="button" onClick=${() => discardMessage(ch, m)}>Delete</a></div>` : null}
       </div>
       ${toolbar}
