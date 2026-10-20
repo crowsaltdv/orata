@@ -17,7 +17,7 @@ export const EFFECTS = [
   ['rays', 'Solar rays'], ['ocean', 'Ocean'], ['ambient', 'Ambient lights'], ['aurora', 'Aurora'], ['sparkles', 'Sparkles'], ['glitter', 'Glitter'], ['stars', 'Stars'], ['starfield', 'Warp speed'], ['galaxy', 'Galaxy'],
   ['meteors', 'Shooting stars'], ['snow', 'Snow'], ['rain', 'Rain'], ['lightning', 'Lightning'], ['clouds', 'Clouds'], ['fog', 'Mist'], ['embers', 'Embers'], ['fire', 'Fire'], ['smoke', 'Smoke'],
   ['hearts', 'Hearts'], ['bubbles', 'Bubbles'], ['bokeh', 'Bokeh'], ['lava', 'Lava lamp'], ['confetti', 'Confetti'], ['fireworks', 'Fireworks'], ['fireflies', 'Fireflies'], ['butterflies', 'Butterflies'],
-  ['petals', 'Petals'], ['leaves', 'Autumn leaves'], ['lanterns', 'Lanterns'], ['balloons', 'Balloons'], ['ripples', 'Ripples'], ['caustics', 'Underwater'], ['disco', 'Disco'], ['spotlight', 'Spotlights'],
+  ['petals', 'Petals'], ['leaves', 'Autumn leaves'], ['sakura', 'Sakura'], ['lanterns', 'Lanterns'], ['balloons', 'Balloons'], ['ripples', 'Ripples'], ['caustics', 'Underwater'], ['disco', 'Disco'], ['spotlight', 'Spotlights'],
   ['vaporwave', 'Vaporwave'], ['equalizer', 'Equalizer'], ['plasma', 'Plasma'], ['scanlines', 'Retro CRT'], ['matrix', 'Matrix'], ['pixels', 'Pixels'], ['dust', 'Dust motes'],
 ];
 /** A good-looking starting palette for each effect: [color, second color]. Used for the previews and when an effect is first picked. */
@@ -25,7 +25,7 @@ const EFFECT_COLORS = {
   rays: ['#ffd966', '#ff9f43'], ocean: ['#1e90ff', '#00e5ff'], ambient: ['#a78bfa', '#38bdf8'], aurora: ['#34d399', '#a78bfa'], sparkles: ['#ffffff', '#ffe9a8'], glitter: ['#f9a8d4', '#fde68a'], stars: ['#fde68a', '#ffffff'],
   starfield: ['#ffffff', '#93c5fd'], galaxy: ['#a78bfa', '#f472b6'], meteors: ['#ffffff', '#93c5fd'], snow: ['#ffffff', '#bfdbfe'], rain: ['#60a5fa', '#93c5fd'], lightning: ['#c4b5fd', '#ffffff'], clouds: ['#ffffff', '#bfdbfe'],
   fog: ['#94a3b8', '#cbd5e1'], embers: ['#ff7a1a', '#ffb703'], fire: ['#ff5a1f', '#ffb703'], smoke: ['#9ca3af', '#d1d5db'], hearts: ['#f43f5e', '#fb7185'], bubbles: ['#7dd3fc', '#a5f3fc'], bokeh: ['#fcd34d', '#f9a8d4'],
-  lava: ['#ff4d6d', '#ff9f1c'], confetti: ['#f43f5e', '#facc15'], fireworks: ['#ff6b6b', '#ffd93d'], fireflies: ['#d9f99d', '#fde047'], butterflies: ['#f472b6', '#60a5fa'], petals: ['#f9a8d4', '#fbcfe8'], leaves: ['#f97316', '#b45309'],
+  lava: ['#ff4d6d', '#ff9f1c'], confetti: ['#f43f5e', '#facc15'], fireworks: ['#ff6b6b', '#ffd93d'], fireflies: ['#d9f99d', '#fde047'], butterflies: ['#f472b6', '#60a5fa'], petals: ['#f9a8d4', '#fbcfe8'], leaves: ['#f97316', '#b45309'], sakura: ['#ffb7c5', '#ffe4ec'],
   lanterns: ['#ffb347', '#ff7f50'], balloons: ['#f43f5e', '#3b82f6'], ripples: ['#7dd3fc', '#ffffff'], caustics: ['#38bdf8', '#a7f3d0'], disco: ['#f472b6', '#60a5fa'], spotlight: ['#fde68a', '#ffffff'], vaporwave: ['#ff71ce', '#01cdfe'],
   equalizer: ['#22d3ee', '#a78bfa'], plasma: ['#6d28d9', '#ec4899'], scanlines: ['#22c55e', '#a7f3d0'], matrix: ['#22c55e', '#86efac'], pixels: ['#60a5fa', '#f472b6'], dust: ['#fde68a', '#ffffff'],
 };

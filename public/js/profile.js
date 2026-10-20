@@ -1,6 +1,6 @@
 // Orate — profile card (popout, side panel and full modal) + user context menus.
 import { html, useState, useEffect, cx, formatMemberSince, copyText, avatarColor } from '/js/lib.js';
-import { state, set, useSel, openModal, closeModal, closePopover, openContext, toast, hasPerm, memberOf, topRole, nameOf, goDm } from '/js/store.js';
+import { state, set, useSel, openModal, closeModal, closePopover, openContext, toast, hasPerm, memberOf, topRole, nameOf, goDm, isOwnerOf } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, Btn, IconBtn, MODALS, POPOVERS, Modal, Spinner, TextInput, confirmDialog } from '/js/ui.js';
 import { api } from '/js/api.js';
@@ -9,6 +9,7 @@ import { renderMarkdown } from '/js/markdown.js';
 import { t } from '/js/i18n.js';
 import { ListeningCard, myListening } from '/js/music.js';
 import { cardLook, CardDecor, NameText, useProfileFonts } from '/js/profile-style.js';
+import { Badges, isDev } from '/js/badges.js';
 
 const cache = new Map();
 function useProfile(userId) {
@@ -42,7 +43,7 @@ export function userMenu(userId, serverId) {
     items.push({ type: 'sep' });
     if (hasPerm(serverId, 'MANAGE_NICKNAMES')) items.push({ label: t('Change Nickname'), icon: 'edit', onClick: () => openModal('nickname', { serverId, userId }) });
     if (canRoles && roles.length) items.push({ label: t('Roles'), icon: 'tag', submenu: roles.map((r) => ({ label: r.name, checked: member.roles.includes(r.id), onClick: () => act(member.roles.includes(r.id) ? api.del(`/servers/${serverId}/members/${userId}/roles/${r.id}`) : api.put(`/servers/${serverId}/members/${userId}/roles/${r.id}`)) })) });
-    if (hasPerm(serverId, 'MODERATE_MEMBERS') && userId !== server.ownerId) {
+    if (hasPerm(serverId, 'MODERATE_MEMBERS') && !isOwnerOf(server, userId)) {
       const set = async (minutes) => {
         const r = await act(api.put(`/servers/${serverId}/members/${userId}/timeout`, { minutes }));
         if (r) toast(minutes ? `${u.displayName} was timed out${r.alts ? `, along with ${r.alts} other account${r.alts === 1 ? '' : 's'} of theirs` : ''}` : `Timeout removed${r.alts ? ` (and for ${r.alts} other account${r.alts === 1 ? '' : 's'})` : ''}`, 'success', 3500);
@@ -52,18 +53,20 @@ export function userMenu(userId, serverId) {
         member.timeoutUntil > Date.now() && { label: t('Remove Timeout'), icon: 'x', onClick: () => set(0) },
       ].filter(Boolean) });
     }
-    if (hasPerm(serverId, 'KICK_MEMBERS') && userId !== server.ownerId) items.push({ label: `${t('Kick')} ${u.displayName}`, icon: 'log-out', danger: true, onClick: async () => { if (await confirmDialog({ title: `Kick ${u.displayName}`, body: 'They can rejoin with a new invite.', confirmLabel: 'Kick', danger: true })) act(api.del(`/servers/${serverId}/members/${userId}`), { success: 'Member kicked' }); } });
-    if (hasPerm(serverId, 'BAN_MEMBERS') && userId !== server.ownerId) items.push({ label: `${t('Ban')} ${u.displayName}`, icon: 'ban', danger: true, onClick: () => openModal('ban', { serverId, userId }) });
+    if (hasPerm(serverId, 'KICK_MEMBERS') && !isOwnerOf(server, userId)) items.push({ label: `${t('Kick')} ${u.displayName}`, icon: 'log-out', danger: true, onClick: async () => { if (await confirmDialog({ title: `Kick ${u.displayName}`, body: 'They can rejoin with a new invite.', confirmLabel: 'Kick', danger: true })) act(api.del(`/servers/${serverId}/members/${userId}`), { success: 'Member kicked' }); } });
+    if (hasPerm(serverId, 'BAN_MEMBERS') && !isOwnerOf(server, userId)) items.push({ label: `${t('Ban')} ${u.displayName}`, icon: 'ban', danger: true, onClick: () => openModal('ban', { serverId, userId }) });
     void mine;
   }
+  if (isDev(me) && !u.bot) items.push({ type: 'sep' }, { label: t('Edit Badges'), icon: 'award', onClick: () => openModal('badges', { userId }) });
   items.push({ type: 'sep' }, { label: t('Copy User ID'), icon: 'copy', onClick: async () => { await copyText(userId); toast('Copied', 'success', 1400); } });
   return items.filter(Boolean);
 }
 
-export function Banner({ user, height = 96, server }) {
+/** A banner picture is shown at the shape it was cropped to (3 : 1), so what you chose in the crop dialog is exactly what shows. `shape={false}` keeps a fixed strip. */
+export function Banner({ user, height = 96, server, shape = true }) {
   const style = user.banner ? { backgroundImage: `url("${user.banner}")` } : { background: `linear-gradient(135deg, ${user.bannerColor || avatarColor(user.id)}, ${user.accentColor || 'var(--accent-2)'})` };
   void server;
-  return html`<div class="pc-banner" style=${{ height: height + 'px', ...style }}></div>`;
+  return html`<div class="pc-banner" style=${{ ...(user.banner && shape ? { aspectRatio: '3 / 1' } : { height: height + 'px' }), ...style }}></div>`;
 }
 
 export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOverride }) {
@@ -95,7 +98,7 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
       <${Avatar} user=${user} size=${mode === 'panel' ? 96 : 80} status=${user.status} class="pc-avatar" />
     </div>
     <div class="pc-body">
-      <div class="pc-name"><${NameText} text=${nick || user.displayName} profile=${user.profile} />${user.bot ? html`<span class="bot-tag">APP</span>` : null}</div>
+      <div class="pc-name"><${NameText} text=${nick || user.displayName} profile=${user.profile} />${user.bot ? html`<span class="bot-tag">APP</span>` : null}<${Badges} user=${user} /></div>
       <div class="pc-user">${user.username}${user.pronouns ? html`<i> • ${user.pronouns}</i>` : null}</div>
       ${cs ? html`<div class="pc-status"><span>${cs.emoji}</span>${cs.text}</div>` : null}
       ${listening ? html`<${ListeningCard} listening=${listening} />` : null}

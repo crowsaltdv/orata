@@ -125,8 +125,10 @@
 .pick-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
 .pick-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; cursor: pointer; transition: background var(--t-fast); } .pick-row:hover { background: var(--hover); } .pick-row > span:not(.avatar):not(.box) { flex: 1; display: flex; flex-direction: column; min-width: 0; } .pick-row > .avatar { flex: none; } .pick-row small { color: var(--text-3); font-size: 12.5px; }
 .pick-row input { position: absolute; opacity: 0; pointer-events: none; } .pick-row .box { width: 22px; height: 22px; border-radius: 7px; border: 2px solid var(--border-strong); display: flex; align-items: center; justify-content: center; color: transparent; transition: all var(--t-fast); } .pick-row input:checked ~ .box { background: var(--accent-grad); border-color: transparent; color: #fff; animation: bounce-in .3s var(--ease-spring); }
-.crop-frame { position: relative; margin: 0 auto; overflow: hidden; border-radius: 14px; background: #000; cursor: grab; touch-action: none; user-select: none; } .crop-frame img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; } .crop-frame.round { border-radius: 50%; }
-.crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgb(0 0 0 / .55); pointer-events: none; }
+.crop-stage { position: relative; overflow: hidden; border-radius: 16px; background: #08070d; cursor: grab; touch-action: none; user-select: none; } .crop-stage:active { cursor: grabbing; }
+.crop-frame { position: relative; margin: 0 auto; border-radius: 14px; background: #000; } .crop-frame img { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; } .crop-frame.round { border-radius: 50%; }
+/* everything outside the frame is dimmed: that part of the picture will not show */
+.crop-ring { position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 9999px rgb(0 0 0 / .62); outline: 2px solid rgb(255 255 255 / .85); pointer-events: none; }
 .crop-frame:not(.round) { }
 .crop-zoom { display: flex; align-items: center; gap: 12px; color: var(--text-3); } .crop-zoom .slider { flex: 1; }
 
@@ -166,7 +168,7 @@
 .call-ring .avatar { animation: glow-pulse 1.4s infinite; } .call-ring b { display: block; font-size: 16px; } .call-ring span { font-size: 13px; color: var(--text-3); }
 .call-ring .cr-btns { margin-left: auto; display: flex; gap: 8px; } .call-ring .ctl { width: 44px; height: 44px; } .call-ring .ctl.ok { background: #2f9e57; color: #fff; animation: ring 1.6s infinite; }
 
-.crop-frame, .crop-frame * { -webkit-user-drag: none; }
+.crop-stage, .crop-stage * { -webkit-user-drag: none; }
 .crop-frame img { pointer-events: none; }
 .crop-hint { margin: 10px 0 0; font-size: 12.5px; color: var(--text-3); text-align: center; }
 .avatar img, .pc-avatar img { -webkit-user-drag: none; }

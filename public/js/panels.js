@@ -1,6 +1,6 @@
 // Orate — right-hand panels: members, pinned messages, search, DM profile.
 import { html, useState, useEffect, useMemo, useRef, cx, formatStamp, debounce, memo } from '/js/lib.js';
-import { state, set, useSel, getChannel, dmName, dmUserId, openContext, openModal, hasPerm, hasChannelPerm, nameOf, roleColor } from '/js/store.js';
+import { state, set, useSel, getChannel, dmName, dmUserId, openContext, openModal, hasPerm, hasChannelPerm, nameOf, roleColor, isOwnerOf } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, Empty, Spinner, IconBtn } from '/js/ui.js';
 import { api } from '/js/api.js';
@@ -17,7 +17,7 @@ const MemberRow = memo(function MemberRow({ id, serverId, groupColor }) {
   const u = useSel((s) => s.users[id]);
   const nick = useSel((s) => s.servers[serverId]?.members.find((m) => m.id === id)?.nick);
   const color = useSel((s) => roleColor(serverId, id));
-  const owner = useSel((s) => s.servers[serverId]?.ownerId === id);
+  const owner = useSel((s) => isOwnerOf(s.servers[serverId], id));
   const timedOut = useSel((s) => (s.servers[serverId]?.members.find((m) => m.id === id)?.timeoutUntil || 0) > Date.now());
   if (!u) return null;
   const off = u.status === 'offline';

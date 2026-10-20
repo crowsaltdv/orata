@@ -422,6 +422,39 @@ async function main() {
   r = await api('PATCH', '/me', A.token, { profile: 'pink' }); ok(r.status === 400, 'a style that is not an object is refused');
   r = await api('PATCH', '/me', A.token, { profile: { fonts: { name: 'pacifico' }, junk: 'x'.repeat(5000) } }); ok(r.status === 400, 'and so is an oversized one');
 
+  /* ---------------------------------------------------------------- badges and co-owners */
+  console.log('\nBadges and co-owners');
+  ok(EFFECTS.some(([id]) => id === 'sakura'), 'there is a Sakura effect');
+  const DV = await register('devy', { ip: '192.0.2.201' }); const PL = await register('plainy', { ip: '192.0.2.202' });
+  const CO = await register('cowner', { ip: '192.0.2.203' }); const MB = await register('membo', { ip: '192.0.2.204' });
+  r = await api('POST', '/servers', A.token, { name: 'Co Guild' }); const CG = r.body;
+  const cgCode = (await api('POST', `/servers/${CG.id}/invites`, A.token, {})).body.code;
+  for (const x of [CO, MB, PL]) await api('POST', `/invites/${cgCode}/join`, x.token);
+  r = await api('GET', '/badges', PL.token); ok(r.status === 200 && r.body.some((b) => b.id === 'dev' && b.builtin), 'the built-in badges are listed');
+  r = await api('PUT', `/users/${PL.user.id}/badges`, PL.token, { badges: ['dev'] }); ok(r.status === 403, 'someone who is not a developer can’t give badges (not even to themselves)');
+  r = await api('POST', '/badges', PL.token, { name: 'Mine', icon: 'star', color: '#ff0000' }); ok(r.status === 403, '… or make one');
+  r = await api('PATCH', '/me', PL.token, { badges: ['dev'] }); ok(r.status === 200 && !r.body.badges.length, '… and badges are not part of your own profile settings');
+  await stopServer();
+  const bj = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8'));
+  bj.users[DV.user.id].badges = ['dev']; bj.servers[CG.id].coOwners = [CO.user.id];
+  fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(bj)); startServer(); await ready();
+  r = await api('POST', '/badges', DV.token, { name: 'Sakura Fan', emoji: '🌸', color: '#FFB7C5' }); const fan = r.body;
+  ok(r.status === 200 && fan.emoji === '🌸' && fan.color === '#ffb7c5' && !fan.builtin, 'a developer makes a custom badge');
+  r = await api('POST', '/badges', DV.token, { name: 'x', icon: '<script>', color: '#ffffff' }); ok(r.status === 400, 'a badge needs a real icon name or an emoji');
+  r = await api('PUT', `/users/${PL.user.id}/badges`, DV.token, { badges: [fan.id, 'early', 'nope'] }); ok(r.status === 200 && r.body.badges.map((b) => b.id).join() === `${fan.id},early`, 'a developer gives someone badges (unknown ones are dropped)');
+  r = await api('GET', `/users/${PL.user.id}`, MB.token); ok(r.body.user.badges.some((b) => b.name === 'Sakura Fan'), '… and everyone sees them on the profile');
+  r = await api('PUT', `/users/${DV.user.id}/badges`, DV.token, { badges: [] }); ok(r.status === 400, 'a developer can’t take the developer badge from themselves');
+  r = await api('DELETE', '/badges/dev', DV.token); ok(r.status === 400, 'built-in badges can’t be deleted');
+  r = await api('DELETE', `/badges/${fan.id}`, DV.token); ok(r.status === 200, 'a custom badge can be deleted');
+  r = await api('GET', `/users/${PL.user.id}`, MB.token); ok(r.body.user.badges.map((b) => b.id).join() === 'early', '… and is gone from everyone who had it');
+  const coView = (await api('GET', '/ready', CO.token)).body.servers.find((s) => s.id === CG.id);
+  ok(coView.coOwners.includes(CO.user.id) && coView.perms.includes('ADMINISTRATOR'), 'a co-owner has every permission (and the crown)');
+  r = await api('DELETE', `/servers/${CG.id}/members/${MB.user.id}`, CO.token); ok(r.status === 200, '… can kick a member');
+  r = await api('DELETE', `/servers/${CG.id}/members/${CO.user.id}`, A.token); ok(r.status === 403, '… can’t be kicked, not even by the owner');
+  r = await api('PUT', `/servers/${CG.id}/members/${CO.user.id}/timeout`, A.token, { minutes: 5 }); ok(r.status === 403, '… or timed out');
+  r = await api('DELETE', `/servers/${CG.id}`, CO.token); ok(r.status === 403, 'deleting the server stays the owner’s');
+  r = await api('POST', `/servers/${CG.id}/transfer`, CO.token, { userId: CO.user.id }); ok(r.status === 403, '… and so does transferring it');
+
   /* ---------------------------------------------------------------- hosted TURN relays (calls need one when two networks can't link directly) */
   console.log('\nHosted TURN relays');
   const seen = [];

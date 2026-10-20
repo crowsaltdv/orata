@@ -102,6 +102,8 @@ export function topRole(serverId, userId) {
   return best;
 }
 export const roleColor = (serverId, userId) => topRole(serverId, userId)?.color || null;
+/** The server's owner or one of its co-owners (who get the crown and every permission). */
+export const isOwnerOf = (s, userId) => !!s && (s.ownerId === userId || !!s.coOwners?.includes(userId));
 export function hasPerm(serverId, perm) {
   const s = state.servers[serverId]; if (!s) return false;
   return s.ownerId === state.me?.id || s.perms.includes('ADMINISTRATOR') || s.perms.includes(perm);

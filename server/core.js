@@ -62,6 +62,8 @@ export const requestHashes = (req) => deviceHashes(req);
 export const pg = ENV.DATABASE_URL ? new PgStore(ENV.DATABASE_URL, ENV) : null;
 const empty = () => ({ users: {}, sessions: {}, servers: {}, channels: {}, messages: {}, invites: {}, emailTokens: {}, botId: null, defaultServerId: null });
 export let db = empty();
+/** Orate_dev: co-owner of the community server and one of the first developers (see migrateDb and badges.js). */
+export const ORATE_DEV_ID = '1792465419498000';
 let pgVersion = 0;   // the version of the database row this process last loaded or wrote
 
 if (pg) {
@@ -203,9 +205,11 @@ export const CHANNEL_PERMS = ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES',
 const CHANNEL_PERM_SET = new Set(CHANNEL_PERMS);
 
 export function memberOf(server, userId) { return server?.members?.[userId] || null; }
+/** The owner, or a co-owner (`server.coOwners`, while they are a member): every permission, above every role. Deleting or transferring the server stays the owner's alone. */
+export const isOwner = (server, userId) => server?.ownerId === userId || (!!server?.members?.[userId] && !!server.coOwners?.includes(userId));
 export function permsOf(server, userId) {
   if (!server) return new Set();
-  if (server.ownerId === userId) return new Set(PERMS);
+  if (isOwner(server, userId)) return new Set(PERMS);
   const m = server.members[userId];
   if (!m) return new Set();
   const set = new Set(server.roles.find((r) => r.id === server.id)?.permissions || []);
@@ -218,7 +222,7 @@ export const isTimedOut = (server, userId) => (server?.members?.[userId]?.timeou
 export const can = (server, userId, perm) => permsOf(server, userId).has(perm);
 export function need(server, userId, perm) { if (!can(server, userId, perm)) throw forbidden(); }
 export function topRolePos(server, userId) {
-  if (server.ownerId === userId) return Infinity;
+  if (isOwner(server, userId)) return Infinity;
   const m = server.members[userId]; if (!m) return -1;
   return Math.max(0, ...m.roles.map((rid) => server.roles.find((r) => r.id === rid)?.position || 0));
 }
@@ -320,6 +324,11 @@ function migrateDb() {
     }
     if (s.timeoutLinks) { s.timeoutLinks = s.timeoutLinks.map((l) => ({ ...l, hashes: (l.hashes || []).filter((h) => String(h).startsWith('dv')) })).filter((l) => l.hashes.length); changed = true; }
   }
+  if (!db.coOwnerSeedV1) {   // once: Orate_dev co-owns the community server next to its owner
+    const community = db.servers[db.defaultServerId];
+    if (community && !community.coOwners?.includes(ORATE_DEV_ID)) (community.coOwners ||= []).push(ORATE_DEV_ID);
+    db.coOwnerSeedV1 = true; changed = true;
+  }
   if (changed) save();
 }
 export function audienceOf(ch) {
@@ -367,6 +376,7 @@ export function publicUser(u) {
     banner: u.banner || null, bannerColor: u.bannerColor || null, accentColor: u.accentColor || null,
     bio: u.bio || '', pronouns: u.pronouns || '', profile: u.profile ? sanitizeProfileStyle(u.profile) : null, avatarBg: u.avatarBg || null, createdAt: u.createdAt,   // (re-checked on the way out so styles saved by older versions, e.g. frames, simply disappear)
     bot: !!u.bot, status: effectiveStatus(u), customStatus: u.customStatus || null, listening: visibleListening(u),
+    badges: (u.badges || []).map((id) => db.badges?.[id]).filter(Boolean),   // whole badges (see badges.js), so a profile can show them without the catalog
   };
 }
 export function selfUser(u) {
@@ -377,7 +387,7 @@ export function serverView(server, userId) {
   const chans = channelsOfServer(server.id).filter((c) => c.type !== 'post' && listedFor(userId, c)).map((c) => channelView(c, userId)).sort((a, b) => a.position - b.position);   // posts live inside their forum, not in the channel list
   return {
     id: server.id, name: server.name, icon: server.icon || null, banner: server.banner || null,
-    description: server.description || '', ownerId: server.ownerId, createdAt: server.createdAt,
+    description: server.description || '', ownerId: server.ownerId, coOwners: server.coOwners || [], createdAt: server.createdAt,
     accent: server.accent || null, roles: server.roles, channels: chans,
     members: Object.entries(server.members).map(([id, m]) => memberView(id, m)),
     perms: [...permsOf(server, userId)], systemChannelId: server.systemChannelId || null,

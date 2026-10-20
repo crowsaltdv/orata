@@ -22,7 +22,9 @@ export function cropImage(file, { aspect = 1, out = 512, round = false, title = 
 }
 
 MODALS.crop = function CropModal({ id, file, aspect, out, round, title, resolve }) {
-  const frameW = Math.min(360, innerWidth - 80); const frameH = Math.round(frameW / aspect);
+  // the frame is what you keep; around it the stage shows (dimmed) the part of the picture that will be cut off, like Discord's
+  const padX = 34; const padY = aspect > 1.5 ? 56 : 34;
+  const frameW = Math.min(360, innerWidth - 80 - 2 * padX); const frameH = Math.round(frameW / aspect);
   const [img, setImg] = useState(null); const [zoom, setZoom] = useState(1); const [pos, setPos] = useState({ x: 0, y: 0 }); const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);   // while an animated GIF is being cropped
   const drag = useRef(null); const url = useRef(null);
@@ -51,13 +53,15 @@ MODALS.crop = function CropModal({ id, file, aspect, out, round, title, resolve 
   const onDown = (e) => { drag.current = { sx: e.clientX, sy: e.clientY, p: pos }; e.currentTarget.setPointerCapture(e.pointerId); };
   const onMove = (e) => { if (!drag.current) return; setPos(limit({ x: drag.current.p.x + e.clientX - drag.current.sx, y: drag.current.p.y + e.clientY - drag.current.sy })); };
   const setZ = (z) => { const cx0 = frameW / 2; const cy0 = frameH / 2; const ratio = (base * z) / scale; setZoom(z); setPos(limit({ x: cx0 - (cx0 - pos.x) * ratio, y: cy0 - (cy0 - pos.y) * ratio }, z)); };
-  return html`<${Modal} title=${title} width=${frameW + 60} onClose=${() => done(null)} footer=${html`<${Btn} variant="ghost" onClick=${() => done(null)}>Cancel<//><${Btn} variant="primary" loading=${busy} disabled=${!img} onClick=${apply}>Apply<//>`}>
-    <div class=${`crop-frame ${round ? 'round' : ''}`} style=${{ width: frameW + 'px', height: frameH + 'px' }} onDragStart=${noDrag} onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${() => (drag.current = null)} onPointerCancel=${() => (drag.current = null)} onWheel=${(e) => { e.preventDefault(); setZ(clamp(zoom - e.deltaY * 0.0015, 1, 4)); }}>
-      ${img ? html`<img src=${url.current} draggable=${false} onDragStart=${noDrag} alt="" style=${{ width: img.naturalWidth * scale + 'px', height: img.naturalHeight * scale + 'px', transform: `translate(${pos.x}px, ${pos.y}px)` }} />` : null}
-      ${round ? html`<div class="crop-ring"></div>` : null}
+  return html`<${Modal} title=${title} width=${frameW + 2 * padX + 48} onClose=${() => done(null)} footer=${html`<${Btn} variant="ghost" onClick=${() => done(null)}>Cancel<//><${Btn} variant="primary" loading=${busy} disabled=${!img} onClick=${apply}>Apply<//>`}>
+    <div class="crop-stage" style=${{ padding: `${padY}px ${padX}px` }} onDragStart=${noDrag} onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${() => (drag.current = null)} onPointerCancel=${() => (drag.current = null)} onWheel=${(e) => { e.preventDefault(); setZ(clamp(zoom - e.deltaY * 0.0015, 1, 4)); }}>
+      <div class=${`crop-frame ${round ? 'round' : ''}`} style=${{ width: frameW + 'px', height: frameH + 'px' }}>
+        ${img ? html`<img src=${url.current} draggable=${false} onDragStart=${noDrag} alt="" style=${{ width: img.naturalWidth * scale + 'px', height: img.naturalHeight * scale + 'px', transform: `translate(${pos.x}px, ${pos.y}px)` }} />` : null}
+        <div class="crop-ring"></div>
+      </div>
     </div>
     <div class="crop-zoom"><${Icon} name="image" size=${16} /><${Slider} value=${zoom} min=${1} max=${4} step=${0.01} onChange=${setZ} format=${(v) => v.toFixed(1) + '×'} /><${Icon} name="image" size=${22} /></div>
-    <p class="crop-hint">${progress !== null ? `Cropping the animation… ${Math.round(progress * 100)}%` : gif ? 'Drag the picture to move it, scroll or use the slider to zoom. The animation is kept.' : 'Drag the picture to move it, scroll or use the slider to zoom.'}</p>
+    <p class="crop-hint">${progress !== null ? `Cropping the animation… ${Math.round(progress * 100)}%` : gif ? 'Only the bright part shows. Drag the picture to move it, scroll or use the slider to zoom. The animation is kept.' : 'Only the bright part shows. Drag the picture to move it, scroll or use the slider to zoom.'}</p>
   <//>`;
 };
 

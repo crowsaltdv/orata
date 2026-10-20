@@ -350,3 +350,16 @@ html[data-motion="reduce"] .profile-card.pf-rainbow, html[data-motion="reduce"] 
 .profile-card.pf-image { isolation: isolate; }
 .profile-card.pf-image::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--pf-img) center / cover no-repeat; opacity: var(--pf-img-o, .6); pointer-events: none; }
 .ps-picture { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .ps-thumb { width: 42px; height: 56px; border-radius: 8px; background: center / cover no-repeat #000; border: 1px solid var(--border); flex: none; }
+
+/* ------------------------------------------------ profile badges (badges.js) */
+.pc-badges { display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; border-radius: 9px; background: rgb(0 0 0 / .22); }
+html[data-mode="light"] .pc-badges { background: rgb(0 0 0 / .06); }
+.pc-badge { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; filter: drop-shadow(0 1px 2px rgb(0 0 0 / .35)); cursor: default; }
+.bdg-emoji { line-height: 1; }
+.bdg-big { width: 34px; height: 34px; flex: none; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--hover); font-style: normal; }
+.bdg-del { flex: none; color: var(--text-3); padding: 6px; border-radius: 8px; transition: color var(--t-fast), background var(--t-fast); } .bdg-del:hover { color: #ff7b93; background: rgb(240 77 106 / .14); }
+.bdg-new { display: flex; flex-direction: column; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border); }
+.bdg-new h5 { margin: 0; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--text-2); }
+.bdg-new > .btn { align-self: flex-start; }
+.bdg-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .bdg-row > .dropdown, .bdg-row > .input-wrap { flex: 1; min-width: 140px; }
+.bdg-opt { display: inline-flex; align-items: center; gap: 8px; }

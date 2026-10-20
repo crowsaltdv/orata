@@ -1,6 +1,6 @@
 // Orate — server settings overlay (overview, roles, channels, members, invites, bans).
 import { html, useState, useEffect, useRef, cx, formatMemberSince, relTime, copyText } from '/js/lib.js';
-import { state, set, useSel, openModal, closeModal, closePopover, toast, hasPerm, go, memberOf, addUsers } from '/js/store.js';
+import { state, set, useSel, openModal, closeModal, closePopover, toast, hasPerm, go, memberOf, addUsers, isOwnerOf } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Btn, Field, TextInput, Toggle, SettingRow, Section, Segmented, Modal, MODALS, Avatar, ServerIcon, ColorSwatch, Dropdown, Empty, confirmDialog, useEscape, Spinner, useSaveBar } from '/js/ui.js';
 import { api, upload } from '/js/api.js';
@@ -115,12 +115,12 @@ function Members({ server }) {
     <${Section} title=${`${t('Members')} — ${server.members.length}`}>
       <${TextInput} value=${q} onInput=${setQ} placeholder=${t('Search members')} icon="search" />
       <div class="mem-table">${list.map((m) => { const u = users[m.id]; const mine = server.roles.filter((r) => m.roles.includes(r.id)); return html`<div class="mem-row" key=${m.id}>
-        <${Avatar} user=${u} size=${38} status=${u.status} /><div class="mem-name"><b>${m.nick || u.displayName}${m.id === server.ownerId ? html`<${Icon} name="crown" size=${14} class="crown" />` : null}</b><small>${u.username}</small></div>
+        <${Avatar} user=${u} size=${38} status=${u.status} /><div class="mem-name"><b>${m.nick || u.displayName}${isOwnerOf(server, m.id) ? html`<${Icon} name="crown" size=${14} class="crown" />` : null}</b><small>${u.username}</small></div>
         <div class="mem-roles">${mine.map((r) => html`<span class="role-chip" key=${r.id}><i style=${{ background: r.color || 'var(--text-3)' }}></i>${r.name}${canRoles ? html`<button type="button" onClick=${() => act(api.del(`/servers/${server.id}/members/${m.id}/roles/${r.id}`))} aria-label="Remove role"><${Icon} name="x" size=${11} sw=${3} /></button>` : null}</span>`)}
           ${canRoles && roles.length > mine.length ? html`<button type="button" class="role-add" onClick=${(e) => { const r = e.currentTarget.getBoundingClientRect(); import('/js/store.js').then(({ openContext }) => openContext({ clientX: r.left, clientY: r.bottom + 4 }, roles.filter((x) => !m.roles.includes(x.id)).map((x) => ({ label: x.name, onClick: () => act(api.put(`/servers/${server.id}/members/${m.id}/roles/${x.id}`)) })))); }} data-tip="Add role"><${Icon} name="plus" size=${13} sw=${3} /></button>` : null}</div>
         <small class="mem-join">${formatMemberSince(m.joinedAt)}</small>
-        <span class="chs-acts">${hasPerm(server.id, 'KICK_MEMBERS') && m.id !== server.ownerId && m.id !== state.me.id ? html`<button type="button" data-tip="Kick" onClick=${async () => { if (await confirmDialog({ title: `Kick ${u.displayName}`, body: 'They can rejoin with a new invite.', confirmLabel: 'Kick', danger: true })) act(api.del(`/servers/${server.id}/members/${m.id}`)); }}><${Icon} name="log-out" size=${16} /></button>` : null}
-          ${hasPerm(server.id, 'BAN_MEMBERS') && m.id !== server.ownerId && m.id !== state.me.id ? html`<button type="button" class="danger" data-tip="Ban" onClick=${() => openModal('ban', { serverId: server.id, userId: m.id })}><${Icon} name="ban" size=${16} /></button>` : null}</span></div>`; })}</div>
+        <span class="chs-acts">${hasPerm(server.id, 'KICK_MEMBERS') && !isOwnerOf(server, m.id) && m.id !== state.me.id ? html`<button type="button" data-tip="Kick" onClick=${async () => { if (await confirmDialog({ title: `Kick ${u.displayName}`, body: 'They can rejoin with a new invite.', confirmLabel: 'Kick', danger: true })) act(api.del(`/servers/${server.id}/members/${m.id}`)); }}><${Icon} name="log-out" size=${16} /></button>` : null}
+          ${hasPerm(server.id, 'BAN_MEMBERS') && !isOwnerOf(server, m.id) && m.id !== state.me.id ? html`<button type="button" class="danger" data-tip="Ban" onClick=${() => openModal('ban', { serverId: server.id, userId: m.id })}><${Icon} name="ban" size=${16} /></button>` : null}</span></div>`; })}</div>
     <//></div>`;
 }
 

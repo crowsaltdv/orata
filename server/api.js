@@ -9,7 +9,7 @@ import {
   db, save, newId, cmpId, sha, ENV, DATA_DIR, UPLOAD_DIR, ROOT, ApiError, bad, forbidden, notFound, byUsername, byEmail,
   conns, emitTo, can, need, permsOf, permsIn, canIn, needIn, listedFor, isSynced, overwritesOf, sanitizeOverwrites, topRolePos, canView, audienceOf, serverAudience, channelsOfServer, publicUser, selfUser,
   serverView, channelView, messageView, relatedUserIds, broadcastPresence, readStateFor, systemMessage, randomCode, RESERVED,
-  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteDevice, deviceHashesOf, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView,
+  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteDevice, deviceHashesOf, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView, isOwner,
 } from './core.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
@@ -20,6 +20,7 @@ import { closeConns, storeUpload, restoreUpload } from './core.js';
 import { createSession, findSession, touchSession, endSession, endUserSessions, listSessions } from './sessions.js';
 import { mountMusic, mountMusicPublic, musicConfigured } from './music.js';
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
+import { mountBadges } from './badges.js';
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -343,6 +344,7 @@ export function createApi() {
   }));
 
   mountMusic(r, { h, limit });
+  mountBadges(r, { h });
 
   r.post('/auth/logout', h(async (req, res) => { await endSession(req.sessionId); res.json({ ok: true }); }));
   r.get('/ready', (req, res) => { noteDevice(req.user, req); res.json(buildReady(req.user)); });   // (also remembers the browser, for the alt checks)
@@ -527,12 +529,12 @@ export function createApi() {
     for (const h of deviceHashesOf(user, requestHashes(req))) if (banned[h] && banned[h] !== user.id) return true;
     return false;
   }
-  /** Other accounts that share a browser with `uid` (never the server owner, the moderator acting, or any browser those two use). */
+  /** Other accounts that share a browser with `uid` (never the server owner or a co-owner, the moderator acting, or any browser those use). */
   function altAccounts(s, uid, actorId, req) {
-    const safe = new Set([...deviceHashesOf(db.users[s.ownerId]), ...deviceHashesOf(db.users[actorId], requestHashes(req))]);
+    const safe = new Set([...[s.ownerId, ...(s.coOwners || [])].flatMap((id) => [...deviceHashesOf(db.users[id])]), ...deviceHashesOf(db.users[actorId], requestHashes(req))]);
     const mine = deviceHashesOf(db.users[uid]); for (const h of safe) mine.delete(h);
     if (!mine.size) return { alts: [], mine, safe };
-    const alts = Object.values(db.users).filter((u) => u.id !== uid && u.id !== s.ownerId && u.id !== actorId && !u.bot && !u.deleted && [...deviceHashesOf(u)].some((h) => mine.has(h))).map((u) => u.id);
+    const alts = Object.values(db.users).filter((u) => u.id !== uid && !isOwner(s, u.id) && u.id !== actorId && !u.bot && !u.deleted && [...deviceHashesOf(u)].some((h) => mine.has(h))).map((u) => u.id);
     return { alts, mine, safe };
   }
   r.post('/invites/:code/join', limit('join', 20, 60_000), h(async (req, res) => {
@@ -1051,7 +1053,7 @@ export function createApi() {
   /** A new member whose browser matches someone currently timed out here is timed out for the rest of that time. */
   function linkedTimeout(s, userId, hashes) {
     const now = Date.now(); s.timeoutLinks = (s.timeoutLinks || []).filter((l) => l.until > now);
-    const m = s.members[userId]; if (!m || userId === s.ownerId) return;
+    const m = s.members[userId]; if (!m || isOwner(s, userId)) return;
     for (const l of s.timeoutLinks) if (l.uid !== userId && l.hashes.some((h) => hashes.has(h)) && (m.timeoutUntil || 0) < l.until) { m.timeoutUntil = l.until; m.timeoutAlt = l.uid; }
   }
 
