@@ -71,7 +71,7 @@ function AccountPage() {
 /* ------------------------------------------------------------------ profile */
 function ProfilePage() {
   const me = useSel((s) => s.me);
-  const orig = { displayName: me.displayName, pronouns: me.pronouns || '', bio: me.bio || '', avatar: me.avatar, banner: me.banner, bannerColor: me.bannerColor || '#6d28d9', profile: me.profile || null };
+  const orig = { displayName: me.displayName, pronouns: me.pronouns || '', bio: me.bio || '', avatar: me.avatar, banner: me.banner, bannerColor: me.bannerColor || '#6d28d9', accentColor: me.accentColor || null, profile: me.profile || null };
   const [d, setD] = useState(orig); const [busy, setBusy] = useState(false); const [up, setUp] = useState(null);
   const dirty = JSON.stringify(d) !== JSON.stringify(orig);
   const up1 = (k, v) => setD((p) => ({ ...p, [k]: v }));
@@ -92,7 +92,7 @@ function ProfilePage() {
     },
   }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });
   const changeProfile = (fn) => setD((p) => ({ ...p, profile: fn(p.profile || null) }));
-  const save = async () => { setBusy(true); const r = await act(api.patch('/me', { displayName: d.displayName.trim() || me.displayName, pronouns: d.pronouns, bio: d.bio, avatar: d.avatar, banner: d.banner, bannerColor: d.bannerColor, profile: d.profile }), { success: 'Profile saved' }); setBusy(false); if (r) set({}); };
+  const save = async () => { setBusy(true); const r = await act(api.patch('/me', { displayName: d.displayName.trim() || me.displayName, pronouns: d.pronouns, bio: d.bio, avatar: d.avatar, banner: d.banner, bannerColor: d.bannerColor, accentColor: d.accentColor, profile: d.profile }), { success: 'Profile saved' }); setBusy(false); if (r) set({}); };
   const preview = { ...me, ...d };
   useSaveBar(dirty, { save, reset: () => setD(orig), busy });
   return html`<div class="s-page profile-edit">
@@ -108,7 +108,7 @@ function ProfilePage() {
       <//>
       <${Section} title=${t('Banner')}>
         <div class="pe-banner"><${Banner} user=${preview} height=${96} /></div>
-        <div class="pe-btns"><${Btn} variant="primary" loading=${up === 'banner'} icon="image" onClick=${() => img('banner', { aspect: 3, out: 960, title: 'Banner', allowGif: true })}>${t('Change Banner')}<//>${state.gifOk !== false ? html`<${Btn} icon="sticker" disabled=${up === 'banner'} onClick=${(e) => gifBanner(e.currentTarget)}>${t('Choose a GIF')}<//>` : null}${d.banner ? html`<${Btn} variant="ghost" onClick=${() => up1('banner', null)}>${t('Remove')}<//>` : null}<span class="pe-color"><${ColorSwatch} value=${d.bannerColor} onChange=${(c) => up1('bannerColor', c)} label="Banner color" size=${34} /><small>${t('Banner color')}</small></span></div>
+        <div class="pe-btns"><${Btn} variant="primary" loading=${up === 'banner'} icon="image" onClick=${() => img('banner', { aspect: 3, out: 960, title: 'Banner', allowGif: true })}>${t('Change Banner')}<//>${state.gifOk !== false ? html`<${Btn} icon="sticker" disabled=${up === 'banner'} onClick=${(e) => gifBanner(e.currentTarget)}>${t('Choose a GIF')}<//>` : null}${d.banner ? html`<${Btn} variant="ghost" onClick=${() => up1('banner', null)}>${t('Remove')}<//>` : null}<span class="pe-color"><${ColorSwatch} value=${d.bannerColor} onChange=${(c) => up1('bannerColor', c)} label=${t('First banner color')} size=${34} /><small>${t('First color')}</small></span><span class="pe-color"><${ColorSwatch} value=${d.accentColor || '#ec4899'} onChange=${(c) => up1('accentColor', c)} label=${t('Second banner color')} size=${34} /><small>${t('Second color')}</small>${d.accentColor ? html`<button type="button" class="link-btn" onClick=${() => up1('accentColor', null)}>${t('Reset')}</button>` : null}</span></div>
         <p class="text-muted" style="font-size:13px;margin:10px 0 0">${t('Upload a GIF or pick one from KLIPY — animated banners play everywhere.')}</p>
       <//>
       <${Section} title=${t('Profile style')} desc=${t('Colors, outline, fonts, name style and effects for your profile. The preview updates as you go.')}>

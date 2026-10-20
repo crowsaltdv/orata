@@ -10,6 +10,7 @@ import { logout, switchAccount, beginAddAccount, removeAccount } from '/js/event
 import { STATUS_META } from '/js/defaults.js';
 import { copyText } from '/js/lib.js';
 import { t } from '/js/i18n.js';
+import { UserName } from '/js/profile-style.js';
 import { MiniPlayer } from '/js/music.js';
 
 export async function setStatus(status) { await act(api.patch('/me', { status })); }
@@ -23,7 +24,7 @@ POPOVERS['user-menu'] = function UserMenu({ close }) {
   const cs = me.customStatus;
   const item = (icon, label, onClick, cls) => html`<button type="button" class=${cx('um-item', cls)} onClick=${() => { close(); onClick(); }}><${Icon} name=${icon} size=${17} /><span>${label}</span></button>`;
   return html`<div class="pop-card user-menu">
-    <div class="um-head"><${Avatar} user=${me} size=${44} status=${me.status} /><div><b>${me.displayName}</b><span>@${me.username}</span></div></div>
+    <div class="um-head"><${Avatar} user=${me} size=${44} status=${me.status} /><div><b><${UserName} user=${me} /></b><span>@${me.username}</span></div></div>
     <button type="button" class="um-custom" onClick=${() => { close(); import('/js/store.js').then((m) => m.openModal('custom-status')); }}>
       <${Icon} name="smile-plus" size=${17} /><span>${cs ? `${cs.emoji || ''} ${cs.text}`.trim() : t('Set a custom status')}</span>${cs ? html`<span class="um-x" onClick=${(e) => { e.stopPropagation(); act(api.patch('/me', { customStatus: null })); }}><${Icon} name="x" size=${14} /></span>` : null}</button>
     <div class="ctx-sep"></div>
@@ -94,7 +95,7 @@ export function UserBar() {
     <div class="ub-row">
       <button type="button" class="ub-user" onClick=${(e) => openPopover(e.currentTarget, 'user-menu', {}, { placement: 'top-start' })} data-popover-anchor>
         <${Avatar} user=${me} size=${38} status=${status} />
-        <span class="ub-text"><span class="ub-name">${me.displayName}</span><span class="ub-status">${me.customStatus ? `${me.customStatus.emoji || ''} ${me.customStatus.text}`.trim() : t(STATUS_META[status]?.label || 'Online')}</span></span>
+        <span class="ub-text"><span class="ub-name"><${UserName} user=${me} /></span><span class="ub-status">${me.customStatus ? `${me.customStatus.emoji || ''} ${me.customStatus.text}`.trim() : t(STATUS_META[status]?.label || 'Online')}</span></span>
       </button>
       <div class="ub-icons">
         <${IconBtn} icon=${muted ? 'mic-off' : 'mic'} label=${muted ? t('Unmute') : t('Mute')} class=${muted ? 'muted-state' : ''} onClick=${() => { voice.toggleMute(); setBump(bump + 1); }} onContextMenu=${(e) => { e.preventDefault(); openSettings('voice'); }} pos="top" glass="buttons" />

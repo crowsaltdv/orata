@@ -91,7 +91,7 @@ export function Lightbox() {
       <button type="button" class="icon-btn" onClick=${close} aria-label="Close"><${Icon} name="x" size=${22} /></button></div>
     ${items.length > 1 ? html`<button type="button" class="lb-nav prev" onClick=${() => nav(-1)} aria-label="Previous"><${Icon} name="chevron-left" size=${30} /></button><button type="button" class="lb-nav next" onClick=${() => nav(1)} aria-label="Next"><${Icon} name="chevron-right" size=${30} /></button>` : null}
     <div class="lb-stage">
-      ${isVideo ? html`<video src=${cur.video || cur.url} autoplay loop controls class="lb-media"></video>`
+      ${isVideo ? html`<video src=${cur.video || cur.url} autoplay loop muted=${!!cur.gif} playsinline controls=${!cur.gif} class="lb-media"></video>`
         : html`<img key=${cur.url} class="lb-media" src=${cur.url} alt=${cur.name} draggable=${false} style=${{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${z})`, cursor: z > 1 ? 'grab' : 'zoom-in' }}
           onPointerDown=${(e) => { if (z > 1) { drag.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }; e.currentTarget.setPointerCapture(e.pointerId); } }}
           onPointerMove=${(e) => drag.current && setPan({ x: e.clientX - drag.current.x, y: e.clientY - drag.current.y })} onPointerUp=${() => (drag.current = null)}

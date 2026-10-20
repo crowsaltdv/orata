@@ -9,6 +9,7 @@ import { serverMenu } from '/js/rail.js';
 import { voice } from '/js/voice.js';
 import { copyText, cmpId } from '/js/lib.js';
 import { t } from '/js/i18n.js';
+import { UserName } from '/js/profile-style.js';
 
 /* ------------------------------------------------------------------ DM list */
 export function dmMenu(ch) {
@@ -41,7 +42,7 @@ const DmItem = memo(function DmItem({ id, active }) {
       ? html`<span class="group-av">${ch.icon ? html`<img src=${ch.icon} alt="" />` : html`<${Icon} name="users" size=${19} />`}</span>`
       : html`<${Avatar} user=${user} size=${36} status=${user?.status || 'offline'} />`}
     <span class="dm-text">
-      <span class="dm-name"><span>${names}</span></span>
+      <span class="dm-name"><span>${ch.type === 'group' ? names : html`<${UserName} user=${user} />`}</span></span>
       <span class="dm-sub">${ch.type === 'group' ? `${ch.recipients.length} Members` : user?.customStatus ? `${user.customStatus.emoji || ''} ${user.customStatus.text}`.trim() : ''}</span>
     </span>
     ${Number(mentions) ? html`<${Badge} n=${Number(mentions)} />` : null}
@@ -106,7 +107,7 @@ function VoiceUsers({ channelId, serverId }) {
   const list = Object.values(room).sort((a, b) => (b.speaker ? 1 : 0) - (a.speaker ? 1 : 0) || (b.hand ? 1 : 0) - (a.hand ? 1 : 0));   // on a stage: speakers first, then raised hands
   return html`<div class="vc-users">${list.map((st) => { const u = users[st.userId]; return html`<div class="vc-user" key=${st.userId} onClick=${(e) => openProfile(st.userId, e.currentTarget)} onContextMenu=${(e) => openContext(e, [{ label: 'Profile', icon: 'user', onClick: () => openProfile(st.userId) }])}>
       <${Avatar} user=${u} size=${22} speaking=${!!speaking?.[st.userId] && !st.muted} />
-      <span class="vc-name">${(serverId && state.servers[serverId]?.members.find((m) => m.id === st.userId)?.nick) || u?.displayName}</span>
+      <span class="vc-name"><${UserName} user=${u} text=${(serverId && state.servers[serverId]?.members.find((m) => m.id === st.userId)?.nick) || u?.displayName} /></span>
       <span class="vc-ic">${st.speaker ? html`<${Icon} name="mic" size=${14} />` : st.hand ? html`<${Icon} name="hand" size=${14} />` : null}${st.screen ? html`<span class="live">LIVE</span>` : st.video ? html`<${Icon} name="video" size=${14} />` : null}${st.deafened ? html`<${Icon} name="headphones-off" size=${14} />` : st.muted ? html`<${Icon} name="mic-off" size=${14} />` : null}</span></div>`; })}</div>`;
 }
 

@@ -7,6 +7,7 @@ import { voice, isStageMod } from '/js/voice.js';
 import { Grid } from '/js/voiceview.js';
 import { openProfile } from '/js/sidebar.js';
 import { t } from '/js/i18n.js';
+import { UserName } from '/js/profile-style.js';
 
 function Listener({ st, mod }) {
   const u = useSel((s) => s.users[st.userId]); const me = state.me.id;
@@ -14,7 +15,7 @@ function Listener({ st, mod }) {
   const open = (e) => openProfile(st.userId, e.currentTarget);
   return html`<div class=${cx('sch-aud', st.hand && 'hand')} role="button" tabindex="0" onClick=${open} onKeyDown=${(e) => e.key === 'Enter' && open(e)} onContextMenu=${menu}>
     <${Avatar} user=${u} size=${36} />
-    <span class="sch-aud-name">${u?.displayName || '…'}</span>
+    <span class="sch-aud-name"><${UserName} user=${u} /></span>
     ${st.hand ? html`<span class="sch-hand" data-tip=${t('Hand raised')}><${Icon} name="hand" size=${15} /></span>` : null}
     ${mod && st.hand && st.userId !== me ? html`<button type="button" class="sch-invite" onClick=${(e) => { e.stopPropagation(); voice.setSpeaker(st.userId, true); }}>${t('Invite to Speak')}</button>` : null}
   </div>`;

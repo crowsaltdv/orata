@@ -82,6 +82,13 @@ export function openAboutBlank(redirectTo = '') {
   return 'ok';
 }
 
+/** `/cloak`: disguise this tab as Desmos and open Orate in an about:blank tab that wears the same cloak. Must run inside the key press that sent it (pop-up blockers). */
+export function cloakAsDesmos() {
+  const p = CLOAKS.find((x) => x.id === 'desmos');
+  setCloak({ id: p.id, title: p.title, icon: iconFor(p.url) });
+  return openAboutBlank();
+}
+
 /* ------------------------------------------------------------------ the settings page */
 function TabPreview({ title, icon }) {
   return html`<div class="cloak-tab" aria-hidden="true"><img src=${icon} alt="" /><span>${title}</span><i>×</i></div>`;

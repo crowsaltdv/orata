@@ -9,6 +9,7 @@ import { openProfile } from '/js/sidebar.js';
 import { frequentEmoji } from '/js/emoji.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
+import { UserName } from '/js/profile-style.js';
 import { InviteCard, inviteCodeOf } from '/js/invite-card.js';
 import { PollView } from '/js/polls.js';
 import { ThemeCard } from '/js/theme-card.js';
@@ -70,7 +71,7 @@ function GifMedia({ g, onImage }) {
   // the whole GIF, at its own proportions (never cropped or rounded): as big as it is, up to 440 × 380
   const gw = g.w || 280; const gh = g.h || 200; const k = Math.min(1, 440 / gw, 380 / gh); const w = Math.max(60, Math.round(gw * k));
   const autoplay = state.settings.chat.gifAutoplay; const favs = useFavGifs(); const fav = favs.some((x) => x.id === String(g.id));
-  return html`<div class=${cx('gif-wrap', fav && 'fav')} style=${{ width: w + 'px', aspectRatio: `${gw} / ${gh}` }} onClick=${() => onImage({ url: g.gif || g.url, name: g.title || 'GIF', video: g.mp4 })}>
+  return html`<div class=${cx('gif-wrap', fav && 'fav')} style=${{ width: w + 'px', aspectRatio: `${gw} / ${gh}` }} onClick=${() => onImage({ url: g.gif || g.url, name: g.title || 'GIF', video: g.mp4, gif: true })}>
     ${g.mp4 && autoplay ? html`<video src=${g.mp4} poster=${g.poster} autoplay loop muted playsinline preload="metadata" aria-label=${g.title}></video>` : html`<img src=${autoplay ? (g.gif || g.url) : (g.poster || g.url)} alt=${g.title || 'GIF'} loading="lazy" />`}
     <span class="gif-badge">GIF</span>${g.id ? html`<button type="button" class=${cx('gif-fav', fav && 'on')} aria-label=${fav ? t('Remove from Favorites') : t('Add to Favorites')} data-tip=${fav ? t('Remove from Favorites') : t('Add to Favorites')} onClick=${(e) => { e.stopPropagation(); toggleFavGif(gifFromMessage(g)); }}><${Icon} name="star" size=${15} fill=${fav} /></button>` : null}</div>`;
 }
@@ -193,12 +194,12 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
     ${m.reply ? html`<div class="msg-reply" onClick=${() => m.reply.id && !m.reply.deleted && jumpToMessage(ch.id, m.reply.id)}>
       <span class="reply-hook"></span>
       ${m.reply.deleted ? html`<span class="reply-deleted"><${Icon} name="reply" size=${13} /> Original message was deleted</span>`
-        : html`<${Avatar} user=${replyAuthor} size=${16} /><span class="reply-name" style=${replyColor ? { color: replyColor } : null}>${m.reply.authorId === me ? '@' : ''}${replyNick || replyAuthor?.displayName || 'Unknown'}</span>
+        : html`<${Avatar} user=${replyAuthor} size=${16} /><span class="reply-name" style=${replyColor ? { color: replyColor } : null}>${m.reply.authorId === me ? '@' : ''}<${UserName} user=${replyAuthor} text=${replyNick || replyAuthor?.displayName || 'Unknown'} /></span>
           <span class="reply-text">${m.reply.content ? plainPreview(m.reply.content, ch.serverId, 120) : m.reply.gif ? 'Click to see GIF' : m.reply.sticker ? 'Click to see sticker' : m.reply.attachments ? 'Click to see attachment' : ''}</span>${m.reply.attachments ? html`<${Icon} name="image" size=${14} />` : null}`}</div>` : null}
     <div class="msg-main">
       <div class="msg-gutter">${head ? (state.settings.chat.showAvatars ? html`<${Avatar} user=${author} size=${40} onClick=${open} onContextMenu=${(e) => openContext(e, [{ label: 'Profile', icon: 'user', onClick: () => openProfile(m.authorId) }, { label: 'Message', icon: 'message', onClick: () => import('/js/actions.js').then((a) => a.openDm(m.authorId)), disabled: m.authorId === me }])} />` : null) : html`<time class="msg-time hover-time">${formatClock(m.createdAt, hour12)}</time>`}</div>
       <div class="msg-body">
-        ${head ? html`<div class="msg-head"><span class="msg-author" style=${color ? { color } : null} role="button" tabindex="0" onClick=${open}>${name}</span>${author?.bot ? html`<span class="bot-tag">APP</span>` : null}${timeEl}</div>` : null}
+        ${head ? html`<div class="msg-head"><span class="msg-author" style=${color ? { color } : null} role="button" tabindex="0" onClick=${open}><${UserName} user=${author} text=${name} /></span>${author?.bot ? html`<span class="bot-tag">APP</span>` : null}${timeEl}</div>` : null}
         ${editing ? html`<${InlineEditor} m=${m} ch=${ch} onDone=${() => set({ editing: null })} />`
           : htmlContent ? html`<div class=${cx('msg-content', jumbo && 'jumbo')} onClick=${(e) => onBodyClick(e, ch)} dangerouslySetInnerHTML=${{ __html: htmlContent }}></div>` : null}
         ${m.editedAt && !editing ? html`<span class="edited" data-tip=${formatFull(m.editedAt)}>(${t('edited')})</span>` : null}

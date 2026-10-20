@@ -247,8 +247,10 @@ export function PopoverHost() {
   const p = useSel((s) => s.popover);
   const ref = useRef(null); const [pos, setPos] = useState(null);
   useLayoutEffect(() => {
-    if (!p || !ref.current) { setPos(null); return; }
-    const el = ref.current; const r = el.getBoundingClientRect(); const a = p.rect; const pad = 10; const gap = 10;
+    if (!p || !ref.current) { setPos(null); return undefined; }
+    const el = ref.current; const a = p.rect; const pad = 14; const gap = 10;
+    const place = () => {
+    const r = { width: el.offsetWidth, height: el.offsetHeight };   // layout size: the pop-in animation's scale must not make it look smaller than it is
     let x; let y;
     switch (p.placement) {
       case 'left': x = a.x - r.width - gap; y = a.y; break;
@@ -262,7 +264,13 @@ export function PopoverHost() {
     if (x + r.width > innerWidth - pad) { x = p.placement === 'right' ? a.x - r.width - gap : innerWidth - r.width - pad; }
     if (x < pad) x = p.placement === 'left' ? a.x + a.w + gap : pad;
     x = clamp(x, pad, Math.max(pad, innerWidth - r.width - pad)); y = clamp(y, pad, Math.max(pad, innerHeight - r.height - pad));
-    setPos({ x, y });
+    setPos((cur) => (cur && Math.abs(cur.x - x) < 0.5 && Math.abs(cur.y - y) < 0.5 ? cur : { x, y }));
+    };
+    place();
+    // pictures, fonts and the person's details arrive after the popover opened and make it taller: keep it inside the window
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null; ro?.observe(el);
+    window.addEventListener('resize', place);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', place); };
   }, [p?.id]);
   useEffect(() => {
     if (!p) return undefined;

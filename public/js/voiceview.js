@@ -9,6 +9,7 @@ import { Composer } from '/js/composer.js';
 import { openProfile } from '/js/sidebar.js';
 import { userMenu } from '/js/profile.js';
 import { t } from '/js/i18n.js';
+import { UserName } from '/js/profile-style.js';
 
 function Video({ stream, muted, mirror, screen }) {
   const ref = useRef(null);
@@ -27,7 +28,7 @@ export function Tile({ uid, kind, stream, expanded, onExpand, avatarSize = 84 })
   const menu = (e) => { e.preventDefault(); if (uid === state.me.id) return; const stage = voice.stageMenu(uid); openContext(e, [{ type: 'custom', render: () => html`<div class="vol-ctx"><small>${t('User volume')}</small><${Slider} value=${Math.round(getUserVolume(uid) * 100)} min=${0} max=${100} onChange=${(v) => setUserVolume(uid, v / 100)} format=${(v) => v + '%'} /></div>` }, { type: 'sep' }, { label: t('Profile'), icon: 'user', onClick: () => openProfile(uid) }, ...(stage.length ? [{ type: 'sep' }, ...stage] : [])]); void userMenu; };
   return html`<div class=${cx('tile', speaking && !st?.muted && kind !== 'screen' && 'speaking', expanded && 'expand')} onDblClick=${onExpand} onContextMenu=${menu}>
     ${hasVideo ? html`<${Video} stream=${stream} muted=${uid === state.me.id} mirror=${mirror} screen=${kind === 'screen'} />` : html`<${Avatar} user=${u} size=${avatarSize} />`}
-    <span class="tile-name">${kind === 'screen' ? html`<${Icon} name="monitor" size=${14} />` : null}${kind === 'screen' ? `${name}${t('’s screen')}` : name}${st?.muted && kind !== 'screen' ? html`<${Icon} name=${st.deafened ? 'headphones-off' : 'mic-off'} size=${14} />` : null}</span>
+    <span class="tile-name">${kind === 'screen' ? html`<${Icon} name="monitor" size=${14} />` : null}${kind === 'screen' ? `${name}${t('’s screen')}` : html`<${UserName} user=${u} text=${name} />`}${st?.muted && kind !== 'screen' ? html`<${Icon} name=${st.deafened ? 'headphones-off' : 'mic-off'} size=${14} />` : null}</span>
     ${link && link !== 'connected' ? html`<span class=${cx('tile-link', link)} title=${link === 'failed' ? t('A direct link to this person isn’t possible on your networks — a TURN relay is needed.') : t('Setting up the audio and video link…')}>${link === 'failed' ? html`<${Icon} name="wifi" size=${13} /> ${t('Can’t connect')}` : html`<span class="spinner sm"></span> ${link === 'slow' ? t('Still connecting…') : t('Connecting…')}`}</span>` : null}
     ${kind !== 'screen' && st?.muted ? html`<span class="tile-muted"><${Icon} name=${st.deafened ? 'headphones-off' : 'mic-off'} size=${15} /></span>` : null}
   </div>`;

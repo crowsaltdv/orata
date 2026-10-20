@@ -394,6 +394,14 @@ async function main() {
   ok(ps.effect.id === 'rays' && ps.effect.density === 1 && !('frame' in ps) && !('avatarFrame' in ps) && !('nameStyle' in ps) && !('evil' in ps), 'effects are saved; frames, the old name style and unknown parts are dropped');
   r = await api('GET', `/users/${A.user.id}`, T.token); ok(r.status === 200 && r.body.user.profile?.nameShadow?.color === '#14532d', 'other people see it on your profile');
   r = await api('GET', '/ready', T.token); ok(r.body.users.find((x) => x.id === A.user.id)?.profile?.effect?.id === 'rays', '… and on you everywhere you appear');
+  const rbStyle = { colors: { mode: 'solid', a: '#ff0000', rainbow: true }, outline: { color: '#00ff00', rainbow: true }, shadow: { color: '#112233', rainbow: true }, nameColor: { mode: 'solid', a: '#fde047', rainbow: true }, nameOutline: { mode: 'solid', a: '#14532d', rainbow: 'yes' }, nameShadow: { color: '#14532d', rainbow: true }, effect: { id: 'rays', color: '#ffffff', rainbow: true } };
+  r = await api('PATCH', '/me', A.token, { profile: rbStyle }); const rb = r.body.profile;
+  ok(r.status === 200 && rb.colors.rainbow && rb.outline.rainbow && rb.shadow.rainbow && rb.nameColor.rainbow && rb.nameShadow.rainbow && rb.effect.rainbow, 'every colored part (card colors, outline, shadow, name color, name shadow, effect) can be rainbow');
+  ok(!('rainbow' in rb.nameOutline), '… and only a real true counts');
+  r = await api('PATCH', '/me', A.token, { profile: { colors: { mode: 'solid', a: '#ff0000' } } }); ok(r.status === 200 && !('rainbow' in r.body.profile.colors), 'rainbow is off unless asked for');
+  r = await api('PATCH', '/me', A.token, { bannerColor: '#ff0000', accentColor: '#0000ff' }); ok(r.status === 200 && r.body.bannerColor === '#ff0000' && r.body.accentColor === '#0000ff', 'the banner has two gradient colors');
+  r = await api('GET', `/users/${A.user.id}`, T.token); ok(r.body.user.bannerColor === '#ff0000' && r.body.user.accentColor === '#0000ff', '… that everyone sees');
+  r = await api('PATCH', '/me', A.token, { accentColor: null }); ok(r.status === 200 && r.body.accentColor === null, 'the second banner color can be reset');
   r = await api('PATCH', '/me', A.token, { profile: { effect: { id: 'lasers' }, avatarFrame: { id: 'ring' } } }); ok(r.status === 200 && r.body.profile === null, 'nothing valid left means no style');
   for (const [id] of EFFECTS) { r = await api('PATCH', '/me', A.token, { profile: { effect: { id, color: '#336699' } } }); if (r.status !== 200 || r.body.profile?.effect?.id !== id) { ok(false, `effect ${id} is accepted`); break; } }
   ok(EFFECTS.length >= 40, `${EFFECTS.length} effects to choose from, and every one is accepted`);

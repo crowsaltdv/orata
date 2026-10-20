@@ -10,6 +10,7 @@ import { userMenu } from '/js/profile.js';
 import { voice } from '/js/voice.js';
 import { copyText } from '/js/lib.js';
 import { t } from '/js/i18n.js';
+import { UserName } from '/js/profile-style.js';
 
 function FriendRow({ id, type }) {
   const u = useSel((s) => s.users[id]);
@@ -19,7 +20,7 @@ function FriendRow({ id, type }) {
   const btn = (icon, label, fn, cls) => html`<button type="button" class=${cx('fr-btn', cls)} data-tip=${label} aria-label=${label} onClick=${(e) => { e.stopPropagation(); fn(e); }}><${Icon} name=${icon} size=${19} /></button>`;
   return html`<div class="friend-row" role="button" tabindex="0" onClick=${(e) => (type === 'friend' ? openDm(id) : openProfile(id, e.currentTarget))} onContextMenu=${(e) => openContext(e, userMenu(id, null))}>
     <${Avatar} user=${u} size=${40} status=${type === 'friend' || type === 'blocked' ? u.status : undefined} />
-    <div class="fr-text"><div class="fr-name"><b>${u.displayName}</b><span class="fr-user">${u.username}</span></div><div class="fr-sub">${sub}</div></div>
+    <div class="fr-text"><div class="fr-name"><b><${UserName} user=${u} /></b><span class="fr-user">${u.username}</span></div><div class="fr-sub">${sub}</div></div>
     <div class="fr-actions">
       ${type === 'friend' ? html`${btn('message', t('Message'), () => openDm(id))}${inVoice ? btn('volume', t('Join voice'), () => { const ch = state.channelIndex[inVoice]; if (ch?.serverId) { voice.join(inVoice); import('/js/store.js').then((m) => m.goChannel(ch.serverId, inVoice)); } }, 'live') : ''}${btn('more-v', t('More'), (e) => { const r = e.currentTarget.getBoundingClientRect(); openContext({ clientX: r.left, clientY: r.bottom + 4 }, userMenu(id, null)); })}` : null}
       ${type === 'incoming' ? html`${btn('check', t('Accept'), () => act(api.put(`/relationships/${id}`)), 'ok')}${btn('x', t('Ignore'), () => act(api.del(`/relationships/${id}`)), 'no')}` : null}
@@ -42,7 +43,7 @@ function AddFriend() {
       <${Btn} variant="primary" loading=${busy} disabled=${!name.trim()} onClick=${() => send()}>${t('Send Friend Request')}<//></div>
     ${msg ? html`<div class=${cx('af-msg', msg.ok ? 'ok' : 'err')}>${msg.text}</div>` : null}
     <div class="af-me"><span>${t('Your username')}: <b>${me.username}</b></span><button type="button" class="link-btn" onClick=${async () => { await copyText(me.username); toast('Username copied', 'success', 1400); }}>${t('Copy')}</button></div>
-    ${suggestions.length ? html`<h4 class="af-sub">${t('People you may know')}</h4><div class="af-sug">${suggestions.map((u) => html`<div class="friend-row sug" key=${u.id}><${Avatar} user=${u} size=${36} status=${u.status} /><div class="fr-text"><div class="fr-name"><b>${u.displayName}</b><span class="fr-user">${u.username}</span></div></div><${Btn} size="sm" variant="primary" onClick=${() => send(u.username)}>${t('Add Friend')}<//></div>`)}</div>` : null}
+    ${suggestions.length ? html`<h4 class="af-sub">${t('People you may know')}</h4><div class="af-sug">${suggestions.map((u) => html`<div class="friend-row sug" key=${u.id}><${Avatar} user=${u} size=${36} status=${u.status} /><div class="fr-text"><div class="fr-name"><b><${UserName} user=${u} /></b><span class="fr-user">${u.username}</span></div></div><${Btn} size="sm" variant="primary" onClick=${() => send(u.username)}>${t('Add Friend')}<//></div>`)}</div>` : null}
   </div>`;
 }
 
@@ -91,7 +92,7 @@ export function ActiveNow() {
     const room = Object.entries(vs).find(([, r]) => r[id]); return { u: users[id], room: room ? state.channelIndex[room[0]] : null };
   }).filter((x) => x.room || x.u.customStatus || x.u.listening).slice(0, 12);
   return html`<aside class="right panel wide right-enter"><div class="panel-pane"><div class="pane-head"><b>${t('Active Now')}</b></div>
-    <div class="pane-scroll">${rows.length ? rows.map(({ u, room }) => html`<div class="active-card" key=${u.id} onClick=${(e) => openProfile(u.id, e.currentTarget)}><${Avatar} user=${u} size=${40} status=${u.status} /><div><b>${u.displayName}</b><span>${room ? html`<${Icon} name="volume" size=${13} /> ${room.name}` : u.listening ? html`<${Icon} name="music" size=${13} /> ${u.listening.title} — ${u.listening.artist}` : `${u.customStatus.emoji || ''} ${u.customStatus.text}`}</span></div></div>`)
+    <div class="pane-scroll">${rows.length ? rows.map(({ u, room }) => html`<div class="active-card" key=${u.id} onClick=${(e) => openProfile(u.id, e.currentTarget)}><${Avatar} user=${u} size=${40} status=${u.status} /><div><b><${UserName} user=${u} /></b><span>${room ? html`<${Icon} name="volume" size=${13} /> ${room.name}` : u.listening ? html`<${Icon} name="music" size=${13} /> ${u.listening.title} — ${u.listening.artist}` : `${u.customStatus.emoji || ''} ${u.customStatus.text}`}</span></div></div>`)
       : html`<div class="active-empty"><b>${t("It's quiet for now…")}</b><p>${t("When a friend starts an activity — like hopping in a voice channel — we'll show it here!")}</p></div>`}</div></div></aside>`;
 }
 void IconBtn; void openModal;

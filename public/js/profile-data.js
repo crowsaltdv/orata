@@ -55,6 +55,7 @@ const fill = (o, withWidth) => {
   const mode = o.mode === 'gradient' ? 'gradient' : 'solid';
   const out = { mode, a: hex(o.a), b: hex(o.b, hex(o.a)), angle: num(o.angle, 0, 360, 90) };
   if (withWidth) out.width = num(o.width, 1, 6, 2);
+  if (o.rainbow === true) out.rainbow = true;
   return out;
 };
 
@@ -65,14 +66,17 @@ export function sanitizeProfileStyle(p) {
   const c = p.colors;
   if (isObj(c) && (c.mode === 'solid' || c.mode === 'gradient') && hex(c.a)) {
     out.colors = { mode: c.mode, a: hex(c.a), b: hex(c.b, hex(c.a)), angle: num(c.angle, 0, 360, 150), tint: num(c.tint, 0.05, 1, 0.35) };
+    if (c.rainbow === true) out.colors.rainbow = true;
   }
   const o = p.outline;
   if (isObj(o) && hex(o.color)) {
     out.outline = { color: hex(o.color), color2: hex(o.color2), width: num(o.width, 1, 8, 2), style: oneOf(OUTLINE_STYLES, o.style) || 'solid' };
+    if (o.rainbow === true) out.outline.rainbow = true;
   }
   const s = p.shadow;
   if (isObj(s) && hex(s.color)) {
     out.shadow = { color: hex(s.color), blur: num(s.blur, 0, 80, 30), spread: num(s.spread, 0, 30, 0), x: num(s.x, -40, 40, 0), y: num(s.y, -40, 40, 8), alpha: num(s.alpha, 0.05, 1, 0.55) };
+    if (s.rainbow === true) out.shadow.rainbow = true;
   }
   const f = p.fonts;
   if (isObj(f)) {
@@ -83,9 +87,11 @@ export function sanitizeProfileStyle(p) {
   const no = fill(p.nameOutline, true); if (no) out.nameOutline = no;
   const ns = p.nameShadow;
   if (isObj(ns) && hex(ns.color)) out.nameShadow = { color: hex(ns.color), angle: num(ns.angle, 0, 360, 135), distance: num(ns.distance, 0, 24, 4), blur: num(ns.blur, 0, 30, 0) };
+  if (out.nameShadow && ns.rainbow === true) out.nameShadow.rainbow = true;
   const e = p.effect;
   if (isObj(e) && oneOf(EFFECTS, e.id)) {
     out.effect = { id: e.id, color: hex(e.color, '#ffffff'), color2: hex(e.color2), density: num(e.density, 0.1, 1, 0.6), speed: num(e.speed, 0.3, 2.5, 1), opacity: num(e.opacity, 0.1, 1, 1) };
+    if (e.rainbow === true) out.effect.rainbow = true;
   }
   return Object.keys(out).length ? out : null;
 }

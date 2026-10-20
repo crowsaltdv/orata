@@ -11,6 +11,7 @@ import { openPicker } from '/js/pickers.js';
 import { t } from '/js/i18n.js';
 import { fx } from '/js/fx.js';
 import { shareTheme } from '/js/theme-card.js';
+import { cloakAsDesmos } from '/js/cloak.js';
 
 const drafts = new Map(); // channelId -> text
 /** How a custom emoji reads in the message box: `:name:` (turned into the real token when sent) unless another server has one with the same name. */
@@ -26,6 +27,7 @@ const COMMANDS = [
   { name: 'gif', desc: 'Search for a GIF', arg: 'query' },
   { name: 'poll', desc: 'Ask everybody a question', arg: 'question' },
   { name: 'theme', desc: 'Share your theme so others can try it', arg: 'name (optional)' },
+  { name: 'cloak', desc: 'Open Orate in about:blank, disguised as Desmos', noArg: true },
   { name: 'nick', desc: 'Change your nickname in this server', arg: 'name', server: true },
 ];
 
@@ -127,6 +129,7 @@ export function Composer({ chId }) {
       else if (cmd === 'me') { if (!arg) return; v = `_${arg}_`; }
       else if (cmd === 'spoiler') { if (!arg) return; v = `||${arg}||`; }
       else if (cmd === 'poll') { setText(''); openModal('create-poll', { channelId: chId }); return; }
+      else if (cmd === 'cloak') { setText(''); drafts.delete(chId); if (cloakAsDesmos() === 'blocked') toast('Your browser blocked the new tab. Allow pop-ups for this site and type /cloak again.', 'error', 6000); else toast('Opened in about:blank as Desmos', 'success', 2200); return; }
       else if (cmd === 'theme') { setText(''); await shareTheme(chId, arg); return; }
       else if (cmd === 'gif') { if (!canGif) { toast('You don’t have permission to send GIFs or stickers here', 'error'); return; } setText(''); const el = document.querySelector('.emoji-btn'); openPickerFor(el, 'gif', arg); return; }
       else if (cmd === 'nick') { if (!server) { toast('Nicknames only work in servers', 'error'); return; } setText(''); await act(api.patch(`/servers/${server.id}/members/${state.me.id}`, { nick: arg }), { success: arg ? 'Nickname updated' : 'Nickname cleared' }); return; }
@@ -196,6 +199,8 @@ export function Composer({ chId }) {
     if (ac) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setAcIdx((acIdx + 1) % ac.items.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setAcIdx((acIdx - 1 + ac.items.length) % ac.items.length); return; }
+      // a command with nothing to fill in (/cloak) runs as soon as it is typed out; otherwise Enter completes the highlighted suggestion
+      if (e.key === 'Enter' && !e.shiftKey && ac.trig.kind === '/' && COMMANDS.some((c) => c.noArg && text.trim().toLowerCase() === '/' + c.name)) { e.preventDefault(); setAc(null); submit(); return; }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); pick(ac.items[acIdx]); return; }
       if (e.key === 'Escape') { e.preventDefault(); setAc(null); return; }
     }

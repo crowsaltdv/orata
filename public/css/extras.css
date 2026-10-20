@@ -332,3 +332,16 @@ img.emoji.custom { height: 1.4em; width: auto; min-width: 1em; max-width: 4em; o
 .sch-hand { display: inline-flex; color: #f5c542; line-height: 0; }
 .sch-invite { margin-left: 4px; padding: 4px 11px; border-radius: 99px; background: var(--accent-grad); color: var(--on-accent); font-size: 12px; font-weight: 700; white-space: nowrap; transition: transform var(--t-fast); } .sch-invite:hover { transform: scale(1.06); }
 .sch-controls { flex: none; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px; }
+
+/* ------------------------------------------------ rainbow profile parts (--rb is an angle that spins; colors are hsl(var(--rb) …)) */
+@property --rb { syntax: '<angle>'; inherits: true; initial-value: 300deg; }
+@keyframes rb-spin { from { --rb: 0deg; } to { --rb: 360deg; } }
+@keyframes rb-hue { to { filter: hue-rotate(360deg); } }
+.profile-card.pf-rainbow, .pn.rainbow { animation: rb-spin 8s linear infinite; }
+.pf-fx.rainbow, .ps-fx-view canvas.rainbow { animation: rb-hue 8s linear infinite; }
+html[data-motion="reduce"] .profile-card.pf-rainbow, html[data-motion="reduce"] .pn.rainbow, html[data-motion="reduce"] .pf-fx.rainbow, html[data-motion="reduce"] .ps-fx-view canvas.rainbow { animation: none; }
+.ps-hint { font-size: 12.5px; color: var(--text-3); }
+/* a profile you open is never see-through: the card on top of the chat is solid */
+.pop-card.profile-pop, .modal:has(.profile-card.modal) { background: rgb(var(--panel-rgb)); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.pop-card.profile-pop .profile-card.popout { max-height: min(640px, calc(100vh - 48px)); }
+.pe-banner-colors { display: inline-flex; align-items: center; gap: 8px; }

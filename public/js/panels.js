@@ -10,6 +10,7 @@ import { ProfileCard, userMenu } from '/js/profile.js';
 import { renderMarkdown, plainPreview } from '/js/markdown.js';
 import { addUsers } from '/js/store.js';
 import { t } from '/js/i18n.js';
+import { UserName } from '/js/profile-style.js';
 
 /* ------------------------------------------------------------------ members */
 const MemberRow = memo(function MemberRow({ id, serverId, groupColor }) {
@@ -22,7 +23,7 @@ const MemberRow = memo(function MemberRow({ id, serverId, groupColor }) {
   const off = u.status === 'offline';
   return html`<button type="button" class=${cx('member-row', off && 'off')} onClick=${(e) => openProfile(id, e.currentTarget)} onContextMenu=${(e) => openContext(e, userMenu(id, serverId))}>
     <${Avatar} user=${u} size=${34} status=${u.status} />
-    <span class="mr-text"><span class="mr-name" style=${color ? { color } : null}>${nick || u.displayName}${owner ? html`<${Icon} name="crown" size=${13} class="crown" />` : null}${timedOut ? html`<span class="timeout-ico" title=${t('Timed out')}><${Icon} name="clock" size=${13} /></span>` : null}${u.bot ? html`<span class="bot-tag">APP</span>` : null}</span>
+    <span class="mr-text"><span class="mr-name" style=${color ? { color } : null}><${UserName} user=${u} text=${nick || u.displayName} />${owner ? html`<${Icon} name="crown" size=${13} class="crown" />` : null}${timedOut ? html`<span class="timeout-ico" title=${t('Timed out')}><${Icon} name="clock" size=${13} /></span>` : null}${u.bot ? html`<span class="bot-tag">APP</span>` : null}</span>
       ${u.customStatus ? html`<span class="mr-sub">${u.customStatus.emoji} ${u.customStatus.text}</span>` : null}</span>
   </button>`;
 });
