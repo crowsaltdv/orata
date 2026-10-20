@@ -1,10 +1,9 @@
-// Orate — theme engine: turns settings into CSS variables, wallpaper layers, fonts, glass and rain.
+// Orate — theme engine: turns settings into CSS variables, wallpaper layers, fonts, glass (pure CSS) and rain.
 import { state, subscribe, toast } from '/js/store.js';
 import { DEFAULT_SETTINGS } from '/js/defaults.js';
 import { hexToRgb, luminance, mixHex, readableOn, ls } from '/js/lib.js';
 import { MESH_WALLPAPERS, PHOTO_WALLPAPERS } from '/js/defaults.js';
 import { rain } from '/js/rain.js';
-import { glass } from '/js/glass.js';
 
 const root = document.documentElement;
 const $ = (s) => document.querySelector(s);
@@ -79,7 +78,8 @@ function applyWallpaper(s) {
   root.style.setProperty('--wp-dim-rgb', light ? '255,255,255' : '0,0,0');
   root.style.setProperty('--wp-pos', `${s.bg.posX}% ${s.bg.posY}%`);
   root.style.setProperty('--wp-zoom', String(s.bg.zoom));
-  const wp = $('#wallpaper'); wp.dataset.parallax = s.bg.parallax && !s.motion.reduce ? '1' : '0';
+  const wp = $('#wallpaper'); const parallaxOn = s.bg.parallax && !s.motion.reduce; wp.dataset.parallax = parallaxOn ? '1' : '0';
+  if (!parallaxOn) stopParallax();   // switched off: put the wallpaper back in the middle instead of leaving it where the mouse last was
   $('.wp-base').style.background = s.bg.type === 'solid' ? s.bg.color : '#07060d';
 
   if (sigImg !== lastBgKey) {
@@ -122,15 +122,11 @@ function sourceFor(src) {
   } };
 }
 
-/** Feeds the liquid-glass lenses the same wallpaper the user sees (they refract it). */
-let glassSig = '';
-function syncGlass() {
-  const s = look(); const src = wallpaperSource(s.bg); const source = sourceFor(src);
-  if (!source) return;
-  const light = isLightMode();
-  const sig = JSON.stringify([src.key, !!currentImg, s.bg.brightness, s.bg.saturate, s.bg.posX, s.bg.posY, s.bg.zoom, s.bg.dim, s.theme.panelColor, light]);
-  if (sig === glassSig) return; glassSig = sig;
-  glass.setWallpaper(source, s.bg, s.theme.panelColor, light ? [1, 1, 1, s.bg.dim] : [0, 0, 0, s.bg.dim]);
+/** Liquid glass is plain CSS now (base.css): these attributes switch it on and say which parts of the interface get it. */
+function applyGlass(g) {
+  root.dataset.glass = g.style === 'off' ? 'off' : 'liquid';
+  for (const k of ['rail', 'nav', 'toolbar', 'buttons', 'composer', 'panels']) root.dataset['glass' + k[0].toUpperCase() + k.slice(1)] = g[k] ? '1' : '0';
+  root.style.setProperty('--lg-k', String(g.intensity ?? 1));
 }
 
 let rainSig = '';
@@ -139,7 +135,6 @@ function syncRain() {
   const wp = $('#wallpaper');
   const on = s.rain.enabled && !s.motion.reduce;
   wp.classList.toggle('rain-on', on);
-  syncGlass();
   if (on && src.kind === 'image' && !currentImg) { rain.stop(); rainSig = ''; return; }   // wait for the wallpaper to finish loading
   const sig = JSON.stringify([on, src.key, !!currentImg, s.rain, s.bg.blur, s.bg.brightness, s.bg.saturate, s.bg.posX, s.bg.posY, s.bg.zoom]);
   if (sig === rainSig) return; rainSig = sig;
@@ -213,7 +208,7 @@ function applyMisc(s) {
   root.dataset.density = s.chat.compact ? 'compact' : 'cozy';
   root.style.setProperty('--msg-gap', s.chat.spacing + 'px');
   root.lang = s.lang || 'en';
-  glass.apply(s.glass, s.motion.reduce);
+  applyGlass(s.glass);
 }
 
 /* ------------------------------------------------------------------ main */
@@ -227,24 +222,26 @@ export function applyTheme(force) {
   if (!prev || prev.bg !== s.bg || prev.theme !== s.theme || prev.motion !== s.motion) applyWallpaper(s);
   applyMisc(s);
   if (prev && (prev.rain !== s.rain || prev.bg !== s.bg || prev.motion !== s.motion)) syncRain();
-  else if (prev && prev.theme !== s.theme) syncGlass();
 }
+/** The wallpaper's mouse parallax: where it is (cx, cy) and where it is heading (tx, ty). */
+const par = { tx: 0, ty: 0, cx: 0, cy: 0, running: false };
+function stopParallax() { par.tx = par.ty = par.cx = par.cy = 0; root.style.setProperty('--px', '0px'); root.style.setProperty('--py', '0px'); }
 export function initTheme() {
   bootPreview();
   applyTheme(true);
   subscribe(() => { if (look() !== last) { clearTimeout(raf); raf = setTimeout(() => applyTheme(), 12); } });
   window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (look().theme.mode === 'auto') applyTheme(true); });
   // gentle parallax on the wallpaper
-  let tx = 0; let ty = 0; let cx = 0; let cy = 0; let running = false;
   const tick = () => {
-    cx += (tx - cx) * 0.06; cy += (ty - cy) * 0.06;
-    root.style.setProperty('--px', cx.toFixed(2) + 'px'); root.style.setProperty('--py', cy.toFixed(2) + 'px');
-    if (Math.abs(tx - cx) > 0.05 || Math.abs(ty - cy) > 0.05) requestAnimationFrame(tick); else running = false;
+    if ($('#wallpaper').dataset.parallax !== '1') { par.running = false; return; }
+    par.cx += (par.tx - par.cx) * 0.06; par.cy += (par.ty - par.cy) * 0.06;
+    root.style.setProperty('--px', par.cx.toFixed(2) + 'px'); root.style.setProperty('--py', par.cy.toFixed(2) + 'px');
+    if (Math.abs(par.tx - par.cx) > 0.05 || Math.abs(par.ty - par.cy) > 0.05) requestAnimationFrame(tick); else par.running = false;
   };
   window.addEventListener('pointermove', (e) => {
     if ($('#wallpaper').dataset.parallax !== '1') return;
-    tx = -((e.clientX / innerWidth) - 0.5) * 22; ty = -((e.clientY / innerHeight) - 0.5) * 14;
-    if (!running) { running = true; requestAnimationFrame(tick); }
+    par.tx = -((e.clientX / innerWidth) - 0.5) * 22; par.ty = -((e.clientY / innerHeight) - 0.5) * 14;
+    if (!par.running) { par.running = true; requestAnimationFrame(tick); }
   }, { passive: true });
   void ls;
 }

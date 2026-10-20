@@ -13,6 +13,16 @@ export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
+/** A random, good-looking gradient for a default avatar (the colour behind the logo): two hues a little apart, rich but never neon or muddy. */
+export function randomAvatarBg() {
+  const hex = (h, s, l) => {
+    s /= 100; l /= 100; const k = (n) => (n + h / 30) % 12; const a = s * Math.min(l, 1 - l); const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return '#' + [f(0), f(8), f(4)].map((v) => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+  };
+  const h = Math.floor(Math.random() * 360); const h2 = (h + 35 + Math.floor(Math.random() * 60)) % 360;
+  return { a: hex(h, 70 + Math.random() * 15, 52 + Math.random() * 8), b: hex(h2, 68 + Math.random() * 17, 44 + Math.random() * 10), angle: Math.floor(Math.random() * 24) * 15 };
+}
+
 /* ---------------------------------------------------------------- hashed IP addresses
  * Orate never keeps a readable IP address. For ban evasion checks only, each account remembers a few keyed hashes (HMAC) of the networks it has
  * signed in from; they are never sent to clients. Loopback / private / link-local addresses are ignored (so a laptop or a LAN never bans itself),
@@ -316,6 +326,10 @@ function migrateDb() {
     }
     delete c.private; delete c.allowedRoles; delete c.allowedUsers; changed = true;
   }
+  if (!db.avatarBgDone) {   // once: every account gets its own random gradient behind the default avatar's logo
+    for (const u of Object.values(db.users)) if (!u.avatarBg) u.avatarBg = randomAvatarBg();
+    db.avatarBgDone = true; changed = true;
+  }
   if (changed) save();
 }
 export function audienceOf(ch) {
@@ -361,7 +375,7 @@ export function publicUser(u) {
   return {
     id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar || null,
     banner: u.banner || null, bannerColor: u.bannerColor || null, accentColor: u.accentColor || null,
-    bio: u.bio || '', pronouns: u.pronouns || '', profile: u.profile ? sanitizeProfileStyle(u.profile) : null, createdAt: u.createdAt,   // (re-checked on the way out so styles saved by older versions, e.g. frames, simply disappear)
+    bio: u.bio || '', pronouns: u.pronouns || '', profile: u.profile ? sanitizeProfileStyle(u.profile) : null, avatarBg: u.avatarBg || null, createdAt: u.createdAt,   // (re-checked on the way out so styles saved by older versions, e.g. frames, simply disappear)
     bot: !!u.bot, status: effectiveStatus(u), customStatus: u.customStatus || null, listening: visibleListening(u),
   };
 }
@@ -489,7 +503,7 @@ export const RESERVED = new Set(['everyone', 'here', 'admin', 'administrator', '
 export function ensureBot() {
   if (db.botId && db.users[db.botId]) return db.users[db.botId];
   const id = newId();
-  db.users[id] = { id, username: 'orbit', displayName: 'Orbit', email: null, bot: true, status: 'online', createdAt: Date.now(), bio: 'Your friendly Orate helper. Say "help" in a DM.', bannerColor: '#6d28d9', rel: {}, reads: {}, settings: {} };
+  db.users[id] = { id, username: 'orbit', displayName: 'Orbit', email: null, bot: true, avatarBg: randomAvatarBg(), status: 'online', createdAt: Date.now(), bio: 'Your friendly Orate helper. Say "help" in a DM.', bannerColor: '#6d28d9', rel: {}, reads: {}, settings: {} };
   byUsername.set('orbit', id);
   db.botId = id;
   save();

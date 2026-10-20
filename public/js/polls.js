@@ -1,8 +1,8 @@
 // Orate — polls: the "create poll" dialog and the poll shown inside a message.
 import { html, useState, useEffect, cx } from '/js/lib.js';
-import { state, useSel, closeModal, getChannel, hasChannelPerm } from '/js/store.js';
+import { state, useSel, closeModal, openModal, getChannel, hasChannelPerm } from '/js/store.js';
 import { Icon } from '/js/icons.js';
-import { Btn, Field, TextInput, Toggle, SettingRow, Dropdown, Modal, MODALS } from '/js/ui.js';
+import { Btn, Field, TextInput, Toggle, SettingRow, Dropdown, Modal, MODALS, Avatar } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { act } from '/js/actions.js';
 import { t } from '/js/i18n.js';
@@ -32,6 +32,20 @@ MODALS['create-poll'] = function CreatePoll({ id, channelId }) {
   <//>`;
 };
 
+/** Who voted for what — opened from the vote count on a poll. Stays live while the poll changes. */
+MODALS['poll-voters'] = function PollVoters({ id, channelId, messageId }) {
+  const m = useSel((s) => s.msgs[channelId]?.list?.find((x) => x.id === messageId)); const users = useSel((s) => s.users);
+  const p = m?.poll; if (!p) return null;
+  return html`<${Modal} title=${p.question} subtitle=${`${p.total} ${p.total === 1 ? t('vote') : t('votes')}`} width=${460} onClose=${() => closeModal(id)} footer=${html`<${Btn} variant="primary" onClick=${() => closeModal(id)}>${t('Done')}<//>`}>
+    <div class="pv-list">${p.answers.map((a) => {
+      const n = a.voters.length; const pct = p.total ? Math.round((n / p.total) * 100) : 0;
+      return html`<section class="pv-ans" key=${a.id}><header><b>${a.text}</b><span>${n} ${n === 1 ? t('vote') : t('votes')} · ${pct}%</span></header>
+        ${n ? html`<div class="pv-voters">${a.voters.map((uid) => html`<div class="pv-voter" key=${uid}><${Avatar} user=${users[uid]} size=${28} /><span>${users[uid]?.displayName || '…'}</span></div>`)}</div>` : html`<small class="pv-none">${t('No votes yet')}</small>`}
+      </section>`;
+    })}</div>
+  <//>`;
+};
+
 const timeLeft = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); if (m < 1) return t('less than a minute'); if (m < 60) return `${m} ${t('min')}`; const h = Math.round(m / 60); return h < 48 ? `${h} ${h === 1 ? t('hour') : t('hours')}` : `${Math.round(h / 24)} ${t('days')}`; };
 
 /** The poll inside a message: vote by clicking, see the results as bars, close it early if it's yours (or you moderate). */
@@ -56,7 +70,7 @@ export function PollView({ m, ch }) {
         <span class="pa-check">${on ? html`<${Icon} name="check" size=${13} sw=${3.5} />` : null}</span>
         <span class="pa-text">${a.text}</span><span class="pa-num">${n}${p.total ? ` · ${pct}%` : ''}</span></button>`;
     })}</div>
-    <div class="poll-foot"><span>${p.total} ${p.total === 1 ? t('vote') : t('votes')}</span><span>·</span><span>${closed ? t('Poll closed') : p.expiresAt ? `${t('Ends in')} ${timeLeft(p.expiresAt - now)}` : ''}</span>
+    <div class="poll-foot"><button type="button" class="poll-count" data-tip=${t('See who voted')} onClick=${() => openModal('poll-voters', { channelId: ch.id, messageId: m.id })}>${p.total} ${p.total === 1 ? t('vote') : t('votes')}</button><span>·</span><span>${closed ? t('Poll closed') : p.expiresAt ? `${t('Ends in')} ${timeLeft(p.expiresAt - now)}` : ''}</span>
       ${canClose ? html`<button type="button" class="link-btn" onClick=${() => act(api.post(`/channels/${ch.id}/messages/${m.id}/poll/close`))}>${t('End poll')}</button>` : null}</div>
   </div>`;
 }

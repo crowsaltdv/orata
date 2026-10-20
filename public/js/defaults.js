@@ -31,7 +31,7 @@ export const PANEL_PRESETS = [
   ['#1f1a14', 'Mocha'], ['#ffffff', 'Snow'], ['#f3ecff', 'Lavender'], ['#e8f4ff', 'Sky'], ['#fff1f2', 'Blush'],
 ];
 
-export const SETTINGS_VERSION = 5;
+export const SETTINGS_VERSION = 6;
 export const DEFAULT_SETTINGS = {
   v: SETTINGS_VERSION,
   theme: {
@@ -44,7 +44,7 @@ export const DEFAULT_SETTINGS = {
     blur: 0, dim: 0.22, brightness: 1, saturate: 1.1, posX: 50, posY: 50, zoom: 1, parallax: true, library: [],
   },
   rain: { enabled: true, preset: 'rain', amount: 0.7, size: 0.88, speed: 1, refraction: 1, mist: 3, trails: 1, droplets: 50, lightning: 0, fps: 60 },
-  glass: { style: 'off', last: 'liquid', intensity: 1, rail: true, nav: true, toolbar: true, buttons: true, composer: true, panels: true },
+  glass: { style: 'off', intensity: 1, rail: true, nav: true, toolbar: true, buttons: true, composer: true, panels: true },
   fx: { particles: true, ripples: true, amount: 1 },
   fonts: { ui: 'Montserrat', chat: null, code: 'JetBrains Mono', size: 16, weight: 400, lineHeight: 1.45, letterSpacing: 0 },
   motion: { reduce: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, parallaxHover: true },
@@ -53,7 +53,7 @@ export const DEFAULT_SETTINGS = {
   lang: 'en',
   privacy: { dmFromServers: true, friendRequests: true, showActivity: true },
   access: { highContrast: false, underlineLinks: false, saturation: 1, tooltips: true },
-  mutedServers: {}, mutedChannels: {}, serverOrder: [], serverFolders: [], collapsed: {}, lastChannel: {}, skinTone: 0,
+  favGifs: [], mutedServers: {}, mutedChannels: {}, serverOrder: [], serverFolders: [], collapsed: {}, lastChannel: {}, skinTone: 0,
   advanced: { devMode: false },
 };
 
@@ -78,6 +78,7 @@ export function migrateSettings(saved) {
   }
   if ((s.v || 0) < 4) { delete s.rain; delete s.quests; delete s.shopEquipped; }   // v3/v4: rain is now the original Codrops effect with new options (lighter default mist)
   if ((s.v || 0) < 5) { delete s.quests; delete s.shopEquipped; if (s.glass) s.glass.style = 'off'; }   // v5: glass is opt-in (off by default) and now covers the whole UI
+  if ((s.v || 0) < 6) { if (s.glass) { if (s.glass.style === 'frosted') s.glass.style = 'liquid'; delete s.glass.last; } }   // v6: liquid glass is pure CSS — the WebGL "frosted" style is gone
   s.v = SETTINGS_VERSION;
   return s;
 }

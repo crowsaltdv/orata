@@ -29,7 +29,7 @@ const RANGE = {
 const ENUM = {
   'theme.mode': ['dark', 'light', 'midnight', 'auto'], 'theme.accentType': ['solid', 'gradient'], 'theme.panelType': ['solid', 'gradient'],
   'bg.type': ['mesh', 'photo', 'image', 'gradient', 'solid'], 'bg.mesh': MESH_WALLPAPERS.map((m) => m.id), 'bg.photo': PHOTO_WALLPAPERS.map((p) => p.id),
-  'rain.preset': ['rain', 'drizzle', 'storm', 'fallout', 'custom'], 'rain.fps': [30, 60], 'glass.style': ['off', 'liquid', 'frosted'], 'glass.last': ['liquid', 'frosted'],
+  'rain.preset': ['rain', 'drizzle', 'storm', 'fallout', 'custom'], 'rain.fps': [30, 60], 'glass.style': ['off', 'liquid'],
 };
 const COLORS = new Set(['theme.accent', 'theme.accent2', 'theme.panelColor', 'theme.panelColor2', 'theme.textColor', 'bg.color', 'bg.gradient.c1', 'bg.gradient.c2']);
 const HEX = /^#[0-9a-f]{6}$/i; const FONT = /^[\w .+-]{1,60}$/; const IMAGE = /^(\/uploads\/[\w.-]+|\/img\/[\w./-]+|https?:\/\/[^\s"'()\\]+)$/i;
@@ -84,7 +84,7 @@ function describe(look) {
   const all = deepMerge(DEFAULT_SETTINGS, look); const bg = all.bg; const parts = [t(MODE[all.theme.mode] || 'Dark')];
   parts.push(bg.type === 'photo' ? PHOTO_WALLPAPERS.find((p) => p.id === bg.photo)?.name : bg.type === 'mesh' ? MESH_WALLPAPERS.find((m) => m.id === bg.mesh)?.name : bg.type === 'image' && bg.image ? t('Custom wallpaper') : bg.type === 'gradient' ? t('Gradient wallpaper') : t('Solid wallpaper'));
   if (all.rain.enabled) parts.push(t('Rain'));
-  if (all.glass.style !== 'off') parts.push(all.glass.style === 'frosted' ? t('Frosted glass') : t('Liquid glass'));
+  if (all.glass.style !== 'off') parts.push(t('Liquid glass'));
   if (all.fonts.ui) parts.push(all.fonts.ui);
   return parts.filter(Boolean).join(' · ');
 }

@@ -355,6 +355,15 @@ async function main() {
   const h3H = { 'cf-connecting-ip': '198.51.100.77', 'x-forwarded-for': '203.0.113.99' }; const h3 = await reg2('hdr3', h3H);
   r = await join2(h3.token, h3H); ok(r.status === 200, 'a forged X-Forwarded-For cannot be used to frame someone else’s network');
 
+  /* ---------------------------------------------------------------- default avatar gradients */
+  console.log('\nDefault avatar');
+  const bgs = [A.user.avatarBg, E.user.avatarBg, M.user.avatarBg];
+  ok(bgs.every((b) => /^#[0-9a-f]{6}$/.test(b?.a) && /^#[0-9a-f]{6}$/.test(b?.b) && b.angle >= 0 && b.angle < 360) && new Set(bgs.map((b) => b.a + b.b)).size === 3, 'every new account gets its own random gradient behind the default avatar');
+  const before = (await api('GET', '/me', A.token)).body.avatarBg; r = await api('PATCH', '/me', A.token, { avatarBg: 'random' });
+  ok(r.status === 200 && r.body.avatarBg && JSON.stringify(r.body.avatarBg) !== JSON.stringify(before), 'Shuffle picks a new one');
+  r = await api('PATCH', '/me', A.token, { avatarBg: { a: '#ff0000' } }); ok(r.status === 200 && JSON.stringify(r.body.avatarBg) !== JSON.stringify({ a: '#ff0000' }), 'it cannot be set to anything but a fresh random one');
+  ok((await api('GET', '/ready', T.token)).body.users.find((x) => x.id === A.user.id)?.avatarBg?.a === (await api('GET', '/me', A.token)).body.avatarBg.a, 'everyone sees the same gradient');
+
   /* ---------------------------------------------------------------- profile styling + GIF banners */
   console.log('\nProfile styling');
   r = await api('PATCH', '/me', A.token, { banner: gifUp.url }); ok(r.status === 200 && r.body.banner === gifUp.url, 'a GIF can be your profile banner');

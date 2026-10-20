@@ -84,9 +84,9 @@ export function UserBar() {
   const status = me.status === 'invisible' ? 'invisible' : me.status;
   return html`<div class="userbar panel">
     ${conn ? html`<div class="vc-panel">
-      <div class="vc-row"><div class="vc-status"><b><${Icon} name="wifi" size=${15} />${conn.status === 'connecting' ? t('Connecting…') : t('Voice Connected')}</b><span>${ch ? (ch.serverId ? `${ch.name} / ${server?.name}` : dmName(ch)) : ''}</span></div>
+      <div class="vc-row"><div class="vc-status"><b><${Icon} name="wifi" size=${15} />${conn.status === 'connecting' ? t('Connecting…') : conn.stage ? (conn.speaker ? t('On Stage') : t('In the Audience')) : t('Voice Connected')}</b><span>${ch ? (ch.serverId ? `${ch.name} / ${server?.name}` : dmName(ch)) : ''}</span></div>
         <${IconBtn} icon="phone-off" label=${t('Disconnect')} class="leave" onClick=${() => voice.leave()} glass=${null} /></div>
-      <div class="vc-btns">
+      <div class="vc-btns" style=${conn.stage && !conn.speaker ? 'display:none' : undefined}>
         <${IconBtn} icon=${conn.video ? 'video' : 'video-off'} label=${conn.video ? t('Turn Off Camera') : t('Turn On Camera')} active=${conn.video} onClick=${() => voice.toggleCamera()} glass="buttons" />
         <${IconBtn} icon="monitor" label=${conn.screen ? t('Stop Sharing') : t('Share Your Screen')} active=${conn.screen} onClick=${() => voice.toggleScreen()} glass="buttons" />
       </div></div>` : null}

@@ -110,7 +110,7 @@ const clock = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor
 function Art({ src, size = 44, playing }) {
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [src]);
-  return html`<span class=${cx('m-art', playing && 'on')} style=${{ width: size + 'px', height: size + 'px' }}>${src && !broken ? html`<img src=${size <= 64 ? src.replace('/300x300bb.', '/100x100bb.') : src} alt="" decoding="async" referrerpolicy="no-referrer" draggable="false" onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${Math.round(size * 0.45)} />`}${playing ? html`<span class="eq sm"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
+  return html`<span class=${cx('m-art', playing && 'on')} style=${{ width: size + 'px', height: size + 'px' }}>${src && !broken ? html`<img src=${size <= 64 ? src.replace('/300x300bb.', '/100x100bb.') : src} alt="" decoding="async" referrerpolicy="no-referrer" draggable=${false} onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${Math.round(size * 0.45)} />`}${playing ? html`<span class="eq sm"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
 }
 function Progress() {
   const pos = useSel((s) => s.music.position); const dur = useSel((s) => s.music.duration);
@@ -134,7 +134,7 @@ function Controls({ big }) {
 function Cover({ src, playing }) {
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [src]);
-  return html`<span class=${cx('m-art cover', playing && 'on')}>${src && !broken ? html`<img src=${src} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false" onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${34} />`}${playing ? html`<span class="eq"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
+  return html`<span class=${cx('m-art cover', playing && 'on')}>${src && !broken ? html`<img src=${src} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable=${false} onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${34} />`}${playing ? html`<span class="eq"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
 }
 
 /** What is playing, big, with the controls. Shown above everything else on the page. */

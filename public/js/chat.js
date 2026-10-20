@@ -27,7 +27,7 @@ export function RightPanel() {
   const panel = useSel((s) => s.panel);
   const width = useSel((s) => s.width);
   const p = effectivePanel(view, ch, panel);
-  if (!p || (view !== 'dm' && view !== 'channel') || !ch || ch.type === 'forum' || ch.type === 'voice' && p === 'members') return null;
+  if (!p || (view !== 'dm' && view !== 'channel') || !ch || ch.type === 'forum' || (ch.type === 'voice' || ch.type === 'stage') && p === 'members') return null;
   if (width < 1100) return null;
   return html`<aside class=${cx('right panel right-enter', p === 'profile' && 'wide')} key=${p + chId}>
     ${p === 'members' ? html`<${MembersPanel} chId=${chId} />` : p === 'profile' ? html`<${DmProfilePanel} chId=${chId} />` : p === 'pins' ? html`<${PinsPanel} chId=${chId} />` : html`<${SearchPanel} chId=${chId} />`}

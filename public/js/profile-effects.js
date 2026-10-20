@@ -96,6 +96,7 @@ export function startEffect(canvas, fx, { reduce = false, fps = 30, onlyWhenVisi
   const eng = ENGINES[fx?.id]; if (!canvas || !eng) return () => {};
   const g = canvas.getContext('2d'); const r = Math.random;
   let w = 1; let h = 1; let parts = []; let raf = 0; let last = 0; let t = fx.id === 'rays' || fx.id === 'ocean' ? 0 : 3; let alive = true; let visible = !onlyWhenVisible;
+  canvas.style.opacity = String(fx.opacity ?? 1);   // how strongly the effect shows over the card
   const color = fx.color || '#ffffff'; const color2 = fx.color2 || null; const speed = fx.speed || 1; const density = fx.density || 0.6;
   const build = () => { const area = (w * h) / 140000 + 0.35; const n = eng.count > 5 ? Math.max(3, Math.min(180, Math.round(eng.count * density * area))) : eng.count; parts = Array.from({ length: n }, () => eng.make(w, h, r, true)); };
   const fit = () => { const b = size || canvas.parentElement.getBoundingClientRect(); const dpr = Math.min(2, window.devicePixelRatio || 1); w = Math.max(1, b.width); h = Math.max(1, b.height); canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); g.setTransform(dpr, 0, 0, dpr, 0, 0); build(); };

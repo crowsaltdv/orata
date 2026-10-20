@@ -160,7 +160,7 @@ export function Composer({ chId }) {
         items = [...items, ...roles, ...evr].slice(0, 9);
       }
     } else if (trig.kind === '#' && server) {
-      items = server.channels.filter((c) => c.type !== 'category' && c.name.toLowerCase().includes(q)).slice(0, 8).map((c) => ({ type: 'channel', id: c.id, label: c.name, sub: c.type === 'voice' ? 'Voice' : server.name, insert: '#' + c.name + ' ', icon: c.type === 'voice' ? 'volume' : 'hash' }));
+      items = server.channels.filter((c) => c.type !== 'category' && c.name.toLowerCase().includes(q)).slice(0, 8).map((c) => ({ type: 'channel', id: c.id, label: c.name, sub: c.type === 'voice' ? 'Voice' : c.type === 'stage' ? 'Stage' : server.name, insert: '#' + c.name + ' ', icon: c.type === 'voice' ? 'volume' : c.type === 'stage' ? 'stage' : 'hash' }));
     } else if (trig.kind === ':') {
       const cust = allCustomEmojis().filter((e) => e.name.toLowerCase().includes(q)).sort((a, b) => (b.serverId === server?.id) - (a.serverId === server?.id)).slice(0, 5).map((e) => ({ type: 'cemoji', id: e.id, label: `:${e.name}:`, sub: e.serverName, insert: emojiText(e, server?.id) + ' ', emoji: e }));
       items = [...cust, ...searchEmoji(q, 8).map((e) => ({ type: 'emoji', id: e.char, label: `:${e.code || e.label}:`, sub: '', insert: e.char + ' ', char: e.char }))].slice(0, 8);

@@ -1,10 +1,11 @@
-// Orate — realtime gateway: presence, voice rooms and WebRTC signalling over WebSocket.
+// Orate — realtime gateway: presence, voice rooms (voice channels, calls and stages) and WebRTC signalling over WebSocket.
 import { WebSocketServer } from 'ws';
 import { db, sha, conns, gatedConns, send, emitTo, canView, audienceOf, publicUser, broadcastPresence, newId, canIn, voice, effectiveStatus, save, serverView, serverAudience } from './core.js';
 import { buildReady } from './api.js';
 import { findSession } from './sessions.js';
 import { expireListening } from './music.js';
 import { isGated } from './verify.js';
+import { isStage, isVoiceLike, isStageMod, stageJoinState, peersFor, mayLink, setSpeaker, setHand } from './stage.js';
 
 const offlineTimers = new Map();
 
@@ -46,7 +47,7 @@ export function attachGateway(server) {
       const ch = db.channels[d.channelId];
       if (!ch || !canView(conn.userId, ch)) return send(conn, 'error', { message: 'Unknown channel' });
       if (ch.serverId) {
-        if (ch.type !== 'voice') return send(conn, 'error', { message: 'Not a voice channel' });
+        if (!isVoiceLike(ch)) return send(conn, 'error', { message: 'Not a voice channel' });
         if (!canIn(conn.userId, ch, 'CONNECT')) return send(conn, 'error', { message: 'You can’t join this channel' });
       } else if (!['dm', 'group'].includes(ch.type)) return;
       // one voice connection per user across all tabs
@@ -54,8 +55,9 @@ export function attachGateway(server) {
       if (conn.voice) conn.leaveVoice('moved');
       let room = voice.get(ch.id); const wasEmpty = !room || !room.size;
       if (!room) { room = new Map(); voice.set(ch.id, room); }
-      const peers = [...room.values()].map((s) => s.userId);
-      const state = { userId: conn.userId, channelId: ch.id, muted: !!d.muted, deafened: !!d.deafened, video: !!d.video, screen: false, joinedAt: Date.now() };
+      let state = { userId: conn.userId, channelId: ch.id, muted: !!d.muted, deafened: !!d.deafened, video: !!d.video, screen: false, joinedAt: Date.now() };
+      if (isStage(ch)) state = stageJoinState(ch, conn.userId, room, state);   // the audience starts muted and without video; the first moderator opens the stage
+      const peers = peersFor(ch, room, state);
       room.set(conn.userId, state);
       conn.voice = ch.id;
       send(conn, 'voice_joined', { channelId: ch.id, peers, states: [...room.values()] });
@@ -99,12 +101,25 @@ export function attachGateway(server) {
         case 'voice_update': {
           if (!conn.voice) break;
           const st = voice.get(conn.voice)?.get(conn.userId); if (!st) break;
+          const ch = db.channels[conn.voice];
           for (const k of ['muted', 'deafened', 'video', 'screen']) if (typeof d[k] === 'boolean') st[k] = d[k];
+          if (isStage(ch)) {
+            if (!st.speaker) { st.muted = true; st.video = false; st.screen = false; }   // only speakers talk or show anything
+            if (typeof d.hand === 'boolean') { setHand(ch, conn.userId, d.hand); break; }   // (broadcasts by itself)
+          }
           broadcastVoice(conn.voice, conn.userId, st);
+          break;
+        }
+        case 'stage_speaker': {   // a moderator invites someone up (or sends them back); anybody may step down themselves
+          const ch = conn.voice && db.channels[conn.voice]; if (!isStage(ch)) break;
+          const target = String(d.userId || conn.userId); const on = !!d.speaker;
+          if ((on || target !== conn.userId) && !isStageMod(conn.userId, ch)) { send(conn, 'error', { message: 'Only stage moderators can do that' }); break; }
+          const err = setSpeaker(ch, target, on); if (err) send(conn, 'error', { message: err });
           break;
         }
         case 'voice_signal': {
           if (!conn.voice || !voice.get(conn.voice)?.has(String(d.to))) break;
+          if (!mayLink(db.channels[conn.voice], voice.get(conn.voice), conn.userId, String(d.to))) break;   // on a stage two listeners never connect to each other
           for (const c of conns.get(String(d.to)) || []) if (c.voice === conn.voice) send(c, 'voice_signal', { from: conn.userId, channelId: conn.voice, signal: d.signal });
           break;
         }

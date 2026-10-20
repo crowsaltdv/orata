@@ -82,6 +82,7 @@ export function channelMenu(ch) {
   return [
     ch.type === 'text' && { label: t('Mark As Read'), icon: 'check', onClick: () => ackChannel(ch.id) },
     ch.type === 'voice' && { label: t('Join Voice'), icon: 'volume', onClick: () => { voice.join(ch.id); goChannel(ch.serverId, ch.id); } },
+    ch.type === 'stage' && { label: t('Join Stage'), icon: 'stage', onClick: () => { voice.join(ch.id); goChannel(ch.serverId, ch.id); } },
     { label: muted ? t('Unmute Channel') : t('Mute Channel'), icon: muted ? 'bell' : 'bell-off', onClick: () => updateSettings({ mutedChannels: { [ch.id]: !muted } }) },
     { label: t('Copy Link'), icon: 'link', onClick: async () => { await copyText(`${location.origin}/channels/${ch.serverId}/${ch.id}`); toast('Link copied', 'success', 1500); } },
     hasChannelPerm(ch, 'CREATE_INVITE') && { label: t('Invite People'), icon: 'user-plus', onClick: () => openModal('invite', { serverId: ch.serverId }) },
@@ -102,11 +103,11 @@ function VoiceUsers({ channelId, serverId }) {
   const speaking = useSel((s) => s.voice.speaking);
   const users = useSel((s) => s.users);
   if (!room) return null;
-  const list = Object.values(room);
+  const list = Object.values(room).sort((a, b) => (b.speaker ? 1 : 0) - (a.speaker ? 1 : 0) || (b.hand ? 1 : 0) - (a.hand ? 1 : 0));   // on a stage: speakers first, then raised hands
   return html`<div class="vc-users">${list.map((st) => { const u = users[st.userId]; return html`<div class="vc-user" key=${st.userId} onClick=${(e) => openProfile(st.userId, e.currentTarget)} onContextMenu=${(e) => openContext(e, [{ label: 'Profile', icon: 'user', onClick: () => openProfile(st.userId) }])}>
       <${Avatar} user=${u} size=${22} speaking=${!!speaking?.[st.userId] && !st.muted} />
       <span class="vc-name">${(serverId && state.servers[serverId]?.members.find((m) => m.id === st.userId)?.nick) || u?.displayName}</span>
-      <span class="vc-ic">${st.screen ? html`<span class="live">LIVE</span>` : st.video ? html`<${Icon} name="video" size=${14} />` : null}${st.deafened ? html`<${Icon} name="headphones-off" size=${14} />` : st.muted ? html`<${Icon} name="mic-off" size=${14} />` : null}</span></div>`; })}</div>`;
+      <span class="vc-ic">${st.speaker ? html`<${Icon} name="mic" size=${14} />` : st.hand ? html`<${Icon} name="hand" size=${14} />` : null}${st.screen ? html`<span class="live">LIVE</span>` : st.video ? html`<${Icon} name="video" size=${14} />` : null}${st.deafened ? html`<${Icon} name="headphones-off" size=${14} />` : st.muted ? html`<${Icon} name="mic-off" size=${14} />` : null}</span></div>`; })}</div>`;
 }
 
 const ChannelItem = memo(function ChannelItem({ ch, active, serverId }) {
@@ -117,7 +118,7 @@ const ChannelItem = memo(function ChannelItem({ ch, active, serverId }) {
   const click = () => { if (isVoice) { if (!inCall) voice.join(ch.id); } goChannel(serverId, ch.id); };
   return html`<div>
     <div class=${cx('ch-item', active && 'active', unread === '1' && muted === '0' && 'unread', muted === '1' && 'muted', inCall && 'in-call')} role="button" tabindex="0" onClick=${click} onKeyDown=${(e) => e.key === 'Enter' && click()} onContextMenu=${(e) => openContext(e, channelMenu(ch))}>
-      <${Icon} name=${isVoice ? 'volume' : ch.type === 'forum' ? 'forum' : ch.private ? 'hash-lock' : 'hash'} size=${19} class="ch-icon" />
+      <${Icon} name=${isVoice ? 'volume' : ch.type === 'stage' ? 'stage' : ch.type === 'forum' ? 'forum' : ch.private ? 'hash-lock' : 'hash'} size=${19} class="ch-icon" />
       <span class="ch-name">${ch.name}</span>
       ${Number(mentions) ? html`<${Badge} n=${Number(mentions)} />` : null}
       <span class="ch-actions">
@@ -125,7 +126,7 @@ const ChannelItem = memo(function ChannelItem({ ch, active, serverId }) {
         ${hasChannelPerm(ch, 'MANAGE_CHANNELS') || Array.isArray(ch.overwrites) ? html`<span data-tip="Edit Channel" onClick=${(e) => { e.stopPropagation(); openModal('edit-channel', { channelId: ch.id }); }}><${Icon} name="settings" size=${15} /></span>` : null}
       </span>
     </div>
-    ${isVoice ? html`<${VoiceUsers} channelId=${ch.id} serverId=${serverId} />` : null}
+    ${isVoice || ch.type === 'stage' ? html`<${VoiceUsers} channelId=${ch.id} serverId=${serverId} />` : null}
   </div>`;
 });
 

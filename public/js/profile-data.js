@@ -47,7 +47,7 @@ export const PROFILE_DEFAULTS = {
   nameColor: { mode: 'gradient', a: '#fde047', b: '#22c55e', angle: 90 },
   nameOutline: { mode: 'solid', a: '#14532d', b: '#052e16', angle: 90, width: 2 },
   nameShadow: { color: '#14532d', angle: 45, distance: 4, blur: 0 },   // 0° = to the right, 90° = down, so 45° falls to the bottom-right
-  effect: { id: 'sparkles', color: '#ffffff', color2: null, density: 0.6, speed: 1 },
+  effect: { id: 'sparkles', color: '#ffffff', color2: null, density: 0.6, speed: 1, opacity: 1 },
 };
 
 const fill = (o, withWidth) => {
@@ -85,7 +85,7 @@ export function sanitizeProfileStyle(p) {
   if (isObj(ns) && hex(ns.color)) out.nameShadow = { color: hex(ns.color), angle: num(ns.angle, 0, 360, 135), distance: num(ns.distance, 0, 24, 4), blur: num(ns.blur, 0, 30, 0) };
   const e = p.effect;
   if (isObj(e) && oneOf(EFFECTS, e.id)) {
-    out.effect = { id: e.id, color: hex(e.color, '#ffffff'), color2: hex(e.color2), density: num(e.density, 0.1, 1, 0.6), speed: num(e.speed, 0.3, 2.5, 1) };
+    out.effect = { id: e.id, color: hex(e.color, '#ffffff'), color2: hex(e.color2), density: num(e.density, 0.1, 1, 0.6), speed: num(e.speed, 0.3, 2.5, 1), opacity: num(e.opacity, 0.1, 1, 1) };
   }
   return Object.keys(out).length ? out : null;
 }

@@ -9,7 +9,7 @@ import {
   db, save, newId, cmpId, sha, ENV, DATA_DIR, UPLOAD_DIR, ROOT, ApiError, bad, forbidden, notFound, byUsername, byEmail,
   conns, emitTo, can, need, permsOf, permsIn, canIn, needIn, listedFor, isSynced, overwritesOf, sanitizeOverwrites, topRolePos, canView, audienceOf, serverAudience, channelsOfServer, publicUser, selfUser,
   serverView, channelView, messageView, relatedUserIds, broadcastPresence, readStateFor, systemMessage, randomCode, RESERVED,
-  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteIp, ipHash, clientIp, userIpHashes, requestHashes, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView,
+  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteIp, ipHash, clientIp, userIpHashes, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView,
 } from './core.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
@@ -19,6 +19,7 @@ import { beginSignup, confirmSignup, resendSignup } from './signup.js';
 import { closeConns, storeUpload, restoreUpload } from './core.js';
 import { createSession, findSession, touchSession, endSession, endUserSessions, listSessions } from './sessions.js';
 import { mountMusic, mountMusicPublic, musicConfigured } from './music.js';
+import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -146,7 +147,7 @@ export function buildReady(user) {
   for (const d of dms) for (const id of d.recipients) userIds.add(id);
   for (const id of Object.keys(user.rel || {})) userIds.add(id);
   const readStates = {};
-  const chans = [...dms, ...servers.flatMap((s) => channelsOfServer(s.id).filter((c) => canView(user.id, c) && !['category', 'voice', 'forum', 'post'].includes(c.type)))];
+  const chans = [...dms, ...servers.flatMap((s) => channelsOfServer(s.id).filter((c) => canView(user.id, c) && !['category', 'voice', 'stage', 'forum', 'post'].includes(c.type)))];
   for (const ch of chans) readStates[ch.id] = readStateFor(user, ch);
   const voiceStates = [];
   for (const [channelId, room] of voice) { const ch = db.channels[channelId]; if (ch && canView(user.id, ch)) for (const st of room.values()) voiceStates.push(st); }
@@ -235,7 +236,7 @@ export function createApi() {
     const id = newId();
     const hues = ['#8b5cf6', '#ec4899', '#f97316', '#10b981', '#06b6d4', '#3b82f6', '#ef4444', '#eab308'];
     const user = {
-      id, username, displayName, email, salt, hash, dob, avatar: null, banner: null, bannerColor: hues[Number(id) % hues.length],
+      id, username, displayName, email, salt, hash, dob, avatar: null, avatarBg: randomAvatarBg(), banner: null, bannerColor: hues[Number(id) % hues.length],
       accentColor: null, bio: '', pronouns: '', status: 'online', customStatus: null, createdAt: Date.now(), rel: {}, reads: {}, settings: {}, closedDms: {},
       emailVerified: true,   // new accounts are verified: either verification is off, or they typed the emailed code
     };
@@ -353,6 +354,7 @@ export function createApi() {
     if (b.displayName !== undefined) u.displayName = str(b.displayName, 1, 32, 'Display name');
     if (b.bio !== undefined) u.bio = String(b.bio).slice(0, 400);
     if (b.pronouns !== undefined) u.pronouns = String(b.pronouns).slice(0, 40);
+    if (b.avatarBg === 'random') u.avatarBg = randomAvatarBg();   // "shuffle" in Profile settings
     if (b.profile !== undefined) {   // colours, outline, fonts, effect and frames of the profile card (see public/js/profile-data.js)
       if (b.profile !== null && (typeof b.profile !== 'object' || JSON.stringify(b.profile).length > 4000)) throw bad('That profile style is invalid');
       u.profile = sanitizeProfileStyle(b.profile) || undefined;
@@ -591,7 +593,7 @@ export function createApi() {
   r.post('/servers/:id/channels', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_CHANNELS');
     const b = req.body || {};
-    const type = ['text', 'voice', 'category', 'forum'].includes(b.type) ? b.type : 'text';
+    const type = ['text', 'voice', 'stage', 'category', 'forum'].includes(b.type) ? b.type : 'text';
     let name = str(b.name, 1, 100, 'Channel name');
     if (type === 'text' || type === 'forum') name = name.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || 'new-channel';
     const siblings = channelsOfServer(s.id);
@@ -621,9 +623,10 @@ export function createApi() {
     for (const c of channelsOfServer(s.id)) {
       const room = voice.get(c.id); if (!room) continue;
       for (const uid of [...room.keys()]) {
-        if (c.type === 'voice' && canIn(uid, c, 'CONNECT')) continue;
+        if (isVoiceLike(c) && canIn(uid, c, 'CONNECT')) continue;
         for (const cn of conns.get(uid) || []) if (cn.voice === c.id) cn.leaveVoice?.('removed');
       }
+      if (isStage(c)) revalidateStage(c);   // whoever lost the right to speak steps down
     }
   }
   const normOverwrites = (list) => JSON.stringify([...list].map((o) => ({ type: o.type, id: o.id, allow: [...o.allow].sort(), deny: [...o.deny].sort() })).sort((a, b) => ((a.type + a.id) < (b.type + b.id) ? -1 : 1)));
@@ -1051,7 +1054,7 @@ export function createApi() {
   /* --------------------------- messages --------------------------- */
   r.get('/channels/:id/messages', h(async (req, res) => {
     const ch = getChannel(req, req.params.id);
-    if (ch.type === 'voice' || ch.type === 'category' || ch.type === 'forum') return res.json({ messages: [], users: [], hasMore: false });
+    if (ch.type === 'voice' || ch.type === 'stage' || ch.type === 'category' || ch.type === 'forum') return res.json({ messages: [], users: [], hasMore: false });
     const list = db.messages[ch.id] || [];
     const limitN = clampInt(req.query.limit, 1, 100, 50);
     let slice; let hasMore = false;
@@ -1076,6 +1079,7 @@ export function createApi() {
     const ch = getChannel(req, req.params.id);
     if (ch.type === 'voice' && !ch.serverId) throw bad('Cannot post here');
     if (ch.type === 'category') throw bad('Cannot post to a category');
+    if (ch.type === 'stage') throw bad('A stage has no messages — it is for talking');
     if (ch.type === 'forum') throw bad('Start a post instead — a forum has no messages of its own', 'forum');
     if (ch.type === 'post' && ch.locked && !canIn(req.user.id, ch, 'MANAGE_MESSAGES') && ch.ownerId !== req.user.id) throw forbidden('This post is locked');
     const server = ch.serverId ? db.servers[ch.serverId] : null;

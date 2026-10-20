@@ -59,11 +59,12 @@ export function Avatar({ user, userId, src, name, size = 40, status, class: c, o
   useEffect(() => setBroken(false), [url]);
   const letter = (name || u?.displayName || '?').trim().slice(0, 1).toUpperCase();
   const stSize = Math.max(8, Math.round(size * 0.3));
+  const bg = u?.avatarBg ? `linear-gradient(${u.avatarBg.angle}deg, ${u.avatarBg.a}, ${u.avatarBg.b})` : avatarColor(id);   // each account's own random gradient
   return html`<span class=${cx('avatar', square && 'square', speaking && 'speaking', onClick && 'clickable', c)} style=${{ width: size + 'px', height: size + 'px', '--av': size + 'px' }} onClick=${onClick} onContextMenu=${onContextMenu} title=${title}>
     ${url && !broken
-      ? html`<img src=${url} alt="" draggable="false" loading="lazy" onError=${() => setBroken(true)} />`
-      : u?.bot || !(url !== undefined && url === null && name && !u) ? html`<span class="av-default" style=${{ background: avatarColor(id) }}><${Logo} size=${Math.round(size * 0.62)} bg="rgba(255,255,255,.92)" /></span>`
-        : html`<span class="av-default letter" style=${{ background: avatarColor(id), fontSize: size * 0.44 + 'px' }}>${letter}</span>`}
+      ? html`<img src=${url} alt="" draggable=${false} loading="lazy" onError=${() => setBroken(true)} />`
+      : u?.bot || !(url !== undefined && url === null && name && !u) ? html`<span class="av-default" style=${{ background: bg }}><${Logo} size=${Math.round(size * 0.62)} bg="rgba(255,255,255,.92)" /></span>`
+        : html`<span class="av-default letter" style=${{ background: bg, fontSize: size * 0.44 + 'px' }}>${letter}</span>`}
     ${status ? html`<${StatusDot} status=${status} size=${stSize} class="av-status" />` : null}
     ${children}
   </span>`;
@@ -76,7 +77,7 @@ export function ServerIcon({ server, size = 48, class: c }) {
   const [broken, setBroken] = useState(false);
   const acr = (server?.name || '?').split(/\s+/).map((w) => w[0]).join('').slice(0, 3);
   return html`<span class=${cx('server-icon', c)} style=${{ width: size + 'px', height: size + 'px', fontSize: Math.round(size * (acr.length > 2 ? 0.28 : 0.36)) + 'px' }}>
-    ${server?.icon && !broken ? html`<img src=${server.icon} alt="" draggable="false" onError=${() => setBroken(true)} />` : html`<span class="acr">${acr}</span>`}
+    ${server?.icon && !broken ? html`<img src=${server.icon} alt="" draggable=${false} onError=${() => setBroken(true)} />` : html`<span class="acr">${acr}</span>`}
   </span>`;
 }
 

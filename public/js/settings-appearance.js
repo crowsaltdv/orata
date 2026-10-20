@@ -153,13 +153,11 @@ export function EffectsPage() {
         <${SettingRow} title=${t('Frame rate')} desc=${t('30 FPS saves battery.')}><${Segmented} size="sm" options=${[{ value: 30, label: '30' }, { value: 60, label: '60' }]} value=${rain.fps} onChange=${(v) => setSetting('rain.fps', v)} /><//>
       </div>
     <//>
-    <${Section} title=${t('Liquid glass')} desc=${t('Apple-style glass for the whole interface — panels, menus, windows and buttons. The rims bend whatever is behind them.')}>
+    <${Section} title=${t('Liquid glass')} desc=${t('Glassy buttons and panels with bright, soft edges — drawn with plain CSS, so it is light on your device.')}>
       <div class="glass-demo"><button type="button" class="btn glass glass-buttons">${t('Primary')}</button><button type="button" class="icon-btn glass glass-toolbar"><${Icon} name="settings" size=${19} /></button><button type="button" class="btn glass glass-buttons"><${Icon} name="sparkles" size=${16} />${t('Explore')}</button><span class="rail-btn glass glass-rail" style="--s:46px"><${Icon} name="hash" size=${22} /></span></div>
-      <${SettingRow} title=${t('Enable liquid glass')} desc=${t('Off by default. Turn it on for glass everywhere, or pick which parts below.')}><${Toggle} checked=${g.style !== 'off'} onChange=${(on) => setSetting('glass.style', on ? (g.last === 'frosted' ? 'frosted' : 'liquid') : 'off')} /><//>
+      <${SettingRow} title=${t('Enable liquid glass')} desc=${t('Off by default. Turn it on for glass everywhere, or pick which parts below.')}><${Toggle} checked=${g.style !== 'off'} onChange=${(on) => setSetting('glass.style', on ? 'liquid' : 'off')} /><//>
       <div class=${cx(g.style === 'off' && 'dim')}>
-        <${SettingRow} title=${t('Style')}><${Segmented} size="sm" options=${[{ value: 'liquid', label: t('Liquid') }, { value: 'frosted', label: t('Frosted') }]} value=${g.style === 'off' ? (g.last || 'liquid') : g.style} onChange=${(v) => updateSettings({ glass: { style: v, last: v } })} /><//>
-        ${g.style === 'liquid' ? html`<div class="note-chip"><${Icon} name="info" size=${14} /> ${t('Liquid glass is drawn on the GPU (WebGL). If your browser can’t run it, glass falls back to a frosted look.')}</div>` : null}
-        <${SettingRow} title=${t('Intensity')} desc=${t('Refraction strength, reflection and rim light.')} stack><${SSlider} path="glass.intensity" scale=${100} min=${10} max=${100} format=${pct} /><//>
+        <${SettingRow} title=${t('Intensity')} desc=${t('How bright the glass edges and corner glow are.')} stack><${SSlider} path="glass.intensity" scale=${100} min=${10} max=${100} format=${pct} /><//>
         <h4 class="s-sub">${t('Apply to')}</h4>
         ${scopes.map(([k, l]) => html`<${SettingRow} title=${t(l)}><${SToggle} path=${'glass.' + k} /><//>`)}
       </div>

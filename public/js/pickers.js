@@ -6,6 +6,7 @@ import { POPOVERS, Spinner, Empty } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { loadEmoji, emojiData, searchEmoji, applyTone, frequentEmoji, allEmoji, setSkinTone } from '/js/emoji.js';
 import { t } from '/js/i18n.js';
+import { useFavGifs, toggleFavGif } from '/js/gif-favs.js';
 
 export function openPicker(anchor, handlers, opts = {}) {
   const h = typeof handlers === 'function' ? { onEmoji: handlers } : handlers;
@@ -23,7 +24,7 @@ const EmojiCell = memo(function EmojiCell({ char, label, code, onEmoji, onHover 
 });
 const CustomCell = memo(function CustomCell({ e, onEmoji, onHover }) {
   const token = `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`;
-  return html`<button type="button" class="emoji-cell custom" onMouseEnter=${() => onHover({ img: e.url, label: e.name, code: e.name })} onFocus=${() => onHover({ img: e.url, label: e.name, code: e.name })} onClick=${(ev) => onEmoji(token, ev)} aria-label=${e.name} title=${':' + e.name + ':'}><img src=${e.url} alt="" draggable="false" /></button>`;
+  return html`<button type="button" class="emoji-cell custom" onMouseEnter=${() => onHover({ img: e.url, label: e.name, code: e.name })} onFocus=${() => onHover({ img: e.url, label: e.name, code: e.name })} onClick=${(ev) => onEmoji(token, ev)} aria-label=${e.name} title=${':' + e.name + ':'}><img src=${e.url} alt="" draggable=${false} /></button>`;
 });
 function EmojiPreview({ api }) {
   const [hover, setHover] = useState(null);
@@ -73,15 +74,17 @@ function EmojiTab({ onEmoji }) {
 
 /* ------------------------------------------------------------------ gif / sticker tab */
 function Tile({ item, kind, onPick }) {
-  const p = item.preview; const ref = useRef(null);
+  const p = item.preview; const ref = useRef(null); const favs = useFavGifs(); const fav = favs.some((g) => g.id === String(item.id));
   useEffect(() => {
     const v = ref.current; if (!v || v.tagName !== 'VIDEO') return undefined;
     const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) v.play().catch(() => {}); else v.pause(); }, { threshold: 0.1 });
     io.observe(v); return () => io.disconnect();
   }, []);
-  return html`<button type="button" class=${cx('gif-tile', kind)} style=${{ aspectRatio: `${p.w} / ${p.h}` }} onClick=${() => onPick(item)} title=${item.title} aria-label=${item.title || 'GIF'}>
-    ${p.mp4 && kind === 'gifs' ? html`<video ref=${ref} src=${p.mp4} muted loop playsinline autoplay preload="metadata"></video>` : html`<img src=${p.url} alt=${item.title} loading="lazy" draggable="false" />`}
+  const tile = html`<button type="button" class=${cx('gif-tile', kind)} style=${kind === 'gifs' ? { height: '100%' } : { aspectRatio: `${p.w} / ${p.h}` }} onClick=${() => onPick(item)} title=${item.title} aria-label=${item.title || 'GIF'}>
+    ${p.mp4 && kind === 'gifs' ? html`<video ref=${ref} src=${p.mp4} muted loop playsinline autoplay preload="metadata"></video>` : html`<img src=${p.url} alt=${item.title} loading="lazy" draggable=${false} />`}
   </button>`;
+  if (kind !== 'gifs') return tile;
+  return html`<div class=${cx('gif-tile-wrap', fav && 'fav')} style=${{ aspectRatio: `${p.w} / ${p.h}` }}>${tile}<button type="button" class=${cx('gif-fav', fav && 'on')} aria-label=${fav ? t('Remove from Favorites') : t('Add to Favorites')} data-tip=${fav ? t('Remove from Favorites') : t('Add to Favorites')} onClick=${() => toggleFavGif(item)}><${Icon} name="star" size=${15} fill=${fav} /></button></div>`;
 }
 /** The stickers of every server you are in, filtered by the search box. */
 function ServerStickers({ term, onPick }) {
@@ -89,13 +92,13 @@ function ServerStickers({ term, onPick }) {
   const groups = Object.values(servers).map((sv) => ({ sv, list: (sv.stickers || []).filter((st) => !term || st.name.toLowerCase().includes(term.toLowerCase())) })).filter((g) => g.list.length);
   if (!groups.length) return null;
   return html`${groups.map(({ sv, list }) => html`<h4 class="gif-h" key=${'h' + sv.id}>${sv.name}</h4><div class="sticker-grid" key=${sv.id}>${list.map((st) => html`<button type="button" key=${st.id} class="gif-tile stickers custom" title=${st.name} aria-label=${st.name}
-    onClick=${() => onPick({ id: 's:' + st.id, title: st.name, w: 160, h: 160, preview: { url: st.url, w: 160, h: 160 }, full: { url: st.url }, custom: { serverId: sv.id, id: st.id } })}><img src=${st.url} alt=${st.name} draggable="false" /></button>`)}</div>`)}`;
+    onClick=${() => onPick({ id: 's:' + st.id, title: st.name, w: 160, h: 160, preview: { url: st.url, w: 160, h: 160 }, full: { url: st.url }, custom: { serverId: sv.id, id: st.id } })}><img src=${st.url} alt=${st.name} draggable=${false} /></button>`)}</div>`)}`;
 }
 function GifTab({ kind, initialQuery, onPick, noRemote }) {
   const [q, setQ] = useState(initialQuery || ''); const [term, setTerm] = useState(initialQuery || '');
   const [items, setItems] = useState([]); const [page, setPage] = useState(1); const [next, setNext] = useState(false);
   const [loading, setLoading] = useState(false); const [err, setErr] = useState(null); const [cats, setCats] = useState(null);
-  const scroller = useRef(null); const seq = useRef(0);
+  const scroller = useRef(null); const seq = useRef(0); const [showFavs, setShowFavs] = useState(false); const favs = useFavGifs();
   const stickers = kind === 'stickers';
   const setTermDebounced = useRef(debounce((v) => setTerm(v), 380)).current;
   const fetchPage = useCallback(async (pg, reset) => {
@@ -117,15 +120,17 @@ function GifTab({ kind, initialQuery, onPick, noRemote }) {
     for (const it of items) { const i = h[0] <= h[1] ? 0 : 1; c[i].push(it); h[i] += it.preview.h / it.preview.w; }
     return c;
   }, [items, stickers]);
-  const showCats = !term && cats?.length && !stickers;
+  const showCats = !term && cats?.length && !stickers && !showFavs;
+  const favCols = useMemo(() => { const c = [[], []]; const h = [0, 0]; for (const it of favs) { const i = h[0] <= h[1] ? 0 : 1; c[i].push(it); h[i] += it.preview.h / it.preview.w; } return c; }, [favs]);
   return html`<div class="gif-tab">
     <div class="picker-search"><${Icon} name="search" size=${16} /><input class="pk-input" placeholder=${stickers ? t('Search stickers') : t('Search KLIPY')} value=${q} onInput=${(e) => { setQ(e.target.value); setTermDebounced(e.target.value.trim()); }} autofocus />
       ${q ? html`<button type="button" class="pk-clear" onClick=${() => { setQ(''); setTerm(''); }}><${Icon} name="x" size=${14} /></button>` : null}</div>
     <div class="gif-scroll" ref=${scroller} onScroll=${onScroll}>
-      ${showCats ? html`<div class="gif-cats">${cats.slice(0, 20).map((c) => html`<button type="button" class="gif-cat" key=${c.name} onClick=${() => { setQ(c.query); setTerm(c.query); }} style=${{ backgroundImage: `url("${c.preview}")` }}><span>${c.name}</span></button>`)}</div><h4 class="gif-h">${t('Trending')}</h4>` : null}
+      ${!stickers && !term && showFavs ? html`<div class="gif-favhead"><button type="button" class="link-btn" onClick=${() => setShowFavs(false)}>← ${t('Back')}</button><h4 class="gif-h">${t('Favorites')}</h4></div>${favs.length ? html`<div class="masonry">${favCols.map((col, i) => html`<div class="mcol" key=${i}>${col.map((it) => html`<${Tile} key=${it.id} item=${it} kind=${kind} onPick=${onPick} />`)}</div>`)}</div>` : html`<${Empty} icon="star" title=${t('No favorites yet')}>${t('Press the star on a GIF to save it here.')}<//>`}` : null}
+      ${showCats ? html`<div class="gif-cats">${!stickers ? html`<button type="button" class="gif-cat fav-cat" key="__favs" onClick=${() => setShowFavs(true)} style=${favs[0] ? { backgroundImage: `url("${favs[0].preview.url}")` } : null}><span><${Icon} name="star" size=${14} fill=${true} /> ${t('Favorites')}</span></button>` : null}${cats.slice(0, 20).map((c) => html`<button type="button" class="gif-cat" key=${c.name} onClick=${() => { setQ(c.query); setTerm(c.query); }} style=${{ backgroundImage: `url("${c.preview}")` }}><span>${c.name}</span></button>`)}</div><h4 class="gif-h">${t('Trending')}</h4>` : null}
       ${stickers ? html`<${ServerStickers} term=${term} onPick=${onPick} />` : null}
       ${term && !noRemote ? html`<h4 class="gif-h">${t('Results for')} “${term}”</h4>` : null}
-      ${err ? html`<${Empty} icon="alert-circle" title=${t('GIFs unavailable')}>${err}<//>`
+      ${showFavs && !stickers && !term ? null : err ? html`<${Empty} icon="alert-circle" title=${t('GIFs unavailable')}>${err}<//>`
         : stickers ? html`<div class="sticker-grid">${items.map((it) => html`<${Tile} key=${it.id} item=${it} kind=${kind} onPick=${onPick} />`)}</div>`
           : html`<div class="masonry">${cols.map((col, i) => html`<div class="mcol" key=${i}>${col.map((it) => html`<${Tile} key=${it.id} item=${it} kind=${kind} onPick=${onPick} />`)}</div>`)}</div>`}
       ${!loading && !items.length && !err && !noRemote ? html`<${Empty} icon="search" title=${t('Nothing found')}>${t('Try another search.')}<//>` : null}

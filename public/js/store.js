@@ -148,7 +148,7 @@ export function addUsers(list) {
 }
 
 export function unreadInfo(channelId) {
-  const ch = getChannel(channelId); if (!ch || ch.type === 'voice' || ch.type === 'category') return { unread: false, mentions: 0 };
+  const ch = getChannel(channelId); if (!ch || ch.type === 'voice' || ch.type === 'stage' || ch.type === 'category') return { unread: false, mentions: 0 };
   const last = state.lastMsg[channelId]; const read = state.reads[channelId];
   const unread = !!last && (!read?.lastRead || cmpId(last, read.lastRead) > 0);
   return { unread, mentions: read?.mentions || 0 };

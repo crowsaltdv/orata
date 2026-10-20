@@ -74,7 +74,7 @@ export function renderMarkdown(src, opts = {}) {
       const role = state.servers[serverId]?.roles.find((r) => r.id === id);
       const c = role?.color; return put(`<span class="mention role" ${c ? `style="--mc:${c}"` : ''}>@${esc(role?.name || 'deleted-role')}</span>`);
     });
-    t = t.replace(/&lt;#(\d{6,20})&gt;/g, (_, id) => { const ch = getChannel(id); return put(ch ? `<span class="mention channel" data-channel="${id}" data-server="${ch.serverId || ''}" role="button" tabindex="0">${ch.type === 'voice' ? '🔊' : '#'}${esc(ch.name)}</span>` : '<span class="mention">#deleted-channel</span>'); });
+    t = t.replace(/&lt;#(\d{6,20})&gt;/g, (_, id) => { const ch = getChannel(id); return put(ch ? `<span class="mention channel" data-channel="${id}" data-server="${ch.serverId || ''}" role="button" tabindex="0">${ch.type === 'voice' ? '🔊' : ch.type === 'stage' ? '🎙️' : '#'}${esc(ch.name)}</span>` : '<span class="mention">#deleted-channel</span>'); });
     // custom emoji: the message carries their pictures (so people outside the server see them too)
     t = t.replace(/&lt;(a?):([A-Za-z0-9_]{2,32}):(\d{6,20})&gt;/g, (_, a, name, id) => {
       const e = (opts.emojis || []).find((x) => x.id === id) || emojiById(id);

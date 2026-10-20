@@ -132,9 +132,8 @@ html[data-mode="light"] .hl-k { color: #7c3aed; } html[data-mode="light"] .hl-s 
 .att-file { display: flex; align-items: center; gap: 14px; padding: 12px 14px; width: 380px; max-width: 100%; border-radius: 14px; background: var(--input-bg); border: 1px solid var(--border); transition: background var(--t-fast); }
 .att-file:hover { background: var(--active); } .att-file > .icon { color: var(--accent); flex: none; }
 .att-file-info { flex: 1; min-width: 0; display: flex; flex-direction: column; } .att-file-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .att-file-info span { font-size: 12px; color: var(--text-3); }
-.gif-wrap { position: relative; border-radius: 14px; overflow: hidden; cursor: pointer; margin-top: 4px; background: rgb(0 0 0 / .25); line-height: 0; transition: box-shadow var(--t-med); }
-.gif-wrap:hover { box-shadow: 0 10px 30px rgb(0 0 0 / .4); }
-.gif-wrap video, .gif-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gif-wrap { position: relative; max-width: 100%; border-radius: 0; cursor: pointer; margin-top: 4px; line-height: 0; }
+.gif-wrap video, .gif-wrap img { width: 100%; height: 100%; object-fit: contain; display: block; border-radius: 0; }
 .gif-badge { position: absolute; left: 8px; bottom: 8px; padding: 2px 7px; border-radius: 6px; background: rgb(0 0 0 / .65); color: #fff; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; line-height: 1.4; opacity: 0; transition: opacity var(--t-fast); }
 .gif-wrap:hover .gif-badge { opacity: 1; }
 .msg-sticker { width: 170px; height: 170px; object-fit: contain; margin-top: 4px; filter: drop-shadow(0 4px 10px rgb(0 0 0 / .3)); }
@@ -240,3 +239,11 @@ html[data-mode="light"] .hl-k { color: #7c3aed; } html[data-mode="light"] .hl-s 
 .media-chip .att-thumb img { object-fit: contain; }
 .media-chip .media-badge { position: absolute; left: 5px; bottom: 5px; padding: 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 800; letter-spacing: .05em; background: rgb(0 0 0 / .6); color: #fff; backdrop-filter: blur(4px); }
 .media-chip .att-acts { opacity: 1; }
+
+/* ------------------------------------------------ favorite GIFs */
+.gif-tile-wrap { position: relative; width: 100%; }
+.gif-fav { position: absolute; top: 6px; right: 6px; z-index: 3; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / .6); color: #fff; opacity: 0; transition: opacity var(--t-fast), transform var(--t-fast); line-height: 0; }
+.gif-fav:hover { transform: scale(1.12); background: rgb(0 0 0 / .8); } .gif-fav.on { color: #f5c542; opacity: 1; }
+.gif-tile-wrap:hover .gif-fav, .gif-wrap:hover .gif-fav, .gif-fav:focus-visible { opacity: 1; }
+.gif-favhead { display: flex; align-items: center; gap: 10px; } .gif-favhead .gif-h { margin: 6px 0; }
+.gif-cat.fav-cat { background-color: rgb(var(--accent-rgb) / .35); } .gif-cat.fav-cat span { display: inline-flex; align-items: center; gap: 6px; } .gif-cat.fav-cat .icon { color: #f5c542; }

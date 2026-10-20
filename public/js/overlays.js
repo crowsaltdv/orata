@@ -37,10 +37,10 @@ export function QuickSwitcher() {
     }
     if (!kind || kind === '#' || kind === '!') {
       for (const sv of Object.values(state.servers)) for (const c of sv.channels) {
-        if (c.type === 'category') continue; if (kind === '!' && c.type !== 'voice') continue; if (kind === '#' && c.type !== 'text') continue;
+        if (c.type === 'category') continue; if (kind === '!' && c.type !== 'voice' && c.type !== 'stage') continue; if (kind === '#' && c.type !== 'text') continue;
         const s = score(c.name, query); if (!s) continue;
         const u = unreadInfo(c.id);
-        out.push({ key: 'c' + c.id, kind: 'channel', s: s + (u.unread ? 12 : 0) + (state.route.channelId === c.id ? -30 : 0), title: c.name, sub: sv.name, icon: c.type === 'voice' ? 'volume' : 'hash', server: sv, run: () => goChannel(sv.id, c.id) });
+        out.push({ key: 'c' + c.id, kind: 'channel', s: s + (u.unread ? 12 : 0) + (state.route.channelId === c.id ? -30 : 0), title: c.name, sub: sv.name, icon: c.type === 'voice' ? 'volume' : c.type === 'stage' ? 'stage' : 'hash', server: sv, run: () => goChannel(sv.id, c.id) });
       }
     }
     if (!kind || kind === '*') for (const sv of Object.values(state.servers)) { const s = score(sv.name, query); if (s) out.push({ key: 's' + sv.id, kind: 'server', s: s + 5, title: sv.name, sub: `${sv.members.length} members`, server: sv, run: () => goChannel(sv.id, null) }); }
@@ -92,7 +92,7 @@ export function Lightbox() {
     ${items.length > 1 ? html`<button type="button" class="lb-nav prev" onClick=${() => nav(-1)} aria-label="Previous"><${Icon} name="chevron-left" size=${30} /></button><button type="button" class="lb-nav next" onClick=${() => nav(1)} aria-label="Next"><${Icon} name="chevron-right" size=${30} /></button>` : null}
     <div class="lb-stage">
       ${isVideo ? html`<video src=${cur.video || cur.url} autoplay loop controls class="lb-media"></video>`
-        : html`<img key=${cur.url} class="lb-media" src=${cur.url} alt=${cur.name} draggable="false" style=${{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${z})`, cursor: z > 1 ? 'grab' : 'zoom-in' }}
+        : html`<img key=${cur.url} class="lb-media" src=${cur.url} alt=${cur.name} draggable=${false} style=${{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${z})`, cursor: z > 1 ? 'grab' : 'zoom-in' }}
           onPointerDown=${(e) => { if (z > 1) { drag.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }; e.currentTarget.setPointerCapture(e.pointerId); } }}
           onPointerMove=${(e) => drag.current && setPan({ x: e.clientX - drag.current.x, y: e.clientY - drag.current.y })} onPointerUp=${() => (drag.current = null)}
           onDblClick=${() => { setZ(z > 1.4 ? 1 : 2.4); setPan({ x: 0, y: 0 }); }} />`}

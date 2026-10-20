@@ -40,7 +40,7 @@ export function NameText({ text, profile: p, class: c }) {
 /** The effect drawn over a profile card. Pauses when the tab is hidden and shows a still picture under Reduce motion. */
 export function ProfileEffect({ fx }) {
   const ref = useRef(null); const reduce = useSel((s) => s.settings.motion?.reduce);
-  useEffect(() => (ref.current ? startEffect(ref.current, fx, { reduce }) : undefined), [fx?.id, fx?.color, fx?.color2, fx?.density, fx?.speed, reduce]);
+  useEffect(() => (ref.current ? startEffect(ref.current, fx, { reduce }) : undefined), [fx?.id, fx?.color, fx?.color2, fx?.density, fx?.speed, fx?.opacity, reduce]);
   return html`<canvas class="pf-fx" ref=${ref} aria-hidden="true"></canvas>`;
 }
 
@@ -66,7 +66,7 @@ function Group({ title, on, onToggle, children, desc }) {
 /** One option of the effect gallery: its name with a live little preview below it. */
 function EffectOption({ id, name, on, fx, onPick }) {
   const ref = useRef(null); const reduce = useSel((s) => s.settings.motion?.reduce);
-  useEffect(() => (ref.current ? startEffect(ref.current, { ...fx, id }, { reduce, fps: 24, onlyWhenVisible: true, size: { width: 150, height: 84 } }) : undefined), [id, fx.color, fx.color2, fx.density, fx.speed, reduce]);
+  useEffect(() => (ref.current ? startEffect(ref.current, { ...fx, id }, { reduce, fps: 24, onlyWhenVisible: true, size: { width: 150, height: 84 } }) : undefined), [id, fx.color, fx.color2, fx.density, fx.speed, fx.opacity, reduce]);
   return html`<button type="button" class=${cx('ps-fx', on && 'on')} onClick=${onPick} aria-pressed=${on}><span class="ps-fx-name">${t(name)}</span><span class="ps-fx-view"><canvas ref=${ref} aria-hidden="true"></canvas></span></button>`;
 }
 /** Solid / gradient fill controls shared by the name color and the name outline. */
@@ -139,6 +139,7 @@ export function ProfileStyleEditor({ value, change, me }) {
       <${Group} title=${t('Profile effect')} desc=${t('Pick one above, then tune it here. Turn it off to remove it.')} on=${has(p, 'effect')} onToggle=${(v) => toggle('effect', v)}>
         <${Row} label=${t('Colors')}><${Swatch} value=${e?.color} onChange=${(v) => put('effect', { color: v })} label=${t('Effect color')} />${e?.color2 ? html`<${Swatch} value=${e.color2} onChange=${(v) => put('effect', { color2: v })} label=${t('Second color')} /><button type="button" class="link-btn" onClick=${() => put('effect', { color2: null })}>${t('Single color')}</button>` : html`<button type="button" class="link-btn" onClick=${() => put('effect', { color2: '#ec4899' })}>${t('Add a second color')}</button>`}<//>
         <${Row} label=${t('Amount')} wide=${true}><${Slider} value=${Math.round((e?.density ?? 0.6) * 100)} min=${10} max=${100} onChange=${(v) => put('effect', { density: v / 100 })} format=${(v) => v + '%'} /><//>
+        <${Row} label=${t('Opacity')} wide=${true}><${Slider} value=${Math.round((e?.opacity ?? 1) * 100)} min=${10} max=${100} onChange=${(v) => put('effect', { opacity: v / 100 })} format=${(v) => v + '%'} /><//>
         <${Row} label=${t('Speed')} wide=${true}><${Slider} value=${Math.round((e?.speed ?? 1) * 100)} min=${30} max=${250} step=${10} onChange=${(v) => put('effect', { speed: v / 100 })} format=${(v) => (v / 100).toFixed(1) + '×'} /><//>
       <//>` : null}
     ${p ? html`<div class="ps-foot"><${Btn} variant="ghost" icon="x" onClick=${() => change(() => null)}>${t('Remove all profile styling')}<//></div>` : null}

@@ -12,6 +12,7 @@ import { QuickSwitcher, Lightbox } from '/js/overlays.js';
 import { SettingsHost } from '/js/settings.js';
 import { ServerSettingsHost } from '/js/server-settings.js';
 import { VoiceChannelView } from '/js/voiceview.js';
+import { StageChannelView } from '/js/stageview.js';
 import { CallOverlay } from '/js/callui.js';
 import '/js/modals.js';
 import '/js/pickers.js';
@@ -31,7 +32,7 @@ function MainView() {
     case 'friends': return html`<${FriendsView} />`;
     case 'music': return html`<${MusicPage} />`;
     case 'dm': return html`<${ChatView} key=${chId} />`;
-    case 'channel': return chId ? (isVoice ? html`<${VoiceChannelView} key=${chId} />` : chType === 'forum' ? html`<${ForumView} key=${chId} />` : html`<${ChatView} key=${chId} />`) : html`<main class="main panel"></main>`;
+    case 'channel': return chId ? (isVoice ? html`<${VoiceChannelView} key=${chId} />` : chType === 'stage' ? html`<${StageChannelView} key=${chId} />` : chType === 'forum' ? html`<${ForumView} key=${chId} />` : html`<${ChatView} key=${chId} />`) : html`<main class="main panel"></main>`;
     default: return html`<${FriendsView} />`;
   }
 }

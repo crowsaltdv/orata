@@ -44,7 +44,7 @@ MODALS.crop = function CropModal({ id, file, aspect, out, round, title, resolve 
   const setZ = (z) => { const cx0 = frameW / 2; const cy0 = frameH / 2; const ratio = (base * z) / scale; setZoom(z); setPos(limit({ x: cx0 - (cx0 - pos.x) * ratio, y: cy0 - (cy0 - pos.y) * ratio }, z)); };
   return html`<${Modal} title=${title} width=${frameW + 60} onClose=${() => done(null)} footer=${html`<${Btn} variant="ghost" onClick=${() => done(null)}>Cancel<//><${Btn} variant="primary" loading=${busy} disabled=${!img} onClick=${apply}>Apply<//>`}>
     <div class=${`crop-frame ${round ? 'round' : ''}`} style=${{ width: frameW + 'px', height: frameH + 'px' }} onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${() => (drag.current = null)} onWheel=${(e) => { e.preventDefault(); setZ(clamp(zoom - e.deltaY * 0.0015, 1, 4)); }}>
-      ${img ? html`<img src=${url.current} draggable="false" alt="" style=${{ width: img.naturalWidth * scale + 'px', height: img.naturalHeight * scale + 'px', transform: `translate(${pos.x}px, ${pos.y}px)` }} />` : null}
+      ${img ? html`<img src=${url.current} draggable=${false} alt="" style=${{ width: img.naturalWidth * scale + 'px', height: img.naturalHeight * scale + 'px', transform: `translate(${pos.x}px, ${pos.y}px)` }} />` : null}
       ${round ? html`<div class="crop-ring"></div>` : null}
     </div>
     <div class="crop-zoom"><${Icon} name="image" size=${16} /><${Slider} value=${zoom} min=${1} max=${4} step=${0.01} onChange=${setZ} format=${(v) => v.toFixed(1) + '×'} /><${Icon} name="image" size=${22} /></div>

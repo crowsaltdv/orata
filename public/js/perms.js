@@ -4,7 +4,7 @@ export const PERM_INFO = {
   MANAGE_ROLES: ['Manage Roles', 'Create and edit roles below their own.'], MANAGE_MESSAGES: ['Manage Messages', 'Delete and pin other people’s messages.'], KICK_MEMBERS: ['Kick Members', 'Remove members (they can rejoin).'],
   BAN_MEMBERS: ['Ban Members', 'Permanently remove members.'], MANAGE_NICKNAMES: ['Manage Nicknames', 'Change other members’ nicknames.'], CREATE_INVITE: ['Create Invite', 'Invite new people.'],
   SEND_MESSAGES: ['Send Messages', 'Post in text channels.'], ATTACH_FILES: ['Attach Files', 'Upload images and files.'], ADD_REACTIONS: ['Add Reactions', 'React to messages.'], MENTION_EVERYONE: ['Mention @everyone', 'Notify the whole server.'],
-  CONNECT: ['Connect', 'Join voice channels.'], SPEAK: ['Speak', 'Talk in voice channels.'], CHANGE_NICKNAME: ['Change Nickname', 'Change their own nickname.'],
+  CONNECT: ['Connect', 'Join voice channels.'], SPEAK: ['Speak', 'Talk in voice channels, and ask to speak on a stage.'], CHANGE_NICKNAME: ['Change Nickname', 'Change their own nickname.'],
   VIEW_CHANNEL: ['View Channels', 'See channels and read their messages.'],
   MANAGE_EXPRESSIONS: ['Manage Expressions', 'Add, rename and delete the server’s custom emoji and stickers.'],
   MODERATE_MEMBERS: ['Timeout Members', 'Temporarily stop members from talking, reacting and joining voice.'],
@@ -26,6 +26,7 @@ export const CHANNEL_PERM_INFO = {
 export const CHANNEL_PERM_GROUPS = {
   text: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Text', ['SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES']]],
   voice: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Voice', ['CONNECT', 'SPEAK']]],
+  stage: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Stage', ['CONNECT', 'SPEAK']]],
   forum: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Posts', ['SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES']]],
   category: [['General', ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE']], ['Text', ['SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES']], ['Voice', ['CONNECT', 'SPEAK']]],
 };

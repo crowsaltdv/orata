@@ -16,7 +16,7 @@ function Video({ stream, muted, mirror, screen }) {
   return html`<video ref=${ref} autoplay playsinline muted=${muted} class=${cx(mirror && 'mirror', screen && 'screen')}></video>`;
 }
 
-function Tile({ uid, kind, stream, expanded, onExpand, avatarSize = 84 }) {
+export function Tile({ uid, kind, stream, expanded, onExpand, avatarSize = 84 }) {
   const u = useSel((s) => s.users[uid]);
   const st = useSel((s) => { for (const room of Object.values(s.voice.states)) if (room[uid]) return room[uid]; return null; });
   const speaking = useSel((s) => !!s.voice.speaking?.[uid]);
@@ -24,7 +24,7 @@ function Tile({ uid, kind, stream, expanded, onExpand, avatarSize = 84 }) {
   const mirror = uid === state.me.id && kind === 'camera' && state.local.voice.mirrorVideo;
   const hasVideo = !!stream && stream.getVideoTracks().some((t) => t.readyState === 'live');
   const name = u?.displayName || '…';
-  const menu = (e) => { e.preventDefault(); if (uid === state.me.id) return; openContext(e, [{ type: 'custom', render: () => html`<div class="vol-ctx"><small>${t('User volume')}</small><${Slider} value=${Math.round(getUserVolume(uid) * 100)} min=${0} max=${100} onChange=${(v) => setUserVolume(uid, v / 100)} format=${(v) => v + '%'} /></div>` }, { type: 'sep' }, { label: t('Profile'), icon: 'user', onClick: () => openProfile(uid) }]); void userMenu; };
+  const menu = (e) => { e.preventDefault(); if (uid === state.me.id) return; const stage = voice.stageMenu(uid); openContext(e, [{ type: 'custom', render: () => html`<div class="vol-ctx"><small>${t('User volume')}</small><${Slider} value=${Math.round(getUserVolume(uid) * 100)} min=${0} max=${100} onChange=${(v) => setUserVolume(uid, v / 100)} format=${(v) => v + '%'} /></div>` }, { type: 'sep' }, { label: t('Profile'), icon: 'user', onClick: () => openProfile(uid) }, ...(stage.length ? [{ type: 'sep' }, ...stage] : [])]); void userMenu; };
   return html`<div class=${cx('tile', speaking && !st?.muted && kind !== 'screen' && 'speaking', expanded && 'expand')} onDblClick=${onExpand} onContextMenu=${menu}>
     ${hasVideo ? html`<${Video} stream=${stream} muted=${uid === state.me.id} mirror=${mirror} screen=${kind === 'screen'} />` : html`<${Avatar} user=${u} size=${avatarSize} />`}
     <span class="tile-name">${kind === 'screen' ? html`<${Icon} name="monitor" size=${14} />` : null}${kind === 'screen' ? `${name}${t('’s screen')}` : name}${st?.muted && kind !== 'screen' ? html`<${Icon} name=${st.deafened ? 'headphones-off' : 'mic-off'} size=${14} />` : null}</span>
@@ -79,10 +79,11 @@ function FitGrid({ tiles, big, setBig, className }) {
   return html`<div class=${cx('fit-grid', className)} ref=${ref} style=${{ '--cols': cols, '--rows': rows, '--gap': gap + 'px' }}>${tiles.map((x) => html`<${Tile} key=${x.key} uid=${x.uid} kind=${x.kind} stream=${x.stream} avatarSize=${avatar} expanded=${big === x.key} onExpand=${() => setBig(big === x.key ? null : x.key)} />`)}</div>`;
 }
 
-function Grid({ chId }) {
+/** The tiles of a room (or, with `uids`, of just those people — the speakers of a stage). */
+export function Grid({ chId, uids }) {
   const room = useSel((s) => s.voice.states[chId]); useSel((s) => s.voice.rev);
   const [big, setBig] = useState(null);
-  const ids = Object.keys(room || {});
+  const ids = uids || Object.keys(room || {});
   const tiles = [];
   for (const uid of ids) {
     const e = streamStore.byUser.get(uid) || {};

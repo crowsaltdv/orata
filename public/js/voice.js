@@ -1,7 +1,9 @@
 // Orate — voice, video & screen share. WebRTC full mesh, signalled over the gateway ("perfect negotiation").
-import { state, set, toast, getChannel, notify } from '/js/store.js';
+// On a stage channel only the speakers send audio: the audience connects to the speakers and nobody else, and a promotion starts the mic and the missing links.
+import { state, set, toast, getChannel, notify, hasPerm, hasChannelPerm } from '/js/store.js';
 import { gateway, api } from '/js/api.js';
 import { playSound } from '/js/sound.js';
+import { t } from '/js/i18n.js';
 
 // ICE servers come from the server (/api/ice) so STUN/TURN is configured in .env; this is the offline fallback.
 let ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], iceCandidatePoolSize: 4 };
@@ -40,7 +42,7 @@ export function createMeter(stream, onLevel) {
 /* ------------------------------------------------------------------ session state */
 const S = {
   channelId: null, audioCtx: null, mic: null, micSrc: null, gain: null, gate: null, analyser: null, dest: null, outTrack: null,
-  camera: null, screen: null, peers: new Map(), remoteAudio: new Map(), remoteMeters: new Map(), speakTimer: null, pttDown: false, userVol: {}, meta: {},
+  camera: null, screen: null, stage: false, roles: new Map(), peers: new Map(), remoteAudio: new Map(), remoteMeters: new Map(), speakTimer: null, pttDown: false, userVol: {}, meta: {},
 };
 export const streamStore = { version: 0, byUser: new Map() }; // userId -> { camera, screen, audio }
 const bump = () => { streamStore.version++; notify(); set({ voice: { ...state.voice, rev: streamStore.version } }); };
@@ -77,6 +79,31 @@ async function startMic() {
   S.outTrack = S.dest.stream.getAudioTracks()[0];
   applyMute();
   startSpeakingLoop();
+}
+/** Stage: who may bring people up and down — whoever manages the channel or moderates members. */
+export function isStageMod(ch) { return !!ch && (hasChannelPerm(ch, 'MANAGE_CHANNELS') || hasPerm(ch.serverId, 'MODERATE_MEMBERS')); }
+function stopMic() {
+  S.mic?.getTracks().forEach((tr) => tr.stop()); S.mic = null;
+  try { S.audioCtx?.close(); } catch { /* ignore */ }
+  Object.assign(S, { audioCtx: null, micSrc: null, gain: null, gate: null, analyser: null, dest: null, outTrack: null });
+  const sp = { ...(state.voice.speaking || {}) }; if (sp[me()]) { sp[me()] = false; set({ voice: { ...state.voice, speaking: sp } }); }
+}
+/** Walks onto the stage: starts the microphone (muted until you unmute) and reaches out to everybody in the room. */
+async function becomeSpeaker() {
+  patchConn({ speaker: true, noMic: false, muted: true });   // on stage you start muted, whatever the audience did
+  if (!S.mic) await startMic();
+  if (!S.stage || !state.voice.conn) return;
+  if (S.outTrack) for (const p of S.peers.values()) if (!p.senders.audio) p.senders.audio = p.pc.addTrack(S.outTrack, S.dest.stream);
+  for (const uid of S.roles.keys()) if (uid !== me() && !S.peers.has(uid)) getPeer(uid);
+  applyMute();
+}
+/** Steps down: stops sending, and keeps only the links to the speakers. */
+function becomeAudience() {
+  stopCamera(); stopScreen();
+  for (const p of S.peers.values()) if (p.senders.audio) { try { p.pc.removeTrack(p.senders.audio); } catch { /* ignore */ } p.senders.audio = null; }
+  stopMic();
+  patchConn({ speaker: false, muted: true, video: false, screen: false });
+  for (const uid of [...S.peers.keys()]) if (!S.roles.get(uid)) dropPeer(uid);
 }
 function applyMute() {
   const c = state.voice.conn; if (!c || !S.outTrack) return;
@@ -198,7 +225,7 @@ function teardown() {
   for (const uid of [...S.peers.keys()]) dropPeer(uid);
   for (const k of ['camera', 'screen', 'mic']) { S[k]?.getTracks().forEach((t) => t.stop()); S[k] = null; }
   try { S.audioCtx?.close(); } catch { /* ignore */ }
-  Object.assign(S, { audioCtx: null, micSrc: null, gain: null, gate: null, analyser: null, dest: null, outTrack: null, channelId: null, meta: {} });
+  Object.assign(S, { audioCtx: null, micSrc: null, gain: null, gate: null, analyser: null, dest: null, outTrack: null, channelId: null, meta: {}, stage: false, roles: new Map() });
   warned.clear(); streamStore.byUser.clear(); set({ voice: { ...state.voice, speaking: {}, links: {}, conn: null } }); bump();
 }
 
@@ -208,15 +235,17 @@ export const voice = {
     const ch = getChannel(channelId); if (!ch) return;
     if (state.voice.conn?.channelId === channelId) return;
     if (state.voice.conn) teardown();
-    S.channelId = channelId;
-    set({ voice: { ...state.voice, conn: { channelId, muted: !!state.local.voice.joinMuted, deafened: false, video: false, screen: false, status: 'connecting' } } });
-    await Promise.all([startMic(), loadIce()]);
+    S.channelId = channelId; S.stage = ch.type === 'stage'; S.roles = new Map();
+    set({ voice: { ...state.voice, conn: { channelId, muted: S.stage || !!state.local.voice.joinMuted, deafened: false, video: false, screen: false, status: 'connecting', stage: S.stage, speaker: false } } });
+    if (S.stage) startSpeakingLoop();   // the audience has no microphone, but still shows who is talking
+    await Promise.all([S.stage ? null : startMic(), loadIce()]);
     if (S.channelId !== channelId) return;
     gateway.send('voice_join', { channelId, muted: !!state.voice.conn?.muted });
   },
   leave() { if (!state.voice.conn) return; gateway.send('voice_leave'); teardown(); playSound('leave'); },
   toggleMute() {
     const c = state.voice.conn;
+    if (c?.stage && !c.speaker) { voice.toggleHand(); return; }   // in the audience the microphone button asks to speak
     if (!c) { set({ local: { ...state.local, voice: { ...state.local.voice, joinMuted: !state.local.voice.joinMuted } } }); playSound(state.local.voice.joinMuted ? 'mute' : 'unmute'); return; }
     if (c.noMic && !S.mic) { startMic().then(() => { if (S.mic) { patchConn({ muted: false, noMic: false }); applyMute(); for (const p of S.peers.values()) if (S.outTrack && !p.senders.audio) p.senders.audio = p.pc.addTrack(S.outTrack, S.dest.stream); } }); return; }
     if (c.deafened) { patchConn({ deafened: false, muted: false }); gateway.send('voice_update', { deafened: false, muted: false }); playSound('undeafen'); applyMute(); refreshOutputs(); return; }
@@ -227,7 +256,7 @@ export const voice = {
     const deafened = !c.deafened; patchConn({ deafened, muted: deafened ? true : false }); gateway.send('voice_update', { deafened, muted: deafened ? true : false }); applyMute(); refreshOutputs(); playSound(deafened ? 'deafen' : 'undeafen');
   },
   async toggleCamera() {
-    const c = state.voice.conn; if (!c) return;
+    const c = state.voice.conn; if (!c || (c.stage && !c.speaker)) return;
     if (S.camera) { stopCamera(); return; }
     if (needsSecure()) { toast(needsSecure(), 'error', 6000); return; }
     try {
@@ -238,7 +267,7 @@ export const voice = {
     } catch (e) { toast(e.name === 'NotAllowedError' ? 'Camera permission was denied' : 'Couldn’t start your camera', 'error'); }
   },
   async toggleScreen() {
-    const c = state.voice.conn; if (!c) return;
+    const c = state.voice.conn; if (!c || (c.stage && !c.speaker)) return;
     if (S.screen) { stopScreen(); return; }
     if (!navigator.mediaDevices?.getDisplayMedia) { toast(needsSecure() || 'Your browser can’t share its screen.', 'error', 6000); return; }
     try {
@@ -249,6 +278,22 @@ export const voice = {
     } catch (e) { if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast('Couldn’t start screen sharing', 'error'); }
   },
   micLevel: () => (S.analyser ? level(S.analyser) : 0),
+  /** Stage: raise or lower your hand to ask for the microphone. */
+  toggleHand() {
+    const c = state.voice.conn; if (!c?.stage || c.speaker) return;
+    const ch = getChannel(c.channelId); if (ch && !hasChannelPerm(ch, 'SPEAK')) { toast('You don’t have permission to speak on this stage.', 'error', 4000); return; }
+    const up = !state.voice.states[c.channelId]?.[me()]?.hand;
+    gateway.send('voice_update', { hand: up }); playSound(up ? 'unmute' : 'mute');
+    if (up) toast(t('Hand raised — a moderator can invite you to speak'), 'info', 2800);
+  },
+  /** Stage: bring someone up to speak (moderators) or send a speaker back to the audience (moderators, or yourself). */
+  setSpeaker(uid, on) { gateway.send('stage_speaker', { userId: uid, speaker: on }); },
+  /** Stage: the moderator actions for one person, as context-menu items. */
+  stageMenu(uid) {
+    const c = state.voice.conn; const ch = c && getChannel(c.channelId); if (ch?.type !== 'stage') return [];
+    const st = state.voice.states[ch.id]?.[uid]; if (!st || !isStageMod(ch)) return [];
+    return st.speaker ? (uid === me() ? [] : [{ label: t('Move to Audience'), icon: 'users', onClick: () => voice.setSpeaker(uid, false) }]) : [{ label: t('Invite to Speak'), icon: 'mic', onClick: () => voice.setSpeaker(uid, true) }];
+  },
 };
 function stopCamera() {
   if (!S.camera) return; const tr = S.camera.getTracks(); tr.forEach((t) => t.stop());
@@ -262,10 +307,27 @@ function stopScreen() {
 }
 
 /* ------------------------------------------------------------------ gateway wiring */
-gateway.on('voice_joined', ({ channelId, peers }) => {
+gateway.on('voice_joined', async ({ channelId, peers, states }) => {
   if (state.voice.conn?.channelId !== channelId) return;
-  patchConn({ status: 'connected' }); playSound('join'); applyMute();
+  patchConn({ status: 'connected' }); playSound('join');
+  if (S.stage) {
+    S.roles = new Map((states || []).map((s) => [s.userId, !!s.speaker]));
+    if (S.roles.get(me())) { toast(t('You’re on stage — unmute to speak'), 'success', 3500); await becomeSpeaker(); }
+    else if (S.mic || state.voice.conn?.speaker) becomeAudience();
+    if (S.channelId !== channelId) return;
+  }
+  applyMute();
   for (const uid of peers) if (uid !== me()) getPeer(uid);
+});
+/** Stage: people moving between the audience and the stage. Listeners link to speakers only. */
+gateway.on('voice_state_update', ({ channelId, userId, state: st }) => {
+  if (!S.stage || channelId !== S.channelId) return;
+  if (!st) { S.roles.delete(userId); return; }
+  const was = S.roles.get(userId); const now = !!st.speaker; S.roles.set(userId, now);
+  if (userId === me()) {
+    if (now && !was) { playSound('join'); toast(t('You’re on stage — unmute to speak'), 'success', 3500); becomeSpeaker(); }
+    else if (!now && was) { toast(t('You moved to the audience'), 'info', 3000); becomeAudience(); }
+  } else if (was && !now && !S.roles.get(me())) dropPeer(userId);   // a speaker became a listener: two listeners don’t connect
 });
 gateway.on('voice_signal', onSignal);
 gateway.on('voice_peer_left', ({ channelId, userId }) => { if (S.channelId === channelId) dropPeer(userId); });
@@ -277,6 +339,7 @@ gateway.on('ready', async () => { // reconnected: the server forgot our voice st
   const c = state.voice.conn; if (!c) return;
   await loadIce();
   for (const uid of [...S.peers.keys()]) dropPeer(uid);
+  S.roles = new Map();
   gateway.send('voice_join', { channelId: c.channelId, muted: c.muted, deafened: c.deafened, video: c.video });
 });
 // push-to-talk

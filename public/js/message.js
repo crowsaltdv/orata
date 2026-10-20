@@ -12,6 +12,7 @@ import { t } from '/js/i18n.js';
 import { InviteCard, inviteCodeOf } from '/js/invite-card.js';
 import { PollView } from '/js/polls.js';
 import { ThemeCard } from '/js/theme-card.js';
+import { useFavGifs, toggleFavGif, gifFromMessage } from '/js/gif-favs.js';
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -57,7 +58,7 @@ function Attachment({ a, onImage }) {
   if (isImg) {
     const w = a.width || 400; const h = a.height || 300; const scale = Math.min(1, 420 / w, 340 / h);
     return html`<div class=${cx('att-img-wrap', !revealed && 'spoilered')} style=${a.width ? { width: Math.round(w * scale) + 'px', aspectRatio: `${w} / ${h}` } : null} onClick=${() => (revealed ? onImage(a) : setRevealed(true))}>
-      <img class="att-img" src=${a.url} alt=${a.name} loading="lazy" draggable="false" />${!revealed ? html`<span class="spoiler-cover">SPOILER</span>` : null}</div>`;
+      <img class="att-img" src=${a.url} alt=${a.name} loading="lazy" draggable=${false} />${!revealed ? html`<span class="spoiler-cover">SPOILER</span>` : null}</div>`;
   }
   if (a.type?.startsWith('video/')) return html`<video class="att-video" src=${a.url} controls preload="metadata" playsinline></video>`;
   if (a.type?.startsWith('audio/')) return html`<div class="att-audio"><div class="att-audio-head"><${Icon} name="music" size=${18} /><span>${a.name}</span><small>${fileSize(a.size)}</small></div><audio src=${a.url} controls preload="metadata"></audio></div>`;
@@ -66,11 +67,12 @@ function Attachment({ a, onImage }) {
     <a class="icon-btn" href=${a.url} download=${a.name} data-tip="Download" aria-label="Download"><${Icon} name="download" size=${19} /></a></div>`;
 }
 function GifMedia({ g, onImage }) {
-  const w = Math.min(g.w || 280, 360); const h = Math.round(w * ((g.h || 200) / (g.w || 280)));
-  const autoplay = state.settings.chat.gifAutoplay;
-  return html`<div class="gif-wrap" style=${{ width: w + 'px', aspectRatio: `${g.w || 280} / ${g.h || 200}`, maxHeight: '320px' }} onClick=${() => onImage({ url: g.gif || g.url, name: g.title || 'GIF', video: g.mp4 })}>
+  // the whole GIF, at its own proportions (never cropped or rounded): as big as it is, up to 440 × 380
+  const gw = g.w || 280; const gh = g.h || 200; const k = Math.min(1, 440 / gw, 380 / gh); const w = Math.max(60, Math.round(gw * k));
+  const autoplay = state.settings.chat.gifAutoplay; const favs = useFavGifs(); const fav = favs.some((x) => x.id === String(g.id));
+  return html`<div class=${cx('gif-wrap', fav && 'fav')} style=${{ width: w + 'px', aspectRatio: `${gw} / ${gh}` }} onClick=${() => onImage({ url: g.gif || g.url, name: g.title || 'GIF', video: g.mp4 })}>
     ${g.mp4 && autoplay ? html`<video src=${g.mp4} poster=${g.poster} autoplay loop muted playsinline preload="metadata" aria-label=${g.title}></video>` : html`<img src=${autoplay ? (g.gif || g.url) : (g.poster || g.url)} alt=${g.title || 'GIF'} loading="lazy" />`}
-    <span class="gif-badge">GIF</span></div>`;
+    <span class="gif-badge">GIF</span>${g.id ? html`<button type="button" class=${cx('gif-fav', fav && 'on')} aria-label=${fav ? t('Remove from Favorites') : t('Add to Favorites')} data-tip=${fav ? t('Remove from Favorites') : t('Add to Favorites')} onClick=${(e) => { e.stopPropagation(); toggleFavGif(gifFromMessage(g)); }}><${Icon} name="star" size=${15} fill=${fav} /></button>` : null}</div>`;
 }
 
 /* ------------------------------------------------------------------ reactions */
@@ -79,7 +81,7 @@ const CUSTOM_KEY = /^<(a?):([A-Za-z0-9_]{2,32}):(\d{6,20})>$/;
 function ReactionEmoji({ emoji, m }) {
   const c = CUSTOM_KEY.exec(emoji); if (!c) return html`<span class="r-emoji">${emoji}</span>`;
   const e = (m.emojis || []).find((x) => x.id === c[3]) || emojiById(c[3]);
-  return e ? html`<img class="r-emoji emoji custom" src=${e.url} alt=${`:${c[2]}:`} draggable="false" />` : html`<span class="r-emoji">:${c[2]}:</span>`;
+  return e ? html`<img class="r-emoji emoji custom" src=${e.url} alt=${`:${c[2]}:`} draggable=${false} />` : html`<span class="r-emoji">:${c[2]}:</span>`;
 }
 function Reactions({ m, ch }) {
   const entries = Object.entries(m.reactions || {}); const me = state.me.id;

@@ -130,7 +130,7 @@ function PostCard({ post, forum, onOpen }) {
       <div class="pc-foot"><${Avatar} user=${owner} size=${20} /><b>${nameOf(post.ownerId, forum.serverId)}</b><span>· ${relTime(post.createdAt)}</span><span class="pc-sp"></span>
         <span class="pc-stat"><${Icon} name="message" size=${14} /> ${post.messageCount} ${post.messageCount === 1 ? t('reply') : t('replies')}</span><span class="pc-stat">${t('Active')} ${relTime(post.lastActivity)}</span></div>
     </div>
-    ${post.image ? html`<img class="pc-thumb" src=${post.image} alt="" loading="lazy" draggable="false" />` : null}
+    ${post.image ? html`<img class="pc-thumb" src=${post.image} alt="" loading="lazy" draggable=${false} />` : null}
   </button>`;
 }
 export function ForumView() {
