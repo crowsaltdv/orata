@@ -182,7 +182,7 @@ function Vanity({ server }) {
   const left = server.vanity ? server.vanity.changedAt + VANITY_WAIT - Date.now() : 0;
   if (!admin && !cur) return null;
   const save = async () => { setBusy(true); await act(api.put(`/servers/${server.id}/vanity`, { code: v }), { success: t('Custom invite link saved') }); setBusy(false); };
-  return html`<${Section} title=${t('Custom invite link')} desc=${t('One easy link for the whole server that never expires. Only admins can set it, and it can be changed once every 7 days.')}>
+  return html`<${Section} title=${t('Custom invite link')} desc=${t('One easy link for the whole server that never expires. Only admins can set it, it can be changed once every 7 days, and each person can have a custom link on one server only.')}>
     ${cur ? html`<div class="il-box vanity-box"><span class="il-url">${inviteUrl(cur)}</span><${Btn} size="sm" variant="primary" icon="copy" onClick=${async () => { await copyText(inviteUrl(cur)); toast('Link copied', 'success', 1400); }}>${t('Copy')}<//></div>` : null}
     ${admin ? html`<div class="vanity-row"><span class="vanity-prefix">${location.host}/invite/</span><input class="input vanity-input" value=${v} maxlength="32" placeholder="my-server" aria-label=${t('Custom invite link')} disabled=${left > 0}
         onInput=${(e) => setV(e.target.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))} onKeyDown=${(e) => e.key === 'Enter' && v && v !== cur && left <= 0 && save()} />

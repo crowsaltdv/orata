@@ -918,11 +918,18 @@ export function createApi() {
     if (code === s.vanity?.code) return res.json(s.vanity);
     const left = (s.vanity?.changedAt || 0) + VANITY_WAIT - Date.now();
     if (left > 0) throw new ApiError(429, `The custom link can be changed once every 7 days. Try again in ${formatDuration(left)}.`, 'vanity_wait');
+    // one person, one server with a custom link: "a person" is every account used in the same browser (the browser id kept for bans)
+    const mine = deviceHashesOf(req.user, requestHashes(req));
+    const other = Object.values(db.servers).find((t) => t.id !== s.id && t.vanity && (() => {
+      const by = db.users[t.vanity.by || db.invites[t.vanity.code]?.inviterId];
+      return by && (by.id === req.user.id || [...deviceHashesOf(by)].some((x) => mine.has(x)));
+    })());
+    if (other) throw new ApiError(403, `You already set a custom invite link for ${other.name}. Each person can have one server with a custom link.`, 'vanity_limit');
     if (Object.keys(db.invites).some((k) => k.toLowerCase() === code)) throw bad('That link is already taken', 'code');
     if (db.invites[s.vanity?.code]?.vanity) delete db.invites[s.vanity.code];   // the old link stops working
     db.invites[code] = { code, serverId: s.id, inviterId: req.user.id, createdAt: Date.now(), uses: 0, maxUses: 0, expiresAt: null, vanity: true };
     audit(s, req.user.id, 'vanity_update', { code, old: s.vanity?.code || null });
-    s.vanity = { code, changedAt: Date.now() };
+    s.vanity = { code, changedAt: Date.now(), by: req.user.id };
     save(); pushServerUpdate(s); res.json(s.vanity);
   }));
 

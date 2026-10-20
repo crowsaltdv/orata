@@ -585,7 +585,7 @@ async function main() {
   r = await api('GET', '/invites/BOT-GUILD', MB.token); ok(r.status === 200 && r.body.server.id === BG.id, 'the link works however it is typed');
   r = await api('POST', '/invites/bot-guild/join', MB.token); ok(r.status === 200 && r.body.id === BG.id, 'and anyone can join with it');
   r = await api('PUT', `/servers/${BG.id}/vanity`, A.token, { code: 'bot-guild-2' }); ok(r.status === 429 && r.body.code === 'vanity_wait' && /6 days/.test(r.body.error), 'it can only be changed once every 7 days');
-  r = await api('PUT', `/servers/${CG.id}/vanity`, A.token, { code: 'bot-guild' }); ok(r.status === 400 && /taken/.test(r.body.error), 'two servers can’t have the same link');
+  r = await api('PUT', `/servers/${CG.id}/vanity`, CO.token, { code: 'bot-guild' }); ok(r.status === 400 && /taken/.test(r.body.error), 'two servers can’t have the same link');
   r = await api('DELETE', '/invites/bot-guild', A.token); ok(r.status === 403, 'it can’t be deleted like an ordinary invite');
   r = await api('GET', `/servers/${BG.id}/invites`, A.token); ok(!r.body.some((i) => i.code === 'bot-guild'), 'it isn’t listed with the ordinary invites');
   await stopServer();
@@ -593,6 +593,11 @@ async function main() {
   fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(vj)); startServer(); await ready();
   r = await api('PUT', `/servers/${BG.id}/vanity`, A.token, { code: 'bot-guild-2' }); ok(r.status === 200 && r.body.code === 'bot-guild-2', 'a week later it can be changed');
   r = await api('GET', '/invites/bot-guild', MB.token); ok(r.status === 404, '… and the old link stops working');
+  r = await api('PUT', `/servers/${CG.id}/vanity`, A.token, { code: 'co-guild' }); ok(r.status === 403 && r.body.code === 'vanity_limit' && r.body.error.includes('Bot Guild'), 'one person can have a custom link on one server only');
+  const VX = await register('vanityx', { dev: 'device-vanityvanity01', ip: '192.0.2.241' }); const VY = await register('vanityy', { dev: 'device-vanityvanity01', ip: '192.0.2.242' });
+  const VXS = (await api('POST', '/servers', VX.token, { name: 'X Guild' }, { 'x-forwarded-for': '192.0.2.241' })).body; const VYS = (await api('POST', '/servers', VY.token, { name: 'Y Guild' }, { 'x-forwarded-for': '192.0.2.242' })).body;
+  r = await api('PUT', `/servers/${VXS.id}/vanity`, VX.token, { code: 'x-guild' }); ok(r.status === 200, 'someone else can set one for their own server');
+  r = await api('PUT', `/servers/${VYS.id}/vanity`, VY.token, { code: 'y-guild' }); ok(r.status === 403 && r.body.code === 'vanity_limit' && r.body.error.includes('X Guild'), '… but another account on the same browser counts as the same person');
   r = await api('GET', `/servers/${BG.id}/audit-log?action=vanity_`, A.token); ok(r.body.entries.length === 2 && r.body.entries[0].details.old === 'bot-guild', 'changes are in the audit log');
 
   /* ---------------------------------------------------------------- accounts per browser */
