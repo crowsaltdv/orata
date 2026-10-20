@@ -57,16 +57,23 @@ export function deviceHash(id) {
   if (!db.ipSecret) { db.ipSecret = crypto.randomBytes(24).toString('hex'); save(); }
   return 'dv' + crypto.createHmac('sha256', db.ipSecret).update('dev:' + v).digest('hex').slice(0, 22);
 }
+/** The ids a browser carries: the header the page sends and its first-party cookie (the page keeps both in step, so clearing just one of them does not make it a new browser). */
+function cookieValue(req, name) {
+  const m = String(req?.headers?.cookie || '').match(new RegExp('(?:^|;\\s*)' + name + '=([^;]*)'));
+  if (!m) return '';
+  try { return decodeURIComponent(m[1]); } catch { return ''; }
+}
+export const deviceHashes = (req) => [...new Set([deviceHash(req?.headers?.['x-orate-device']), deviceHash(cookieValue(req, 'orate_dev'))].filter(Boolean))];
 const remember = (user, field, h, max) => {
   const now = Date.now(); const list = (user[field] ||= []); const hit = list.find((x) => x.h === h);
   if (hit) { if (now - hit.at > 6 * 3600_000) { hit.at = now; save(); } return; }
   list.unshift({ h, at: now }); if (list.length > max) list.length = max; save();
 };
-/** Remembers (as hashes) the network and the browser this account just used; at most 8 + 6, refreshed at most every 6 hours. Used only to find ban evaders and alts. */
+/** Remembers (as hashes) the network and the browser this account just used; at most 8 + 8, refreshed at most every 6 hours. Used only to find ban evaders and alts. */
 export function noteIp(user, req) {
   if (!user) return;
   const h = ipHash(clientIp(req)); if (h) remember(user, 'ips', h, 8);
-  const d = deviceHash(req?.headers?.['x-orate-device']); if (d) remember(user, 'devs', d, 6);
+  for (const d of deviceHashes(req)) remember(user, 'devs', d, 8);
 }
 /** Everything that links an account to others: its recent networks and browsers (plus `extra`, e.g. the one it is using right now). */
 export const userIpHashes = (user, extra = null) => {
@@ -76,7 +83,7 @@ export const userIpHashes = (user, extra = null) => {
   return out;
 };
 /** The hashes of the connection this request came on: its network and its browser. */
-export const requestHashes = (req) => [ipHash(clientIp(req)), deviceHash(req?.headers?.['x-orate-device'])].filter(Boolean);
+export const requestHashes = (req) => [ipHash(clientIp(req)), ...deviceHashes(req)].filter(Boolean);
 
 /* ---------------------------------------------------------------- db: files in data/ (default) or PostgreSQL (DATABASE_URL) */
 export const pg = ENV.DATABASE_URL ? new PgStore(ENV.DATABASE_URL, ENV) : null;

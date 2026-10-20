@@ -241,15 +241,19 @@ export function createApi() {
       emailVerified: true,   // new accounts are verified: either verification is off, or they typed the emailed code
     };
     db.users[id] = user; byUsername.set(username, id); if (email) byEmail.set(email, id);
+    noteIp(user, req);   // the browser and network this account starts on: the ban check below needs them
 
-    // First user owns the shared community server; everybody after joins it.
-    let community = db.defaultServerId && db.servers[db.defaultServerId];
+    // First user owns the shared community server; everybody after joins it — unless they are banned there from this browser (or network).
+    let community = db.defaultServerId && db.servers[db.defaultServerId]; let inCommunity = true;
     if (!community) {
       community = createServer(user, { name: 'Orate Community', template: 'community' });
       community.description = 'The default hangout for everyone on this Orate instance.';
       db.defaultServerId = community.id;
+    } else if (isBannedFrom(community, user, req)) {
+      inCommunity = false;
     } else {
       addMember(community, user);
+      linkedTimeout(community, id, userIpHashes(user, requestHashes(req)));   // someone timed out there stays timed out on a new account
     }
     // welcome DM from Orbit
     const bot = ensureBot();
@@ -261,13 +265,13 @@ export function createApi() {
     const token = await newSession(user, req);
     // announce join to community members
     const sys = community.systemChannelId;
-    if (sys && community.ownerId !== id) {
+    if (sys && inCommunity && community.ownerId !== id) {
       for (const uid of serverAudience(community)) if (uid !== id) emitTo([uid], 'member_add', { serverId: community.id, member: { id, roles: [], nick: null, joinedAt: Date.now() }, user: publicUser(user) });
       systemMessage(sys, 'join', id);
     }
     setTimeout(() => {
       const dm = db.channels[dmId]; if (!dm) return;
-      postMessage(dm, bot.id, { content: `**Welcome to Orate, ${displayName}!** 🎉\nI’m Orbit, your built-in helper. Say \`help\` any time to see what you can do.\nA community server called **${community.name}** is already waiting for you on the left.` });
+      postMessage(dm, bot.id, { content: `**Welcome to Orate, ${displayName}!** 🎉\nI’m Orbit, your built-in helper. Say \`help\` any time to see what you can do.${inCommunity ? `\nA community server called **${community.name}** is already waiting for you on the left.` : ''}` });
     }, 1500);
     return { token, user: selfUser(user) };
   }

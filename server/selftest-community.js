@@ -172,6 +172,32 @@ async function main() {
   r = await api('PUT', `/servers/${S.id}/members/${U1.user.id}/timeout`, MOD.token, { minutes: 0 });
   ok(r.status === 200 && !(await timed(U1.user.id)) && !(await timed(U2.user.id)) && !(await timed(U3.user.id)), 'lifting it lifts it for all of them');
 
+  /* ---------------------------------------------------------------- a ban follows the browser into the community server too (it is joined automatically at sign-up) */
+  console.log('\nBans and the default community server');
+  const comm = (await api('GET', '/ready', A.token)).body.servers.find((s) => s.name === 'Orate Community');
+  const mkc = async (name, ip, dev, cookie) => {
+    const h = { ...(ip ? { 'x-forwarded-for': ip } : {}), ...(dev ? { 'x-orate-device': dev } : {}), ...(cookie ? { cookie: `theme=dark; orate_dev=${cookie}; other=1` } : {}) };
+    const reg0 = await api('POST', '/auth/register', null, { username: name, displayName: name, password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, h);
+    const inC = (await api('GET', '/ready', reg0.body.token, null, h)).body.servers.some((s) => s.id === comm.id);
+    return { token: reg0.body.token, user: reg0.body.user, h, inC };
+  };
+  const devC = 'device-cccccccccccccccc'; const devD = 'device-dddddddddddddddd';
+  const C1 = await mkc('cm_one', '198.51.100.31', devC); ok(comm && C1.inC, 'a new account joins the community server automatically');
+  r = await api('PUT', `/servers/${comm.id}/bans/${C1.user.id}`, A.token, { reason: 'spam' }); ok(r.status === 200, 'ban someone from the community server');
+  const C2 = await mkc('cm_two', '198.51.100.32', devC); ok(C2.token && !C2.inC, 'a new account from the same browser is not put in the community server');
+  const C3 = await mkc('cm_three', '198.51.100.33', null, devC); ok(C3.token && !C3.inC, 'the browser is recognised by its cookie alone (local storage cleared)');
+  const C4 = await mkc('cm_four', '198.51.100.34', devD, devC); ok(C4.token && !C4.inC, '… even when the header carries a different id');
+  r = await api('POST', `/invites/${(await api('POST', `/servers/${comm.id}/invites`, A.token, {})).body.code}/join`, C3.token, null, C3.h); ok(r.status === 403, '… and an invite does not let them in either');
+  const C5 = await mkc('cm_five', '198.51.100.35', 'device-eeeeeeeeeeeeeeee'); ok(C5.inC, 'a new account from another browser and network still joins');
+  r = await api('GET', `/servers/${comm.id}/bans`, A.token); ok(r.body.some((x) => x.id === C1.user.id) && !r.body.some((x) => x.id === C2.user.id), 'the new accounts were never members, so only the banned one is listed');
+  r = await api('DELETE', `/servers/${comm.id}/bans/${C1.user.id}`, A.token); ok(r.status === 200, 'unban');
+  const C6 = await mkc('cm_six', '198.51.100.36', devC); ok(C6.inC, 'after the unban the browser can join the community server again');
+  const T1 = await mkc('cm_time1', '198.51.100.41', 'device-tttttttttttttttt');
+  r = await api('PUT', `/servers/${comm.id}/members/${T1.user.id}/timeout`, A.token, { minutes: 5 }); ok(r.status === 200, 'time someone out in the community server');
+  const T2 = await mkc('cm_time2', '198.51.100.42', null, 'device-tttttttttttttttt');
+  const t2 = (await api('GET', '/ready', A.token)).body.servers.find((s) => s.id === comm.id).members.find((m) => m.id === T2.user.id);
+  ok(T2.inC && t2?.timeoutUntil > Date.now(), 'a new account from that browser joins the community server already timed out');
+
   /* ---------------------------------------------------------------- swearing protection + the GIFs & stickers permission */
   console.log('\nSwearing protection');
   const W = await register('wordy'); await api('POST', `/invites/${code}/join`, W.token);
