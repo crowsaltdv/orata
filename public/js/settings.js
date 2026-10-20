@@ -80,14 +80,14 @@ function ProfilePage() {
   const gifAvatar = (anchor) => openPicker(anchor, {
     onGif: async (item) => {
       closePopover(); setUp('avatar');
-      try { up1('avatar', await uploadGifFrom(item.preview?.gif || item.full?.gif || item.preview?.url, 'avatar.gif')); } catch (e) { toast(errMsg(e), 'error'); }
+      try { const u = await uploadGifFrom(item.preview?.gif || item.full?.gif || item.preview?.url, 'avatar.gif', { aspect: 1, out: 256, round: true, title: 'Avatar' }); if (u) up1('avatar', u); } catch (e) { toast(errMsg(e), 'error'); }
       setUp(null);
     },
   }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });
   const gifBanner = (anchor) => openPicker(anchor, {
     onGif: async (item) => {
       closePopover(); setUp('banner');
-      try { up1('banner', await uploadGifFrom(item.full?.gif || item.preview?.gif || item.preview?.url, 'banner.gif')); } catch (e) { toast(errMsg(e), 'error'); }
+      try { const u = await uploadGifFrom(item.full?.gif || item.preview?.gif || item.preview?.url, 'banner.gif', { aspect: 3, out: 960, title: 'Banner' }); if (u) up1('banner', u); } catch (e) { toast(errMsg(e), 'error'); }
       setUp(null);
     },
   }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });

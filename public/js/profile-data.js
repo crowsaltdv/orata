@@ -33,6 +33,7 @@ export const effectColors = (id) => { const [color, color2] = EFFECT_COLORS[id] 
 export const OUTLINE_STYLES = ['solid', 'dashed', 'dotted', 'double'];
 
 const HEX = /^#[0-9a-f]{6}$/i;
+const UPLOAD = /^\/uploads\/[A-Za-z0-9_.-]{1,120}$/;   // a card picture is always one of this server's own uploads: a link to anywhere else would let its owner watch who opens the profile
 const hex = (v, fallback = null) => (typeof v === 'string' && HEX.test(v) ? v.toLowerCase() : fallback);
 const num = (v, lo, hi, fallback) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n * 100) / 100)) : fallback; };
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -40,7 +41,7 @@ const oneOf = (list, v) => (list.some((x) => (Array.isArray(x) ? x[0] : x) === v
 
 /** What a new section starts with in the editor. */
 export const PROFILE_DEFAULTS = {
-  colors: { mode: 'gradient', a: '#8b5cf6', b: '#ec4899', angle: 150, tint: 0.35 },
+  colors: { mode: 'gradient', a: '#8b5cf6', b: '#ec4899', angle: 150, tint: 0.35, image: null, imageOpacity: 0.6 },
   outline: { color: '#8b5cf6', color2: null, width: 2, style: 'solid' },
   shadow: { color: '#8b5cf6', blur: 30, spread: 0, x: 0, y: 8, alpha: 0.55 },
   fonts: { name: null, text: null },
@@ -64,8 +65,10 @@ export function sanitizeProfileStyle(p) {
   if (!isObj(p)) return null;
   const out = {};
   const c = p.colors;
-  if (isObj(c) && (c.mode === 'solid' || c.mode === 'gradient') && hex(c.a)) {
-    out.colors = { mode: c.mode, a: hex(c.a), b: hex(c.b, hex(c.a)), angle: num(c.angle, 0, 360, 150), tint: num(c.tint, 0.05, 1, 0.35) };
+  if (isObj(c) && (c.mode === 'solid' || c.mode === 'gradient' || c.mode === 'image') && hex(c.a)) {
+    const image = typeof c.image === 'string' && UPLOAD.test(c.image) ? c.image : null;
+    out.colors = { mode: c.mode === 'image' && !image ? 'gradient' : c.mode, a: hex(c.a), b: hex(c.b, hex(c.a)), angle: num(c.angle, 0, 360, 150), tint: num(c.tint, 0.05, 1, 0.35) };
+    if (image) { out.colors.image = image; out.colors.imageOpacity = num(c.imageOpacity, 0.05, 1, 0.6); }
     if (c.rainbow === true) out.colors.rainbow = true;
   }
   const o = p.outline;

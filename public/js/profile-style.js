@@ -1,7 +1,8 @@
 // Orate — profile styling: how a styled profile card is drawn (colors, outline, shadow, fonts, name style, effect) and the editor for it.
 // The options and their validation live in profile-data.js (shared with the server); the effect animations in profile-effects.js.
 import { html, useState, useEffect, useRef, cx, hexToRgb } from '/js/lib.js';
-import { useSel } from '/js/store.js';
+import { useSel, toast } from '/js/store.js';
+import { chooseAndUploadImage } from '/js/imageutil.js';
 import { Btn, Segmented, Dropdown, Slider, Toggle, ColorSwatch } from '/js/ui.js';
 import { loadFont } from '/js/theme.js';
 import { startEffect } from '/js/profile-effects.js';
@@ -19,9 +20,10 @@ export function cardLook(p) {
   const style = {}; const cls = [];
   if (!p) return { style, cls };
   if (p.colors) {
-    const c = p.colors;
-    style['--pf-bg'] = c.rainbow ? (c.mode === 'gradient' ? `linear-gradient(${c.angle}deg, ${rb(0, c.tint, 58)}, ${rb(110, c.tint, 58)})` : rb(0, c.tint, 58)) : c.mode === 'gradient' ? `linear-gradient(${c.angle}deg, ${rgba(c.a, c.tint)}, ${rgba(c.b, c.tint)})` : rgba(c.a, c.tint);
-    cls.push('pf-colors'); if (c.rainbow) cls.push('pf-rainbow');
+    const c = p.colors; const picture = c.mode === 'image' && c.image;   // a picture behind the card, at the chosen opacity (see .pf-image in extras.css)
+    if (picture) Object.assign(style, { '--pf-img': `url("${c.image}")`, '--pf-img-o': c.imageOpacity ?? 0.6 });
+    style['--pf-bg'] = picture ? 'transparent' : c.rainbow ? (c.mode === 'gradient' ? `linear-gradient(${c.angle}deg, ${rb(0, c.tint, 58)}, ${rb(110, c.tint, 58)})` : rb(0, c.tint, 58)) : c.mode === 'gradient' ? `linear-gradient(${c.angle}deg, ${rgba(c.a, c.tint)}, ${rgba(c.b, c.tint)})` : rgba(c.a, c.tint);
+    cls.push('pf-colors'); if (picture) cls.push('pf-image'); else if (c.rainbow) cls.push('pf-rainbow');
   }
   if (p.outline) {
     const o = p.outline;
@@ -116,7 +118,7 @@ function FillControls({ f, put, label, extra }) {
  * safe to call from colour popovers that were opened earlier.
  */
 export function ProfileStyleEditor({ value, change, me }) {
-  const [tab, setTab] = useState('colors');
+  const [tab, setTab] = useState('colors'); const [picking, setPicking] = useState(false);
   const p = value || null;
   const put = (key, patch) => change((prev) => ({ ...(prev || {}), [key]: { ...(prev?.[key] || PROFILE_DEFAULTS[key]), ...patch } }));
   const toggle = (key, on) => change((prev) => { const n = { ...(prev || {}) }; if (on) n[key] = { ...PROFILE_DEFAULTS[key] }; else delete n[key]; return Object.keys(n).length ? n : null; });
@@ -124,16 +126,24 @@ export function ProfileStyleEditor({ value, change, me }) {
   const fontOpt = (o) => { const fam = fontFamily(o.value); if (fam) loadFont(fam); return html`<span style=${fam ? { fontFamily: q(fam), fontSize: '16px' } : null}>${o.label}</span>`; };
   const tabs = [{ value: 'colors', label: t('Colors') }, { value: 'outline', label: t('Outline') }, { value: 'name', label: t('Name & text') }, { value: 'effect', label: t('Effect') }];
   const c = p?.colors; const o = p?.outline; const s = p?.shadow; const f = p?.fonts; const nc = p?.nameColor; const no = p?.nameOutline; const ns = p?.nameShadow; const e = p?.effect;
+  const choosePicture = async () => {
+    setPicking(true);
+    try { const u = await chooseAndUploadImage({ aspect: 3 / 4, out: 720, title: 'Card picture', allowGif: true }); if (u) put('colors', { image: u, mode: 'image' }); } catch (e) { toast(e?.message || 'Could not upload that picture', 'error'); }
+    setPicking(false);
+  };
   const nameFont = f?.name ? { fontFamily: q(fontFamily(f.name)), fontWeight: 400 } : null;
   return html`<div class="ps-editor">
     <div class="ps-tabs"><${Segmented} options=${tabs} value=${tab} onChange=${setTab} size="sm" /></div>
     ${tab === 'colors' ? html`
       <${Group} title=${t('Card colors')} desc=${t('Tint the whole profile card with a color or a gradient.')} on=${has(p, 'colors')} onToggle=${(v) => toggle('colors', v)}>
+        <${Row} label=${t('Style')} wide=${true}><${Segmented} size="sm" options=${[{ value: 'solid', label: t('Solid') }, { value: 'gradient', label: t('Gradient') }, { value: 'image', label: t('Picture') }]} value=${c?.mode} onChange=${(v) => put('colors', { mode: v })} /><//>
+        ${c?.mode === 'image' ? html`
+          <${Row} label=${t('Picture')} wide=${true}><div class="ps-picture">${c.image ? html`<span class="ps-thumb" style=${{ backgroundImage: `url("${c.image}")` }}></span>` : null}<${Btn} size="sm" variant="primary" icon="image" loading=${picking} onClick=${choosePicture}>${c.image ? t('Change picture') : t('Choose a picture')}<//>${c.image ? html`<${Btn} size="sm" variant="ghost" onClick=${() => put('colors', { image: null, mode: 'gradient' })}>${t('Remove')}<//>` : null}</div><//>
+          ${c.image ? html`<${Row} label=${t('Opacity')} wide=${true}><${Slider} value=${Math.round((c.imageOpacity ?? 0.6) * 100)} min=${5} max=${100} onChange=${(v) => put('colors', { imageOpacity: v / 100 })} format=${(v) => v + '%'} /><//>` : html`<p class="ps-note">${t('Pick a picture (or a GIF) to show behind your whole profile card. Then set how strong it is.')}</p>`}` : html`
         <${RainbowRow} on=${c?.rainbow} onChange=${(v) => put('colors', { rainbow: v })} />
-        <${Row} label=${t('Style')}><${Segmented} size="sm" options=${[{ value: 'solid', label: t('Solid') }, { value: 'gradient', label: t('Gradient') }]} value=${c?.mode} onChange=${(v) => put('colors', { mode: v })} /><//>
         ${c?.rainbow ? null : html`<${Row} label=${t('Colors')}><${Swatch} value=${c?.a} onChange=${(v) => put('colors', { a: v })} label=${t('First color')} />${c?.mode === 'gradient' ? html`<${Swatch} value=${c?.b} onChange=${(v) => put('colors', { b: v })} label=${t('Second color')} />` : null}<//>`}
         ${c?.mode === 'gradient' ? html`<${Row} label=${t('Angle')} wide=${true}><${Slider} value=${c.angle} min=${0} max=${360} step=${5} onChange=${(v) => put('colors', { angle: v })} format=${(v) => v + '°'} /><//>` : null}
-        <${Row} label=${t('Strength')} wide=${true}><${Slider} value=${Math.round((c?.tint ?? 0.35) * 100)} min=${5} max=${100} onChange=${(v) => put('colors', { tint: v / 100 })} format=${(v) => v + '%'} /><//>
+        <${Row} label=${t('Strength')} wide=${true}><${Slider} value=${Math.round((c?.tint ?? 0.35) * 100)} min=${5} max=${100} onChange=${(v) => put('colors', { tint: v / 100 })} format=${(v) => v + '%'} /><//>`}
       <//>` : null}
     ${tab === 'outline' ? html`
       <${Group} title=${t('Outline')} desc=${t('A border around your profile card.')} on=${has(p, 'outline')} onToggle=${(v) => toggle('outline', v)}>

@@ -345,3 +345,8 @@ html[data-motion="reduce"] .profile-card.pf-rainbow, html[data-motion="reduce"] 
 .pop-card.profile-pop, .modal:has(.profile-card.modal) { background: rgb(var(--panel-rgb)); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .pop-card.profile-pop .profile-card.popout { max-height: min(640px, calc(100vh - 48px)); }
 .pe-banner-colors { display: inline-flex; align-items: center; gap: 8px; }
+
+/* a picture behind the whole profile card, at the opacity the person chose */
+.profile-card.pf-image { isolation: isolate; }
+.profile-card.pf-image::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--pf-img) center / cover no-repeat; opacity: var(--pf-img-o, .6); pointer-events: none; }
+.ps-picture { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .ps-thumb { width: 42px; height: 56px; border-radius: 8px; background: center / cover no-repeat #000; border: 1px solid var(--border); flex: none; }

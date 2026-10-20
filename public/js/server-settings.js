@@ -28,7 +28,7 @@ function Overview({ server }) {
   const gifPick = (key, anchor) => openPicker(anchor, {
     onGif: async (item) => {
       closePopover(); setUp(key);
-      try { const u = await uploadGifFrom(key === 'banner' ? (item.full?.gif || item.preview?.gif || item.preview?.url) : (item.preview?.gif || item.full?.gif || item.preview?.url), `${key}.gif`); setD((p) => ({ ...p, [key]: u })); } catch (e) { toast(errMsg(e), 'error'); }
+      try { const u = await uploadGifFrom(key === 'banner' ? (item.full?.gif || item.preview?.gif || item.preview?.url) : (item.preview?.gif || item.full?.gif || item.preview?.url), `${key}.gif`, key === 'banner' ? { aspect: 16 / 9, out: 1280, title: 'Server Banner' } : { aspect: 1, out: 256, round: true, title: 'Server Icon' }); if (u) setD((p) => ({ ...p, [key]: u })); } catch (e) { toast(errMsg(e), 'error'); }
       setUp(null);
     },
   }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });

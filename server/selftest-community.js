@@ -402,6 +402,15 @@ async function main() {
   r = await api('PATCH', '/me', A.token, { bannerColor: '#ff0000', accentColor: '#0000ff' }); ok(r.status === 200 && r.body.bannerColor === '#ff0000' && r.body.accentColor === '#0000ff', 'the banner has two gradient colors');
   r = await api('GET', `/users/${A.user.id}`, T.token); ok(r.body.user.bannerColor === '#ff0000' && r.body.user.accentColor === '#0000ff', '… that everyone sees');
   r = await api('PATCH', '/me', A.token, { accentColor: null }); ok(r.status === 200 && r.body.accentColor === null, 'the second banner color can be reset');
+  const cardUp = await upload(A.token, PNG, 'image/png', 'card.png');
+  r = await api('PATCH', '/me', A.token, { profile: { colors: { mode: 'image', a: '#8b5cf6', image: cardUp.url, imageOpacity: 7 } } });
+  ok(r.status === 200 && r.body.profile.colors.mode === 'image' && r.body.profile.colors.image === cardUp.url && r.body.profile.colors.imageOpacity === 1, 'the card colors can be a picture of yours, at an opacity (clamped)');
+  r = await api('PATCH', '/me', A.token, { profile: { colors: { mode: 'image', a: '#8b5cf6', image: 'https://example.com/pixel.png' } } });
+  ok(r.status === 200 && r.body.profile.colors.mode === 'gradient' && !('image' in r.body.profile.colors), 'a picture from anywhere else is refused (it could be used to watch who opens a profile)');
+  r = await api('PATCH', '/me', A.token, { profile: { colors: { mode: 'image', a: '#8b5cf6', image: '/uploads/../../etc/passwd' } } });
+  ok(r.status === 200 && !('image' in r.body.profile.colors), '… and so is a path that is not a plain upload');
+  r = await api('PATCH', '/me', A.token, { profile: { colors: { mode: 'image', a: '#8b5cf6' } } });
+  ok(r.status === 200 && r.body.profile.colors.mode === 'gradient', 'picture mode without a picture falls back to a gradient');
   r = await api('PATCH', '/me', A.token, { profile: { effect: { id: 'lasers' }, avatarFrame: { id: 'ring' } } }); ok(r.status === 200 && r.body.profile === null, 'nothing valid left means no style');
   for (const [id] of EFFECTS) { r = await api('PATCH', '/me', A.token, { profile: { effect: { id, color: '#336699' } } }); if (r.status !== 200 || r.body.profile?.effect?.id !== id) { ok(false, `effect ${id} is accepted`); break; } }
   ok(EFFECTS.length >= 40, `${EFFECTS.length} effects to choose from, and every one is accepted`);
