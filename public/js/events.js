@@ -138,6 +138,7 @@ function isMentioned(m, ch) {
 }
 function previewText(m) {
   if (m.content) return m.content.replace(/<@!?(\d+)>/g, (_, id) => '@' + (state.users[id]?.displayName || 'user')).replace(/<#(\d+)>/g, (_, id) => '#' + (getChannel(id)?.name || 'channel')).replace(/[*_~`|>]/g, '').slice(0, 140);
+  if (m.forward) return 'forwarded a message';
   if (m.poll) return 'started a poll: ' + m.poll.question; if (m.theme) return 'shared a theme'; if (m.gif) return 'sent a GIF'; if (m.sticker) return 'sent a sticker'; if (m.attachments?.length) return m.attachments.length > 1 ? `sent ${m.attachments.length} attachments` : 'sent an attachment';
   return '';
 }

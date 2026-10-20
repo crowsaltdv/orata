@@ -94,6 +94,7 @@ export function serverMenu(server) {
     { label: t('Mark As Read'), icon: 'check', onClick: () => markServerRead(server.id) },
     { type: 'sep' },
     hasPerm(server.id, 'CREATE_INVITE') && { label: t('Invite People'), icon: 'user-plus', onClick: () => openModal('invite', { serverId: server.id }) },
+    server.onboarding?.enabled && { label: t('Rules & roles'), icon: 'shield', onClick: () => import('/js/onboarding.js').then(() => openModal('onboarding', { serverId: server.id })) },
     { label: muted ? t('Unmute Server') : t('Mute Server'), icon: muted ? 'bell' : 'bell-off', onClick: () => updateSettings({ mutedServers: { [server.id]: !muted } }) },
     { label: t('Server Folder'), icon: 'folder', submenu: [
       { label: t('New Folder'), icon: 'plus', onClick: () => folderOps.create(server.id) },

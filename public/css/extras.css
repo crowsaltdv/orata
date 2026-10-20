@@ -396,3 +396,40 @@ html[data-mode="light"] .pc-badges { background: rgb(0 0 0 / .06); }
 .oc-role { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--hover); font-size: 12.5px; font-weight: 600; color: var(--text-2); transition: all var(--t-fast); }
 .oc-role i { width: 10px; height: 10px; border-radius: 50%; background: var(--rc); }
 .oc-role.on { color: var(--text); border-color: var(--rc); background: color-mix(in srgb, var(--rc) 22%, transparent); }
+
+/* ------------------------------------------------ forwarded messages (forward.js) */
+.fwd { margin-top: 4px; padding: 8px 12px 8px 12px; border-left: 3px solid rgb(var(--surface-rgb) / .35); border-radius: 4px 10px 10px 4px; background: rgb(var(--surface-rgb) / .05); max-width: 560px; }
+.fwd-head { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 700; font-style: italic; color: var(--text-3); margin-bottom: 4px; }
+.fwd-foot { margin-top: 6px; font-size: 12px; color: var(--text-3); }
+.fwd-list { max-height: 300px; }
+.fwd-ic { font-style: normal; width: 32px; height: 32px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--hover); color: var(--text-2); }
+
+/* ------------------------------------------------ reaction roles (orbit.js) */
+.rr-rows { display: flex; flex-direction: column; gap: 8px; }
+.rr-row { display: flex; align-items: center; gap: 8px; } .rr-row .dropdown { flex: 1; }
+.rr-emoji { width: 44px; height: 40px; flex: none; border-radius: var(--radius-sm); background: var(--input-bg); font-size: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); overflow: hidden; }
+.rr-emoji:hover { background: rgb(var(--surface-rgb) / .12); }
+
+/* ------------------------------------------------ onboarding (onboarding.js) */
+.ob-rules { max-height: 260px; overflow-y: auto; padding: 12px 14px; border-radius: 14px; background: var(--input-bg); font-size: 14.5px; line-height: 1.5; }
+.ob-roles h5, .al-top h5 { margin: 0 0 8px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--text-2); }
+.ob-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.ob-role { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1.5px solid var(--border); background: var(--input-bg); text-align: left; transition: border-color var(--t-fast), background var(--t-fast); }
+.ob-role:hover { border-color: var(--rc); }
+.ob-role.on { border-color: var(--rc); background: color-mix(in srgb, var(--rc) 16%, transparent); }
+.ob-emoji { font-size: 20px; width: 26px; text-align: center; flex: none; }
+.ob-txt { display: flex; flex-direction: column; min-width: 0; flex: 1; } .ob-txt small { color: var(--text-3); font-size: 12px; line-height: 1.3; }
+.ob-check { width: 20px; height: 20px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: transparent; border: 2px solid var(--border-strong); }
+.ob-role.on .ob-check { background: var(--rc); border-color: transparent; color: #fff; }
+.ob-set-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.ob-set-name { display: inline-flex; align-items: center; gap: 8px; min-width: 150px; font-weight: 600; } .ob-set-name i { width: 11px; height: 11px; border-radius: 50%; flex: none; } .ob-set-name small { color: var(--text-3); font-weight: 500; font-size: 12px; }
+.ob-set-row .input-wrap { flex: 1; min-width: 160px; } .ob-set-row .ob-set-emoji { flex: 0 0 72px; min-width: 72px; }
+
+/* ------------------------------------------------ audit log (audit-log.js) */
+.al-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; } .al-top p { margin: 0; max-width: 520px; font-size: 13.5px; }
+.al-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.al-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; border-radius: 12px; background: var(--input-bg); }
+.al-ic { width: 30px; height: 30px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-soft); color: var(--accent); }
+.al-ic.bad { background: rgb(240 77 106 / .15); color: #ff7b93; }
+.al-text { flex: 1; min-width: 0; font-size: 14px; line-height: 1.4; display: flex; flex-direction: column; gap: 2px; } .al-text small { color: var(--text-3); font-size: 12.5px; } .al-ex { font-style: italic; overflow-wrap: anywhere; }
+.al-row time { flex: none; font-size: 12px; color: var(--text-3); white-space: nowrap; }

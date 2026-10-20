@@ -13,6 +13,8 @@ import { deleteChannel } from '/js/sidebar.js';
 import { t } from '/js/i18n.js';
 import { PERM_INFO, PERM_ORDER } from '/js/perms.js';
 import '/js/orbit.js';   // Orbit's settings dialog
+import { OnboardingPage } from '/js/onboarding.js';
+import { AuditLog } from '/js/audit-log.js';
 
 export function openServerSettings(id, page = 'overview') { set({ serverSettings: { id, page }, ctx: null, popover: null }); }
 const close = () => set({ serverSettings: null });
@@ -195,8 +197,10 @@ function Bans({ server }) {
 /* ------------------------------------------------------------------ safety */
 function Safety({ server }) {
   const can = hasPerm(server.id, 'MANAGE_SERVER');
-  const orig = { profanity: server.safety?.profanity || 'off', blockedWords: (server.safety?.words || []).join(', ') };
+  const am0 = server.automod || {};
+  const orig = { profanity: server.safety?.profanity || 'off', blockedWords: (server.safety?.words || []).join(', '), automod: { links: !!am0.links, invites: !!am0.invites, mentions: am0.mentions || 0, spam: !!am0.spam, timeout: am0.timeout || 0 } };
   const [d, setD] = useState(orig); const [busy, setBusy] = useState(false);
+  const am = d.automod; const setAm = (patch) => setD((p) => ({ ...p, automod: { ...p.automod, ...patch } }));
   const dirty = JSON.stringify(d) !== JSON.stringify(orig);
   const save = async () => { setBusy(true); await act(api.patch(`/servers/${server.id}`, d), { success: 'Safety settings saved' }); setBusy(false); };
   useSaveBar(dirty && can, { save, reset: () => setD(orig), busy });
@@ -208,12 +212,19 @@ function Safety({ server }) {
       <${Field} label=${t('Blocked words')} hint=${t('Your own words, separated by commas or new lines. They are treated like the built-in ones.')}><textarea class="textarea" rows="4" maxlength="1500" value=${d.blockedWords} disabled=${!can} onInput=${(e) => setD({ ...d, blockedWords: e.target.value })} placeholder=${t('pineapple pizza, heck …')}></textarea><//>
       <p class="text-muted" style="font-size:13px;margin:6px 0 0">${t('Applies to messages, edits, polls and forum posts in this server — not to DMs. The owner and administrators are never filtered.')}</p>
     <//>
+    <${Section} title=${t('AutoMod')} desc=${t('Stops messages that break these rules before anyone sees them, tells the sender why, and writes each block in the Audit Log. The owner, admins and people who can manage messages are never checked.')}>
+      <${SettingRow} title=${t('Block links')} desc=${t('Any web address.')}><${Toggle} checked=${am.links} disabled=${!can} onChange=${(v) => setAm({ links: v })} /><//>
+      <${SettingRow} title=${t('Block invite links')} desc=${t('Invites to other Orate or Discord servers.')}><${Toggle} checked=${am.invites} disabled=${!can} onChange=${(v) => setAm({ invites: v })} /><//>
+      <${SettingRow} title=${t('Too many mentions')} desc=${am.mentions ? `${t('Block a message that mentions more than')} ${am.mentions} ${t('people or roles')}.` : t('Off')}><${Dropdown} width=${150} value=${am.mentions} options=${[0, 3, 5, 10, 20].map((n) => ({ value: n, label: n ? `> ${n}` : t('Off') }))} onChange=${(v) => setAm({ mentions: v })} /><//>
+      <${SettingRow} title=${t('Block spam')} desc=${t('5 messages within 5 seconds, or the same message 3 times in 30 seconds.')}><${Toggle} checked=${am.spam} disabled=${!can} onChange=${(v) => setAm({ spam: v })} /><//>
+      <${SettingRow} title=${t('Time out rule breakers')} desc=${t('Also time out whoever AutoMod blocks.')}><${Dropdown} width=${150} value=${am.timeout} options=${[[0, 'No'], [1, '1 minute'], [5, '5 minutes'], [10, '10 minutes'], [60, '1 hour'], [1440, '1 day']].map(([value, label]) => ({ value, label: t(label) }))} onChange=${(v) => setAm({ timeout: v })} /><//>
+    <//>
   </div>`;
 }
 
 /* ------------------------------------------------------------------ shell */
-const NAV = [['overview', 'server', 'Overview'], ['roles', 'tag', 'Roles'], ['channels', 'hash', 'Channels'], ['emoji', 'smile', 'Emoji'], ['stickers', 'sticker', 'Stickers'], ['members', 'users', 'Members'], ['invites', 'link', 'Invites'], ['bans', 'ban', 'Bans'], ['safety', 'shield', 'Safety']];
-const PAGES = { overview: Overview, roles: Roles, channels: Channels, emoji: EmojiPage, stickers: StickerPage, members: Members, invites: Invites, bans: Bans, safety: Safety };
+const NAV = [['overview', 'server', 'Overview'], ['roles', 'tag', 'Roles'], ['channels', 'hash', 'Channels'], ['emoji', 'smile', 'Emoji'], ['stickers', 'sticker', 'Stickers'], ['members', 'users', 'Members'], ['invites', 'link', 'Invites'], ['bans', 'ban', 'Bans'], ['safety', 'shield', 'Safety & AutoMod'], ['onboarding', 'check-circle', 'Onboarding'], ['audit', 'list', 'Audit Log']];
+const PAGES = { overview: Overview, roles: Roles, channels: Channels, emoji: EmojiPage, stickers: StickerPage, members: Members, invites: Invites, bans: Bans, safety: Safety, onboarding: OnboardingPage, audit: AuditLog };
 export function ServerSettingsHost() {
   const ss = useSel((s) => s.serverSettings); const server = useSel((s) => (s.serverSettings ? s.servers[s.serverSettings.id] : null));
   useEscape(() => { if (!state.modals.length && !state.popover && !state.ctx) close(); }, !!ss);

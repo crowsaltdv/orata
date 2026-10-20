@@ -9,8 +9,9 @@ import {
   db, save, newId, cmpId, sha, ENV, DATA_DIR, UPLOAD_DIR, ROOT, ApiError, bad, forbidden, notFound, byUsername, byEmail,
   conns, emitTo, can, need, permsOf, permsIn, canIn, needIn, listedFor, isSynced, overwritesOf, sanitizeOverwrites, topRolePos, canView, audienceOf, serverAudience, channelsOfServer, publicUser, selfUser,
   serverView, channelView, messageView, relatedUserIds, broadcastPresence, readStateFor, systemMessage, randomCode, RESERVED,
-  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteDevice, deviceHashesOf, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView, isOwner,
+  ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteDevice, deviceHashesOf, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView, isOwner, audit,
 } from './core.js';
+import { automodRule } from './automod.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 import { hasProfanity, censor, cleanBlockedWords } from './profanity.js';   // the same checker the browser uses
@@ -21,7 +22,7 @@ import { createSession, findSession, touchSession, endSession, endUserSessions, 
 import { mountMusic, mountMusicPublic, musicConfigured } from './music.js';
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 import { mountBadges } from './badges.js';
-import { mountOrbit, addOrbit } from './orbit.js';
+import { mountOrbit, addOrbit, reactionRole } from './orbit.js';
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -286,7 +287,7 @@ export function createApi() {
     // announce join to community members
     const sys = community.systemChannelId;
     if (sys && inCommunity && community.ownerId !== id) {
-      for (const uid of serverAudience(community)) if (uid !== id) emitTo([uid], 'member_add', { serverId: community.id, member: { id, roles: [], nick: null, joinedAt: Date.now() }, user: publicUser(user) });
+      for (const uid of serverAudience(community)) if (uid !== id) emitTo([uid], 'member_add', { serverId: community.id, member: memberView(id, community.members[id]), user: publicUser(user) });
       systemMessage(sys, 'join', id);
     }
     setTimeout(() => {
@@ -364,7 +365,7 @@ export function createApi() {
 
   mountMusic(r, { h, limit });
   mountBadges(r, { h });
-  mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdate, guardText, kickMember, banMember, timeoutMember });
+  mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdate, guardText, automod, kickMember, banMember, timeoutMember });
 
   r.post('/auth/logout', h(async (req, res) => { await endSession(req.sessionId); res.json({ ok: true }); }));
   r.get('/ready', (req, res) => { noteDevice(req.user, req); res.json(buildReady(req.user)); });   // (also remembers the browser, for the alt checks)
@@ -543,6 +544,20 @@ export function createApi() {
     if (mode === 'block') throw new ApiError(400, 'That contains language this server doesn’t allow', 'profanity');
     return censor(text, words);
   }
+  /** AutoMod (Server Settings → Safety): refuses a message that breaks one of the server's rules, writes it in the audit log, and can time the sender out. */
+  function automod(ch, userId, text, opts) {
+    const s = ch?.serverId ? db.servers[ch.serverId] : null; const rule = automodRule(s, userId, text, opts); if (!rule) return;
+    audit(s, null, 'automod_block', { target: userId, rule, channel: ch.name, excerpt: String(text).slice(0, 120) });
+    const m = s.members[userId]; const mins = s.automod.timeout || 0;
+    if (mins && m) {
+      m.timeoutUntil = Math.max(m.timeoutUntil || 0, Date.now() + mins * 60_000);
+      audit(s, null, 'member_timeout', { target: userId, minutes: mins, reason: `AutoMod: ${rule}` }); pushServerUpdate(s); revalidateVoice(s);
+    }
+    save();
+    throw new ApiError(400, `AutoMod blocked your message: this server doesn’t allow ${rule}.${mins ? ` You are timed out for ${mins} minute${mins === 1 ? '' : 's'}.` : ''}`, 'automod');
+  }
+  /** A role members may give themselves (onboarding) or get from a reaction: never @everyone, and it may not grant anything beyond the default permissions. */
+  const pickableRole = (s, rid) => { const r = s.roles.find((x) => x.id === rid); return !!r && r.id !== s.id && r.permissions.every((p) => DEFAULT_PERMS.includes(p)); };
   /** Banned by account, or by browser: a new account from the same browser as someone banned here is turned away too. */
   function isBannedFrom(s, user, req) {
     if (s.bans?.includes(user.id)) return true;
@@ -568,7 +583,7 @@ export function createApi() {
       addMember(s, req.user); inv.uses++;
       linkedTimeout(s, req.user.id, deviceHashesOf(req.user, requestHashes(req)));   // someone who is timed out here can't dodge it with another account
       save();
-      emitTo(serverAudience(s).filter((id) => id !== req.user.id), 'member_add', { serverId: s.id, member: { id: req.user.id, roles: [], nick: null, joinedAt: Date.now() }, user: publicUser(req.user) });
+      emitTo(serverAudience(s).filter((id) => id !== req.user.id), 'member_add', { serverId: s.id, member: memberView(req.user.id, s.members[req.user.id]), user: publicUser(req.user) });
       emitTo([req.user.id], 'server_create', { server: serverView(s, req.user.id), users: usersFor(Object.keys(s.members)) });
       if (s.systemChannelId) systemMessage(s.systemChannelId, 'join', req.user.id);
     }
@@ -585,6 +600,17 @@ export function createApi() {
     if (b.systemChannelId !== undefined) s.systemChannelId = db.channels[b.systemChannelId]?.serverId === s.id ? b.systemChannelId : null;
     if (b.profanity !== undefined) { if (!['off', 'censor', 'block'].includes(b.profanity)) throw bad('Invalid swearing protection mode'); (s.safety ||= {}).profanity = b.profanity; }
     if (b.blockedWords !== undefined) (s.safety ||= {}).words = cleanBlockedWords(b.blockedWords);
+    if (b.automod !== undefined) {   // AutoMod rules (server/automod.js)
+      const a = b.automod || {};
+      s.automod = { links: !!a.links, invites: !!a.invites, mentions: clampInt(a.mentions, 0, 50, 0), spam: !!a.spam, timeout: clampInt(a.timeout, 0, 1440, 0) };
+    }
+    if (b.onboarding !== undefined) {   // the rules newcomers accept and the roles they can pick (POST /servers/:id/onboarding)
+      const o = b.onboarding || {}; const seen = new Set();
+      const roles = (Array.isArray(o.roles) ? o.roles : []).slice(0, 20).map((x) => ({ roleId: String(x?.roleId || ''), emoji: String(x?.emoji || '').trim().slice(0, 16) || null, desc: String(x?.desc || '').trim().slice(0, 100) }))
+        .filter((x) => pickableRole(s, x.roleId) && !seen.has(x.roleId) && seen.add(x.roleId));
+      s.onboarding = { enabled: !!o.enabled, rules: String(o.rules || '').slice(0, 4000), roles };
+    }
+    audit(s, req.user.id, 'server_update', { fields: Object.keys(b).filter((k) => b[k] !== undefined).slice(0, 12) });
     save(); pushServerUpdate(s); res.json(serverView(s, req.user.id));
   }));
   function deleteServer(s) {
@@ -614,7 +640,7 @@ export function createApi() {
     const s = getServer(req, req.params.id);
     if (s.ownerId !== req.user.id) throw forbidden('Only the owner can transfer a server');
     const to = String((req.body || {}).userId); if (!s.members[to] || db.users[to]?.bot) throw bad('Pick a member');
-    s.ownerId = to; save(); pushServerUpdate(s); res.json({ ok: true });
+    s.ownerId = to; audit(s, req.user.id, 'server_transfer', { target: to }); save(); pushServerUpdate(s); res.json({ ok: true });
   }));
 
   /* ---- channels in a server ---- */
@@ -635,7 +661,7 @@ export function createApi() {
     if (ows.length) { ch.overwrites = ows; if (ch.parentId) ch.synced = false; }   // a channel with its own rules no longer follows its category
     db.channels[id] = ch;
     if (!canView(req.user.id, ch)) ch.overwrites.push({ type: 'member', id: req.user.id, allow: ['VIEW_CHANNEL'], deny: [] });   // never lock yourself out of what you just made
-    db.messages[id] = []; save();
+    db.messages[id] = []; audit(s, req.user.id, 'channel_create', { target: id, name: ch.name, type }); save();
     pushChannelEvent('channel_create', ch);
     res.json(channelView(ch, req.user.id));
   }));
@@ -722,6 +748,7 @@ export function createApi() {
       if (b.slowmode !== undefined) ch.slowmode = clampInt(b.slowmode, 0, 21600, 0);
       if (b.parentId !== undefined && ch.type !== 'category') ch.parentId = b.parentId && db.channels[b.parentId]?.type === 'category' && db.channels[b.parentId].serverId === s.id ? b.parentId : null;
       if (touchesPerms) applyOverwrites(s, ch, b, req.user);
+      audit(s, req.user.id, 'channel_update', { target: ch.id, name: ch.name, fields: Object.keys(b).filter((k) => b[k] !== undefined).slice(0, 12) });
       save();
       if (touchesPerms || b.parentId !== undefined) { pushServerUpdate(s); revalidateVoice(s); } else pushChannelEvent('channel_update', ch);   // who can see what may have changed for everybody
     } else {
@@ -746,6 +773,7 @@ export function createApi() {
       if (ch.type === 'category') for (const c of channelsOfServer(s.id)) if (c.parentId === ch.id) c.parentId = null;
       if (ch.type === 'forum') for (const p of channelsOfServer(s.id)) if (p.type === 'post' && p.forumId === ch.id) { delete db.channels[p.id]; delete db.messages[p.id]; }
       delete db.channels[ch.id]; delete db.messages[ch.id]; voice.delete(ch.id);
+      audit(s, req.user.id, 'channel_delete', { target: ch.id, name: ch.name });
       if (s.systemChannelId === ch.id) s.systemChannelId = channelsOfServer(s.id).find((c) => c.type === 'text')?.id || null;
       save(); pushChannelEvent('channel_delete', ch); pushServerUpdate(s);
     } else if (ch.type === 'group') {
@@ -781,6 +809,7 @@ export function createApi() {
     needIn(req.user.id, forum, 'SEND_MESSAGES');
     const b = req.body || {}; const s = db.servers[forum.serverId];
     const title = guardText(forum, req.user.id, str(b.title, 1, 100, 'Title'));
+    automod(forum, req.user.id, `${b.title || ''}\n${b.content || ''}`);
     const content = guardText(forum, req.user.id, typeof b.content === 'string' ? b.content : '');
     if (content.length > 4000) throw bad('The post is too long (4000 characters max)');
     await Promise.all((Array.isArray(b.attachments) ? b.attachments.slice(0, 10) : []).map((a) => restoreUpload(path.basename(String(a?.url || '')))));
@@ -865,7 +894,7 @@ export function createApi() {
     const code = randomCode(8);
     const maxAge = clampInt(b.maxAge, 0, 604800, 0); const maxUses = clampInt(b.maxUses, 0, 1000, 0);
     db.invites[code] = { code, serverId: s.id, inviterId: req.user.id, createdAt: Date.now(), uses: 0, maxUses, expiresAt: maxAge ? Date.now() + maxAge * 1000 : null };
-    save(); res.json(db.invites[code]);
+    audit(s, req.user.id, 'invite_create', { code }); save(); res.json(db.invites[code]);
   }));
   r.get('/servers/:id/invites', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_SERVER');
@@ -874,7 +903,7 @@ export function createApi() {
   r.delete('/invites/:code', h(async (req, res) => {
     const inv = db.invites[req.params.code]; if (!inv) throw notFound();
     const s = db.servers[inv.serverId]; if (!s || (inv.inviterId !== req.user.id && !can(s, req.user.id, 'MANAGE_SERVER'))) throw forbidden();
-    delete db.invites[inv.code]; save(); res.json({ ok: true });
+    delete db.invites[inv.code]; audit(s, req.user.id, 'invite_delete', { code: inv.code }); save(); res.json({ ok: true });
   }));
 
   /* ---- custom emoji & stickers (a server's "expressions") ---- */
@@ -938,7 +967,7 @@ export function createApi() {
     const perms = (Array.isArray(b.permissions) ? b.permissions : []).filter((p) => PERMS.includes(p));
     const role = { id: newId(), name: str(b.name || 'new role', 1, 100, 'Role name'), color: HEX.test(b.color) ? b.color : null, position: Math.max(...s.roles.map((r) => r.position)) + 1, permissions: perms, hoist: !!b.hoist };
     if (topRolePos(s, req.user.id) <= role.position && s.ownerId !== req.user.id) role.position = Math.max(1, topRolePos(s, req.user.id) - 1);
-    s.roles.push(role); save(); pushServerUpdate(s); res.json(role);
+    s.roles.push(role); audit(s, req.user.id, 'role_create', { target: role.id, name: role.name }); save(); pushServerUpdate(s); res.json(role);
   }));
   r.patch('/servers/:id/roles/:rid', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_ROLES');
@@ -954,6 +983,7 @@ export function createApi() {
       if (s.ownerId !== req.user.id) { const mine = permsOf(s, req.user.id); if (wanted.some((p) => !mine.has(p))) throw forbidden('You can only grant permissions you have'); }
       role.permissions = wanted;
     }
+    audit(s, req.user.id, 'role_update', { target: role.id, name: role.name, fields: Object.keys(b).filter((k) => b[k] !== undefined).slice(0, 8) });
     save(); pushServerUpdate(s); res.json(role);
   }));
   r.delete('/servers/:id/roles/:rid', h(async (req, res) => {
@@ -963,6 +993,7 @@ export function createApi() {
     s.roles = s.roles.filter((r) => r.id !== role.id);
     for (const m of Object.values(s.members)) m.roles = m.roles.filter((x) => x !== role.id);
     for (const c of channelsOfServer(s.id)) if (c.overwrites) c.overwrites = c.overwrites.filter((o) => !(o.type === 'role' && o.id === role.id));
+    audit(s, req.user.id, 'role_delete', { target: role.id, name: role.name });
     save(); pushServerUpdate(s); res.json({ ok: true });
   }));
   const memberRole = (add) => h(async (req, res) => {
@@ -970,6 +1001,7 @@ export function createApi() {
     const m = s.members[req.params.uid]; const role = roleView(s, req.params.rid);
     if (!m || !role || role.id === s.id) throw notFound();
     if (s.ownerId !== req.user.id && role.position >= topRolePos(s, req.user.id)) throw forbidden('That role is above yours');
+    if (add !== m.roles.includes(role.id)) audit(s, req.user.id, add ? 'member_role_add' : 'member_role_remove', { target: req.params.uid, role: role.name });
     m.roles = add ? [...new Set([...m.roles, role.id])] : m.roles.filter((x) => x !== role.id);
     save(); pushServerUpdate(s); res.json({ ok: true });
   });
@@ -981,7 +1013,7 @@ export function createApi() {
     const self = req.params.uid === req.user.id;
     need(s, req.user.id, self ? 'CHANGE_NICKNAME' : 'MANAGE_NICKNAMES');
     const nick = String((req.body || {}).nick || '').trim().slice(0, 32);
-    m.nick = nick || null; save();
+    m.nick = nick || null; if (!self) audit(s, req.user.id, 'member_nick', { target: req.params.uid, nick: m.nick }); save();
     emitTo(serverAudience(s), 'member_update', { serverId: s.id, member: memberView(req.params.uid, m) });
     res.json({ ok: true });
   }));
@@ -993,11 +1025,12 @@ export function createApi() {
     for (const set of [...(conns.get(uid) || [])]) if (set.voice && db.channels[set.voice]?.serverId === s.id) set.leaveVoice?.('kicked');
   };
   // kick, ban and timeout are shared by their routes and Orbit's /kick, /ban and /timeout (server/orbit.js): req.user is the moderator
-  function kickMember(req, s, uid) {
+  function kickMember(req, s, uid, reason = '') {
     need(s, req.user.id, 'KICK_MEMBERS');
     if (!s.members[uid]) throw notFound('Unknown member');
     if (uid === s.ownerId || uid === req.user.id) throw forbidden('You can’t kick that member');
     if (topRolePos(s, req.user.id) <= topRolePos(s, uid)) throw forbidden('That member is above you');
+    audit(s, req.user.id, 'member_kick', { target: uid, reason });
     removeMember(s, uid, false);
   }
   r.delete('/servers/:id/members/:uid', h(async (req, res) => {
@@ -1025,6 +1058,7 @@ export function createApi() {
       if (s.members[target]) removeMember(s, target, true); else if (!s.bans.includes(target)) s.bans.push(target);
       purgeMessages(s, target, hours);
     }
+    audit(s, req.user.id, 'member_ban', { target: uid, reason, ...(alts.length ? { alts: alts.length } : {}) });
     save();
     return alts;
   }
@@ -1057,7 +1091,27 @@ export function createApi() {
     for (const t of targets) { s.bans = (s.bans || []).filter((id) => id !== t); if (s.banInfo) delete s.banInfo[t]; }
     for (const [h, id] of Object.entries(s.bannedDevices || {})) if (id === uid) delete s.bannedDevices[h];   // their browsers are free again
     if (info?.altOf) { const main = deviceHashesOf(db.users[info.altOf]); for (const h of deviceHashesOf(db.users[uid])) if (!main.has(h) && s.bannedDevices?.[h] === info.altOf) delete s.bannedDevices[h]; }
-    save(); res.json({ ok: true, freed: targets.length - 1 });
+    audit(s, req.user.id, 'member_unban', { target: uid }); save(); res.json({ ok: true, freed: targets.length - 1 });
+  }));
+
+  /* ---- audit log: who did what (moderators' actions and AutoMod), for people who can manage the server ---- */
+  r.get('/servers/:id/audit-log', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_SERVER');
+    const kinds = String(req.query.action || '').split(',').filter(Boolean);
+    let list = (s.auditLog || []).filter((e) => !kinds.length || kinds.some((k) => e.action.startsWith(k)));
+    if (req.query.before) { const i = list.findIndex((e) => e.id === String(req.query.before)); if (i >= 0) list = list.slice(i + 1); }
+    const page = list.slice(0, 50);
+    res.json({ entries: page, users: usersFor(page.flatMap((e) => [e.actorId, e.target]).filter((id) => id && db.users[id])), hasMore: list.length > 50 });
+  }));
+
+  /* ---- onboarding: a newcomer accepts the rules and picks roles before they can talk; anyone can come back and change their picks ---- */
+  r.post('/servers/:id/onboarding', h(async (req, res) => {
+    const s = getServer(req, req.params.id); const m = s.members[req.user.id]; const ob = s.onboarding;
+    if (!ob?.enabled) throw bad('This server has no rules screen');
+    const offered = new Set((ob.roles || []).map((x) => x.roleId).filter((id) => pickableRole(s, id)));
+    const want = new Set((Array.isArray(req.body?.roles) ? req.body.roles : []).map(String).filter((id) => offered.has(id)));
+    m.roles = [...m.roles.filter((id) => !offered.has(id)), ...want]; delete m.pending;
+    save(); pushServerUpdate(s); res.json({ ok: true });
   }));
 
   /* ---- timeouts: a member can read but not talk, react or join voice until it runs out ---- */
@@ -1065,7 +1119,7 @@ export function createApi() {
     res.json({ ok: true, ...timeoutMember(req, getServer(req, req.params.id), req.params.uid, (req.body || {}).minutes) });
   }));
   /** Times `uid` out for `minutes` (0 lifts it), along with their alts; returns { timeoutUntil, alts } (how many alts). */
-  function timeoutMember(req, s, uid, minutesIn) {
+  function timeoutMember(req, s, uid, minutesIn, reason = '') {
     need(s, req.user.id, 'MODERATE_MEMBERS');
     const m = s.members[uid]; if (!m) throw notFound('Unknown member');
     if (uid === s.ownerId || uid === req.user.id || can(s, uid, 'ADMINISTRATOR')) throw forbidden('You can’t time out that member');
@@ -1081,6 +1135,7 @@ export function createApi() {
       for (const id of alts) { if (id === s.ownerId || can(s, id, 'ADMINISTRATOR') || (s.members[id] && topRolePos(s, req.user.id) <= topRolePos(s, id))) continue; if (apply(id, uid)) hit++; }
       if (mine.size) s.timeoutLinks.push({ uid, until, hashes: [...mine] });   // an account made (or joined) later on the same browser gets it too
     } else { for (const [id, mm] of Object.entries(s.members)) if (mm.timeoutAlt === uid) { apply(id, null); hit++; } }
+    audit(s, req.user.id, minutes ? 'member_timeout' : 'member_timeout_remove', { target: uid, reason, ...(minutes ? { minutes } : {}) });
     save(); pushServerUpdate(s); revalidateVoice(s);
     return { timeoutUntil: m.timeoutUntil || null, alts: hit };
   }
@@ -1137,16 +1192,34 @@ export function createApi() {
     let attachments = sanitizeAttachments(b.attachments, fs, path, UPLOAD_DIR);
     if (server && attachments.length && !canIn(req.user.id, ch, 'ATTACH_FILES')) attachments = [];
     const gif = sanitizeMedia(b.gif, 'gif'); const sticker = b.sticker?.custom ? serverSticker(b.sticker.custom, req.user.id) : sanitizeMedia(b.sticker, 'sticker');
+    const forward = b.forward ? forwardCopy(req, b.forward, ch) : null;
+    if (forward && server && forward.attachments.length && !canIn(req.user.id, ch, 'ATTACH_FILES')) forward.attachments = [];
+    if (forward && server && (forward.gif || forward.sticker) && !canIn(req.user.id, ch, 'SEND_GIFS')) { forward.gif = null; forward.sticker = null; }
+    automod(ch, req.user.id, [b.content, forward?.content].filter(Boolean).join('\n'));
     const content = guardText(ch, req.user.id, typeof b.content === 'string' ? b.content : '');
     const poll = b.poll ? sanitizePoll(b.poll) : null;
     if (poll) { poll.question = guardText(ch, req.user.id, poll.question); for (const a of poll.answers) a.text = guardText(ch, req.user.id, a.text); }
     const theme = b.theme ? sanitizeSharedTheme(b.theme) : null;
-    if (!content.trim() && !attachments.length && !gif && !sticker && !poll && !theme) throw bad('Cannot send an empty message');
+    if (!content.trim() && !attachments.length && !gif && !sticker && !poll && !theme && !forward) throw bad('Cannot send an empty message');
     if ((gif || sticker) && server && !canIn(req.user.id, ch, 'SEND_GIFS')) throw new ApiError(403, 'You don’t have permission to send GIFs or stickers here', 'no_gifs');
     if (content.length > 4000) throw bad('Message is too long (4000 characters max)');
-    const msg = postMessage(ch, req.user.id, { content, attachments, gif, sticker, replyTo: b.replyTo, replyPing: b.replyPing !== false, nonce: b.nonce, poll, theme });
+    const msg = postMessage(ch, req.user.id, { content, attachments, gif, sticker, replyTo: b.replyTo, replyPing: b.replyPing !== false, nonce: b.nonce, poll, theme, forward });
     res.json(messageView(msg));
   }));
+  /** A copy of a message from a channel you can see, to send on elsewhere ("Forwarded"). Audio messages aren't forwarded (they expire), polls and themes neither. */
+  function forwardCopy(req, f, target) {
+    const src = db.channels[String(f?.channelId || '')]; const gone = () => notFound('That message can’t be forwarded');
+    if (!src || !canView(req.user.id, src)) throw gone();
+    const m = (db.messages[src.id] || []).find((x) => x.id === String(f.messageId || '')); if (!m || (m.type && m.type !== 'default')) throw gone();
+    const o = m.forward || m; const s = src.serverId && db.servers[src.serverId]; const author = db.users[o.authorId || m.authorId];
+    const copy = {
+      messageId: m.id, channelId: src.id, authorId: o.authorId || m.authorId, authorName: o.authorName || (s ? s.members[m.authorId]?.nick : null) || author?.displayName || 'Someone',
+      from: m.forward ? m.forward.from : s ? `#${src.name} · ${s.name}` : src.type === 'group' ? (src.name || 'a group chat') : 'a direct message',
+      content: guardText(target, req.user.id, String(o.content || '')), attachments: (o.attachments || []).filter((a) => !a.voice), gif: o.gif || null, sticker: o.sticker || null, createdAt: o.createdAt || m.createdAt,
+    };
+    if (!copy.content.trim() && !copy.attachments.length && !copy.gif && !copy.sticker) throw bad('There is nothing in that message to forward');
+    return copy;
+  }
 
   const findMsg = (ch, id) => { const m = (db.messages[ch.id] || []).find((x) => x.id === id); if (!m) throw notFound('Unknown message'); return m; };
   r.patch('/channels/:id/messages/:mid', h(async (req, res) => {
@@ -1155,8 +1228,9 @@ export function createApi() {
     if (m.type !== 'default') throw forbidden();
     if (m.poll) throw forbidden('A poll can’t be edited');
     if (m.theme) throw forbidden('A shared theme can’t be edited');
+    automod(ch, req.user.id, String((req.body || {}).content ?? ''), { edit: true });
     const content = guardText(ch, req.user.id, String((req.body || {}).content ?? ''));
-    if (!content.trim() && !(m.attachments?.length || m.gif || m.sticker)) throw bad('Message cannot be empty — delete it instead');
+    if (!content.trim() && !(m.attachments?.length || m.gif || m.sticker || m.forward)) throw bad('Message cannot be empty — delete it instead');
     if (content.length > 4000) throw bad('Message is too long');
     m.content = content; m.editedAt = Date.now();
     m.emojis = customEmojisIn(content, req.user.id, m.emojis || []) || undefined;
@@ -1168,6 +1242,7 @@ export function createApi() {
     const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid);
     const s = ch.serverId && db.servers[ch.serverId];
     if (m.authorId !== req.user.id && !(s && canIn(req.user.id, ch, 'MANAGE_MESSAGES'))) throw forbidden();
+    if (s && m.authorId !== req.user.id) audit(s, req.user.id, 'message_delete', { target: m.authorId, channel: ch.name });
     db.messages[ch.id] = db.messages[ch.id].filter((x) => x.id !== m.id); save();
     emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: m.id });
     res.json({ ok: true });
@@ -1176,7 +1251,8 @@ export function createApi() {
     const ch = getChannel(req, req.params.id); const s = ch.serverId && db.servers[ch.serverId];
     if (!s) throw forbidden(); needIn(req.user.id, ch, 'MANAGE_MESSAGES');
     const ids = new Set((Array.isArray((req.body || {}).ids) ? req.body.ids : []).slice(0, 100).map(String));
-    db.messages[ch.id] = (db.messages[ch.id] || []).filter((x) => !ids.has(x.id)); save();
+    db.messages[ch.id] = (db.messages[ch.id] || []).filter((x) => !ids.has(x.id));
+    audit(s, req.user.id, 'message_bulk_delete', { channel: ch.name, count: ids.size }); save();
     for (const id of ids) emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: id });
     res.json({ ok: true });
   }));
@@ -1199,6 +1275,7 @@ export function createApi() {
     }
     save();
     emitTo(audienceOf(ch), add ? 'reaction_add' : 'reaction_remove', { channelId: ch.id, messageId: m.id, emoji, userId: req.user.id });
+    const rs = reactionRole(ch, m, emoji, req.user.id, add); if (rs) pushServerUpdate(rs);   // a reaction-roles message gives (or takes back) its role
     res.json({ ok: true });
   });
   r.put('/channels/:id/messages/:mid/reactions/:emoji/@me', reaction(true));
@@ -1219,7 +1296,7 @@ export function createApi() {
     if (s) needIn(req.user.id, ch, 'MANAGE_MESSAGES');
     if (on && (db.messages[ch.id] || []).filter((x) => x.pinned).length >= 50) throw bad('This channel has reached the pin limit (50)');
     if (!!m.pinned === on) return res.json({ ok: true });
-    m.pinned = on; save();
+    m.pinned = on; if (s) audit(s, req.user.id, on ? 'message_pin' : 'message_unpin', { target: m.authorId, channel: ch.name }); save();
     emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
     if (on) { const sm = systemMessage(ch.id, 'pin', req.user.id, ''); sm.replyTo = m.id; }
     res.json({ ok: true });

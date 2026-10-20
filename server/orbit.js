@@ -1,7 +1,7 @@
 // Orate — Orbit in a server: a server can add its own copy of Orbit (ticked when the server is made, or later in Server Settings) that answers
 // slash commands. Each server's Orbit is its own bot account, so renaming it or changing its picture in /settings only changes it there.
 // Who may use a command: its permission by default (see public/js/orbit-commands.js), narrowed to chosen roles in /settings; owners and admins always may.
-import { db, save, newId, emitTo, publicUser, memberView, serverAudience, can, needIn, need, isOwner, randomAvatarBg, bad, forbidden, ApiError } from './core.js';
+import { db, save, newId, emitTo, publicUser, memberView, messageView, serverAudience, audienceOf, can, needIn, need, isOwner, topRolePos, audit, randomAvatarBg, bad, forbidden, ApiError } from './core.js';
 import { postMessage } from './messages.js';
 import { JOKES, BALL, rollDice } from './bot.js';
 import { ORBIT_COMMANDS, orbitCommand, parseDuration, formatDuration } from '../public/js/orbit-commands.js';
@@ -31,6 +31,16 @@ export function mayUse(s, uid, cmd) {
   return !roles?.length || roles.some((r) => s.members[uid]?.roles.includes(r));
 }
 
+/** Reacting to a reaction-roles message gives its role, taking the reaction back removes it. Returns the server when a member's roles changed. */
+export function reactionRole(ch, msg, emoji, uid, add) {
+  const rid = msg.reactionRoles?.[emoji]; const s = ch.serverId && db.servers[ch.serverId];
+  if (!rid || !s || db.users[uid]?.bot) return null;
+  const m = s.members[uid]; const role = s.roles.find((r) => r.id === rid);
+  if (!m || !role || role.permissions.includes('ADMINISTRATOR') || add === m.roles.includes(rid)) return null;
+  m.roles = add ? [...m.roles, rid] : m.roles.filter((x) => x !== rid);
+  save(); return s;
+}
+
 /** "<@id>", "@username", a nickname or a bare id → a member's id (or null). */
 function memberFrom(s, token) {
   const t = String(token || '').trim();
@@ -56,16 +66,16 @@ setTimeout(sweepReminders, 2000).unref();
 setInterval(sweepReminders, 15_000).unref();
 
 /* ---------------------------------------------------------------- routes */
-export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdate, guardText, kickMember, banMember, timeoutMember }) {
+export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdate, guardText, automod, kickMember, banMember, timeoutMember }) {
   r.put('/servers/:id/orbit', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_SERVER');
-    const bot = addOrbit(s);
+    const bot = addOrbit(s); audit(s, req.user.id, 'orbit_add');
     emitTo(serverAudience(s), 'member_add', { serverId: s.id, member: memberView(bot.id, s.members[bot.id]), user: publicUser(bot) });
     pushServerUpdate(s); res.json({ ok: true, user: publicUser(bot) });
   }));
   r.delete('/servers/:id/orbit', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_SERVER');
-    if (hasOrbit(s)) { delete s.members[s.orbitId]; save(); emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: s.orbitId }); pushServerUpdate(s); }
+    if (hasOrbit(s)) { delete s.members[s.orbitId]; audit(s, req.user.id, 'orbit_remove'); save(); emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: s.orbitId }); pushServerUpdate(s); }
     res.json({ ok: true });
   }));
   // /settings: this server's Orbit's name, picture and bio, and the roles each command is narrowed to
@@ -82,9 +92,34 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
       for (const c of ORBIT_COMMANDS) { const list = Array.isArray(b.roles?.[c.name]) ? b.roles[c.name].map(String).filter((id) => id !== s.id && s.roles.some((x) => x.id === id)) : []; if (list.length) roles[c.name] = [...new Set(list)]; }
       s.orbit = { ...(s.orbit || {}), roles };
     }
+    audit(s, req.user.id, 'orbit_update', { fields: Object.keys(b).filter((k) => b[k] !== undefined) });
     save();
     emitTo(serverAudience(s), 'user_update', { user: publicUser(bot) }); pushServerUpdate(s);
     res.json({ user: publicUser(bot), roles: s.orbit?.roles || {} });
+  }));
+
+  // /reactionroles: Orbit posts a message with one reaction per role; reacting gives the role (see reactionRole)
+  r.post('/channels/:id/reaction-roles', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); const s = ch.serverId && db.servers[ch.serverId];
+    if (!s || !hasOrbit(s)) throw bad('Orbit isn’t in this server');
+    if (!mayUse(s, req.user.id, orbitCommand('reactionroles'))) throw forbidden('You can’t set up reaction roles here');
+    needIn(req.user.id, ch, 'SEND_MESSAGES');
+    const map = {};
+    for (const p of (Array.isArray(req.body?.pairs) ? req.body.pairs : []).slice(0, 10)) {
+      const emoji = String(p?.emoji || '').trim(); const role = s.roles.find((x) => x.id === String(p?.roleId || ''));
+      if (!emoji || emoji.length > 64 || /[<>]/.test(emoji) && !/^<a?:[A-Za-z0-9_]{2,32}:\d{6,20}>$/.test(emoji) || !role || role.id === s.id) continue;
+      if (role.permissions.includes('ADMINISTRATOR')) throw bad(`${role.name} can’t be handed out with a reaction`);
+      if (!isOwner(s, req.user.id) && role.position >= topRolePos(s, req.user.id)) throw forbidden(`${role.name} is at or above your highest role`);
+      map[emoji] = role.id;
+    }
+    if (!Object.keys(map).length) throw bad('Add at least one emoji with a role');
+    const intro = guardText(ch, req.user.id, String(req.body?.content || '').trim().slice(0, 1500)) || 'React to get a role:';
+    const lines = Object.entries(map).map(([e, rid]) => `${e} → **${s.roles.find((x) => x.id === rid).name}**`);
+    const msg = postMessage(ch, s.orbitId, { content: `${intro}\n\n${lines.join('\n')}` });
+    msg.reactionRoles = map; msg.reactions = Object.fromEntries(Object.keys(map).map((e) => [e, [s.orbitId]]));   // Orbit reacts first, so everyone just clicks
+    audit(s, req.user.id, 'reaction_roles_create', { channel: ch.name, count: lines.length });
+    save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(msg) });
+    res.json(messageView(msg));
   }));
 
   r.post('/channels/:id/command', limit('orbit', 12, 10_000, (req) => req.user.id), h(async (req, res) => {
@@ -95,7 +130,7 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
     if (!mayUse(s, req.user.id, cmd)) throw forbidden(`You can’t use /${cmd.name} in this server.`);
     const args = String(req.body?.args || '').trim().slice(0, 2000);
     const me = req.user.id; const who = `**${nameIn(s, me)}**`;
-    const text = (v) => guardText(ch, me, v);   // the server's swearing protection applies to what Orbit repeats for you
+    const text = (v) => { automod(ch, me, v); return guardText(ch, me, v); };   // AutoMod and swearing protection apply to what Orbit repeats for you
     const post = (content) => { postMessage(ch, s.orbitId, { content }); return { ok: true }; };
     const only = (content) => ({ ephemeral: content });
     const [first = '', ...rest] = args.split(/\s+/); const tail = rest.join(' ').trim();
@@ -132,7 +167,7 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
       }
       case 'kick': {
         const uid = target(); const name = nameIn(s, uid); const why = text(tail);
-        kickMember(req, s, uid);
+        kickMember(req, s, uid, why);
         return res.json(post(`👢 **${name}** was kicked by ${who}.${why ? ` Reason: ${why}` : ''}`));
       }
       case 'ban': {
@@ -144,10 +179,11 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
         const uid = target(); const [dur = '', ...why0] = rest; const ms = parseDuration(dur);
         if (!ms) throw bad('Give a duration: /timeout @member 10m (s, m, h, d or w — up to 28 days)');
         const minutes = Math.min(28 * 1440, Math.max(1, Math.ceil(ms / 60_000))); const why = text(why0.join(' ').trim());
-        timeoutMember(req, s, uid, minutes);
+        timeoutMember(req, s, uid, minutes, why);
         return res.json(post(`⏳ **${nameIn(s, uid)}** was timed out for **${formatDuration(minutes * 60_000)}** by ${who}.${why ? ` Reason: ${why}` : ''}`));
       }
       case 'settings': return res.json(only('Type /settings in the message box to open Orbit’s settings.'));
+      case 'reactionroles': return res.json(only('Type /reactionroles in the message box to set up a reaction-roles message.'));
       default: throw new ApiError(400, 'Unknown command');
     }
   }));

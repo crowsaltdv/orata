@@ -15,6 +15,7 @@ export const ORBIT_COMMANDS = [
   { name: 'kick', desc: 'Kick a member', arg: '@member or ID [reason]', perm: 'KICK_MEMBERS' },
   { name: 'ban', desc: 'Ban a member', arg: '@member or ID [reason]', perm: 'BAN_MEMBERS' },
   { name: 'timeout', desc: 'Time a member out', arg: '@member or ID 10m [reason]', perm: 'MODERATE_MEMBERS' },
+  { name: 'reactionroles', desc: 'Post a message where reacting gives a role', perm: 'MANAGE_ROLES', only: true },
   { name: 'settings', desc: 'Change Orbit’s name, picture and who can use each command', perm: 'MANAGE_SERVER', only: true },
 ];
 export const orbitCommand = (name) => ORBIT_COMMANDS.find((c) => c.name === String(name || '').toLowerCase()) || null;

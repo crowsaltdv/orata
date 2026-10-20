@@ -514,6 +514,67 @@ async function main() {
   ok((await fetch(base + AU1)).status === 404, '… and the audio file is deleted too');
   ok((await bgMsgs()).some((m) => m.authorId === BG.orbitId && m.content.includes('stretch your legs') && m.mentions.includes(PL.user.id)), 'Orbit pings the person in the channel when a reminder is due');
 
+  /* ---------------------------------------------------------------- forwarding */
+  console.log('\nForwarding');
+  const src = (await api('POST', `/channels/${bgText.id}/messages`, PL.token, { content: 'look at this' })).body;
+  r = await api('POST', `/channels/${ach.id}/messages`, A.token, { content: 'fyi', forward: { channelId: bgText.id, messageId: src.id } }); const FW = r.body;
+  ok(r.status === 200 && FW.content === 'fyi' && FW.forward?.content === 'look at this' && FW.forward.from.includes('Bot Guild') && FW.forward.authorName === 'Plainy', 'a message can be forwarded to another channel, with a note');
+  r = await api('POST', `/channels/${bgText.id}/messages`, PL.token, { forward: { channelId: ach.id, messageId: FW.id } });
+  ok(r.status === 200 && r.body.forward.content === 'look at this' && r.body.forward.from.includes('Bot Guild'), 'forwarding a forwarded message passes on the original');
+  r = await api('POST', `/channels/${ach.id}/messages`, CO.token, { forward: { channelId: bgText.id, messageId: src.id } }); ok(r.status === 404, 'a message from a channel you can’t see can’t be forwarded');
+
+  /* ---------------------------------------------------------------- reaction roles */
+  console.log('\nReaction roles');
+  const owl = (await api('POST', `/servers/${BG.id}/roles`, A.token, { name: 'Night Owl' })).body;
+  r = await api('POST', `/channels/${bgText.id}/reaction-roles`, PL.token, { content: 'roles', pairs: [{ emoji: '🦉', roleId: owl.id }] }); ok(r.status === 403, 'a member without Manage Roles can’t set up reaction roles');
+  r = await api('POST', `/channels/${bgText.id}/reaction-roles`, A.token, { content: 'Pick one', pairs: [{ emoji: '🦉', roleId: owl.id }] }); const RR = r.body;
+  ok(r.status === 200 && RR.authorId === BG.orbitId && RR.reactions['🦉']?.includes(BG.orbitId) && RR.content.includes('Night Owl'), 'Orbit posts the reaction-roles message and reacts first');
+  const plRoles = async () => (await api('GET', '/ready', A.token)).body.servers.find((s) => s.id === BG.id).members.find((m) => m.id === PL.user.id).roles;
+  await api('PUT', `/channels/${bgText.id}/messages/${RR.id}/reactions/${encodeURIComponent('🦉')}/@me`, PL.token); ok((await plRoles()).includes(owl.id), 'reacting gives the role');
+  await api('DELETE', `/channels/${bgText.id}/messages/${RR.id}/reactions/${encodeURIComponent('🦉')}/@me`, PL.token); ok(!(await plRoles()).includes(owl.id), 'taking the reaction back removes it');
+  const boss = (await api('POST', `/servers/${BG.id}/roles`, A.token, { name: 'Boss', permissions: ['ADMINISTRATOR'] })).body;
+  r = await api('POST', `/channels/${bgText.id}/reaction-roles`, A.token, { pairs: [{ emoji: '👑', roleId: boss.id }] }); ok(r.status === 400, 'an administrator role can’t be handed out with a reaction');
+
+  /* ---------------------------------------------------------------- AutoMod */
+  console.log('\nAutoMod');
+  r = await api('PATCH', `/servers/${BG.id}`, A.token, { automod: { links: true, mentions: 2, spam: true } }); ok(r.status === 200 && r.body.automod.links && r.body.automod.mentions === 2, 'AutoMod rules can be turned on');
+  r = await api('POST', `/channels/${bgText.id}/messages`, PL.token, { content: 'go to https://example.com now' }); ok(r.status === 400 && r.body.code === 'automod' && /links/.test(r.body.error), 'a link is blocked, and the sender is told why');
+  r = await api('POST', `/channels/${bgText.id}/messages`, A.token, { content: 'owner link https://example.com' }); ok(r.status === 200, '… but the owner isn’t checked');
+  r = await api('PATCH', `/channels/${bgText.id}/messages/${src.id}`, PL.token, { content: 'edited to https://example.com' }); ok(r.status === 400, 'an edit that adds a link is blocked too');
+  r = await api('POST', `/channels/${bgText.id}/messages`, PL.token, { content: `<@${A.user.id}> <@${BG.orbitId}> <@${PL.user.id}>` }); ok(r.status === 400 && /mentions/.test(r.body.error), 'too many mentions are blocked');
+  for (let i = 0; i < 2; i++) await api('POST', `/channels/${bgText.id}/messages`, PL.token, { content: 'same thing' });
+  r = await api('POST', `/channels/${bgText.id}/messages`, PL.token, { content: 'same thing' }); ok(r.status === 400 && /spam/.test(r.body.error), 'the same message a third time is spam');
+  r = await api('POST', `/channels/${bgText.id}/command`, PL.token, { name: 'choose', args: 'https://a.example | https://b.example' }); ok(r.status === 400 && r.body.code === 'automod', 'what Orbit would repeat for someone is checked too');
+  await api('PATCH', `/servers/${BG.id}`, A.token, { automod: { invites: true, timeout: 5 } });
+  r = await api('POST', `/channels/${bgText.id}/messages`, PL.token, { content: `join us ${base}/invite/abcd1234` });
+  const plMember = async () => (await api('GET', '/ready', A.token)).body.servers.find((s) => s.id === BG.id).members.find((m) => m.id === PL.user.id);
+  ok(r.status === 400 && (await plMember()).timeoutUntil > Date.now() + 4 * 60_000, 'an invite link is blocked and the sender is timed out for 5 minutes');
+  await api('PUT', `/servers/${BG.id}/members/${PL.user.id}/timeout`, A.token, { minutes: 0 }); await api('PATCH', `/servers/${BG.id}`, A.token, { automod: {} });
+
+  /* ---------------------------------------------------------------- onboarding */
+  console.log('\nOnboarding');
+  const artists = (await api('POST', `/servers/${BG.id}/roles`, A.token, { name: 'Artists' })).body;
+  r = await api('PATCH', `/servers/${BG.id}`, A.token, { onboarding: { enabled: true, rules: 'Be nice', roles: [{ roleId: artists.id, emoji: '🎨', desc: 'You draw' }, { roleId: boss.id }] } });
+  ok(r.status === 200 && r.body.onboarding.roles.length === 1 && r.body.onboarding.roles[0].roleId === artists.id, 'onboarding only offers roles that grant nothing extra');
+  const NB = await register('newbie', { ip: '192.0.2.240' }); await api('POST', `/invites/${bgCode}/join`, NB.token);
+  r = await api('POST', `/channels/${bgText.id}/messages`, NB.token, { content: 'hi' }); ok(r.status === 403, 'a newcomer can’t talk before finishing the rules screen');
+  const nbView = (await api('GET', '/ready', NB.token)).body.servers.find((s) => s.id === BG.id);
+  ok(nbView.members.find((m) => m.id === NB.user.id).pending === true && nbView.onboarding.rules === 'Be nice', '… and is shown the rules');
+  r = await api('POST', `/servers/${BG.id}/onboarding`, NB.token, { roles: [artists.id, boss.id] });
+  const nbm = (await api('GET', '/ready', NB.token)).body.servers.find((s) => s.id === BG.id).members.find((m) => m.id === NB.user.id);
+  ok(r.status === 200 && !nbm.pending && nbm.roles.includes(artists.id) && !nbm.roles.includes(boss.id), 'finishing gives the picked roles (only offered ones)');
+  r = await api('POST', `/channels/${bgText.id}/messages`, NB.token, { content: 'hi all' }); ok(r.status === 200, '… and then they can talk');
+  ok(!(await plMember()).pending, 'people already in the server aren’t asked');
+
+  /* ---------------------------------------------------------------- audit log */
+  console.log('\nAudit log');
+  r = await api('GET', `/servers/${BG.id}/audit-log`, PL.token); ok(r.status === 403, 'only people who can manage the server see the audit log');
+  r = await api('GET', `/servers/${BG.id}/audit-log`, A.token); const acts = r.body.entries.map((e) => e.action);
+  ok(['member_kick', 'member_ban', 'member_timeout', 'member_timeout_remove', 'role_create', 'automod_block', 'reaction_roles_create', 'server_update', 'orbit_update', 'invite_create'].every((a) => acts.includes(a)), 'kicks, bans, timeouts, roles, AutoMod blocks, settings and invites are all logged');
+  const kickE = r.body.entries.find((e) => e.action === 'member_kick');
+  ok(kickE.actorId === A.user.id && kickE.target === CO.user.id && kickE.reason === 'spamming' && r.body.entries.find((e) => e.action === 'automod_block').actorId === null, '… with who did it, to whom and why (AutoMod for its own blocks)');
+  r = await api('GET', `/servers/${BG.id}/audit-log?action=automod`, A.token); ok(r.body.entries.length >= 4 && r.body.entries.every((e) => e.action === 'automod_block'), '… and it can be filtered');
+
   /* ---------------------------------------------------------------- accounts per browser */
   console.log('\nAccounts per browser');
   await stopServer(); startServer({ ACCOUNTS_PER_BROWSER: '', ACCOUNTS_PER_HOUR: '' }); await ready();   // the real limits: 3 and 3

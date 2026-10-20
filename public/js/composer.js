@@ -14,8 +14,10 @@ import { shareTheme } from '/js/theme-card.js';
 import { cloakAsDesmos } from '/js/cloak.js';
 import { orbitCommand, ORBIT_COMMANDS } from '/js/orbit-commands.js';
 import { mayUseOrbit, orbitSays } from '/js/orbit.js';
+import '/js/onboarding.js';   // the rules screen
 
 const drafts = new Map(); // channelId -> text
+const onboardShown = new Set();   // servers whose rules screen already opened by itself this session
 /** How a custom emoji reads in the message box: `:name:` (turned into the real token when sent) unless another server has one with the same name. */
 const emojiText = (e, serverId) => { const tok = `<${e.animated ? 'a' : ''}:${e.name}:${e.id}>`; return customToken(e.name, serverId) === tok ? `:${e.name}:` : tok; };
 export const composerApi = { insert: () => {}, focus: () => {}, setText: () => {} };
@@ -94,6 +96,8 @@ export function Composer({ chId }) {
   const canAttach = !server || hasChannelPerm(ch, 'ATTACH_FILES');
   const canGif = !server || hasChannelPerm(ch, 'SEND_GIFS');
   const orbitOn = !!server?.orbitId;
+  const pending = !!server?.onboarding?.enabled && !!server.members.find((m) => m.id === state.me.id)?.pending;   // hasn't accepted this server's rules yet
+  useEffect(() => { if (pending && !onboardShown.has(server.id)) { onboardShown.add(server.id); openModal('onboarding', { serverId: server.id }); } }, [server?.id, pending]);
 
   // swap drafts when the channel changes
   useEffect(() => { setText(drafts.get(chId) || ''); setAtts([]); setMedia(null); setAc(null); setPing(true); if (matchMedia('(pointer:fine)').matches) setTimeout(() => ta.current?.focus(), 30); }, [chId]);
@@ -166,6 +170,7 @@ export function Composer({ chId }) {
   /* ---- Orbit's commands (when this server has Orbit): run by the server; replies meant only for you appear here and nowhere else ---- */
   const runOrbit = async (name, arg) => {
     if (name === 'settings') { if (mayUseOrbit(server, orbitCommand('settings'))) openModal('orbit-settings', { serverId: server.id }); else orbitSays(chId, server, '❌ You can’t change Orbit’s settings here.'); return; }
+    if (name === 'reactionroles') { if (mayUseOrbit(server, orbitCommand('reactionroles'))) openModal('reaction-roles', { channelId: chId }); else orbitSays(chId, server, '❌ You can’t set up reaction roles here.'); return; }
     try { const r = await api.post(`/channels/${chId}/command`, { name, args: encodeMentions(arg, ch) }); if (r?.ephemeral) orbitSays(chId, server, r.ephemeral); }
     catch (e) { orbitSays(chId, server, `❌ ${e.message}`); }
   };
@@ -302,6 +307,7 @@ export function Composer({ chId }) {
   const openPickerFor = (anchor, tab, query) => openPicker(anchor || ta.current, handlers, { tab, query, placement: 'top-end', emojiOnly: !canGif });   // without the GIFs & stickers permission the picker is just emoji
 
   if (blockedBy) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="ban" size=${18} /> You have blocked this user. <button type="button" class="link-btn" onClick=${() => act(api.del(`/relationships/${dmUserId(ch)}`))}>Unblock</button></div></div>`;
+  if (pending) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="shield" size=${18} /> ${t('Read the rules and pick your roles to start chatting.')} <button type="button" class="link-btn" onClick=${() => openModal('onboarding', { serverId: server.id })}>${t('Open the rules')}</button></div></div>`;
   if (!canSend) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name=${timedOut ? 'clock' : 'lock'} size=${18} /> ${lockedPost ? t('This post is locked.') : timedOut ? `${t('You are timed out until')} ${new Date(timeoutUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : t('You do not have permission to send messages in this channel.')}</div></div>`;
 
   return html`<div class="composer-wrap" ref=${dropdownRef}>

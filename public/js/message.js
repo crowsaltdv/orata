@@ -15,6 +15,7 @@ import { PollView } from '/js/polls.js';
 import { ThemeCard } from '/js/theme-card.js';
 import { useFavGifs, toggleFavGif, gifFromMessage } from '/js/gif-favs.js';
 import { dismissEphemeral } from '/js/orbit.js';
+import '/js/forward.js';   // the Forward dialog
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -97,6 +98,17 @@ function GifMedia({ g, onImage }) {
     <span class="gif-badge">GIF</span>${g.id ? html`<button type="button" class=${cx('gif-fav', fav && 'on')} aria-label=${fav ? t('Remove from Favorites') : t('Add to Favorites')} data-tip=${fav ? t('Remove from Favorites') : t('Add to Favorites')} onClick=${(e) => { e.stopPropagation(); toggleFavGif(gifFromMessage(g)); }}><${Icon} name="star" size=${15} fill=${fav} /></button>` : null}</div>`;
 }
 
+/** A message forwarded from somewhere else: its words, pictures and GIF, and where and when it was first said. */
+function Forwarded({ f, onImage }) {
+  const body = f.content ? renderMarkdown(f.content, {}) : '';
+  return html`<div class="fwd"><div class="fwd-head"><${Icon} name="arrow-right" size=${13} sw=${2.4} />${t('Forwarded')}</div>
+    ${body ? html`<div class="msg-content" dangerouslySetInnerHTML=${{ __html: body }}></div>` : null}
+    ${f.gif ? html`<${GifMedia} g=${f.gif} onImage=${onImage} />` : null}
+    ${f.sticker ? html`<img class="msg-sticker" src=${f.sticker.url} alt=${f.sticker.title || 'sticker'} loading="lazy" />` : null}
+    ${f.attachments?.length ? html`<div class="attachments">${f.attachments.map((a) => html`<${Attachment} key=${a.id || a.url} a=${a} onImage=${onImage} />`)}</div>` : null}
+    <div class="fwd-foot">${f.authorName} · ${f.from} · ${formatStamp(f.createdAt, !state.settings.chat.hour24)}</div></div>`;
+}
+
 /* ------------------------------------------------------------------ reactions */
 const CUSTOM_KEY = /^<(a?):([A-Za-z0-9_]{2,32}):(\d{6,20})>$/;
 /** A reaction's emoji: a character, or the picture of a server's custom emoji. */
@@ -141,6 +153,7 @@ export function messageMenu(m, ch) {
   return [
     { label: t('Add Reaction'), icon: 'smile-plus', submenu: [{ type: 'custom', render: () => html`<div class="quick-react">${['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '👀'].map((e) => html`<button type="button" onClick=${() => { set({ ctx: null }); toggleReaction(ch, m, e); }}>${e}</button>`)}</div>` }] },
     { label: t('Reply'), icon: 'reply', onClick: () => set({ replyTo: { channelId: ch.id, id: m.id } }) },
+    m.type === 'default' && (m.content || m.forward || m.gif || m.sticker || m.attachments?.some((a) => !a.voice)) && { label: t('Forward'), icon: 'arrow-right', onClick: () => openModal('forward', { channelId: ch.id, messageId: m.id }) },
     mine && m.type === 'default' && { label: t('Edit Message'), icon: 'edit', onClick: () => set({ editing: m.id }) },
     { type: 'sep' },
     (canManage || (!serverId)) && m.type === 'default' && { label: m.pinned ? t('Unpin Message') : t('Pin Message'), icon: 'pin', onClick: () => pinMessage(ch, m.id, !m.pinned) },
@@ -224,6 +237,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
         ${editing ? html`<${InlineEditor} m=${m} ch=${ch} onDone=${() => set({ editing: null })} />`
           : htmlContent ? html`<div class=${cx('msg-content', jumbo && 'jumbo')} onClick=${(e) => onBodyClick(e, ch)} dangerouslySetInnerHTML=${{ __html: htmlContent }}></div>` : null}
         ${m.editedAt && !editing ? html`<span class="edited" data-tip=${formatFull(m.editedAt)}>(${t('edited')})</span>` : null}
+        ${m.forward ? html`<${Forwarded} f=${m.forward} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />` : null}
         ${m.gif ? html`<${GifMedia} g=${m.gif} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />` : null}
         ${m.sticker ? html`<img class="msg-sticker" src=${m.sticker.url} alt=${m.sticker.title || 'sticker'} title=${m.sticker.title} loading="lazy" />` : null}
         ${m.poll ? html`<${PollView} m=${m} ch=${ch} />` : null}

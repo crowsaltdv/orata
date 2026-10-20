@@ -213,6 +213,12 @@ const CHANNEL_PERM_SET = new Set(CHANNEL_PERMS);
 export function memberOf(server, userId) { return server?.members?.[userId] || null; }
 /** The owner, or a co-owner (`server.coOwners`, while they are a member): every permission, above every role. Deleting or transferring the server stays the owner's alone. */
 export const isOwner = (server, userId) => server?.ownerId === userId || (!!server?.members?.[userId] && !!server.coOwners?.includes(userId));
+/** Writes down who did what in a server's audit log (Server Settings → Audit Log), newest first, at most 500 kept. actorId null = AutoMod. */
+export function audit(server, actorId, action, { target = null, reason = '', ...details } = {}) {
+  if (!server) return;
+  (server.auditLog ||= []).unshift({ id: newId(), at: Date.now(), actorId, action, target, ...(reason ? { reason: String(reason).slice(0, 200) } : {}), ...(Object.keys(details).length ? { details } : {}) });
+  if (server.auditLog.length > 500) server.auditLog.length = 500;
+}
 export function permsOf(server, userId) {
   if (!server) return new Set();
   if (isOwner(server, userId)) return new Set(PERMS);
@@ -221,6 +227,7 @@ export function permsOf(server, userId) {
   const set = new Set(server.roles.find((r) => r.id === server.id)?.permissions || []);
   for (const rid of m.roles) for (const p of server.roles.find((r) => r.id === rid)?.permissions || []) set.add(p);
   if (set.has('ADMINISTRATOR')) return new Set(PERMS);
+  if (m.pending) return new Set(['VIEW_CHANNEL']);   // hasn't accepted the server's rules yet (onboarding): read only
   if (m.timeoutUntil > Date.now()) return new Set(['VIEW_CHANNEL']);   // timed out: you can read, nothing else
   return set;
 }
@@ -396,6 +403,7 @@ export function serverView(server, userId) {
     description: server.description || '', ownerId: server.ownerId, coOwners: server.coOwners || [], createdAt: server.createdAt,
     accent: server.accent || null, roles: server.roles, channels: chans,
     orbitId: server.orbitId && server.members[server.orbitId] ? server.orbitId : null, orbitRoles: server.orbit?.roles || {},   // this server's Orbit (server/orbit.js)
+    automod: server.automod || null, onboarding: server.onboarding || null,
     members: Object.entries(server.members).map(([id, m]) => memberView(id, m)),
     perms: [...permsOf(server, userId)], systemChannelId: server.systemChannelId || null,
     emojis: server.emojis || [], stickers: server.stickers || [],
@@ -403,7 +411,7 @@ export function serverView(server, userId) {
   };
 }
 /** `userId` adds what that member may do here (`cperms`, only when overwrites make it differ from their server-wide permissions) and, for people who can manage permissions, the overwrites themselves. */
-export const memberView = (id, m) => ({ id, roles: m.roles, nick: m.nick || null, joinedAt: m.joinedAt, timeoutUntil: m.timeoutUntil > Date.now() ? m.timeoutUntil : null });
+export const memberView = (id, m) => ({ id, roles: m.roles, nick: m.nick || null, joinedAt: m.joinedAt, timeoutUntil: m.timeoutUntil > Date.now() ? m.timeoutUntil : null, pending: m.pending ? true : undefined });
 export function channelView(c, userId) {
   const v = c.type === 'post' ? { ...postView(c), position: 0, topic: '' } : {
     id: c.id, serverId: c.serverId || null, type: c.type, name: c.name || null, topic: c.topic || '',
@@ -473,7 +481,7 @@ export function messageView(m) {
     id: m.id, channelId: m.channelId, authorId: m.authorId, content: m.content, createdAt: m.createdAt, editedAt: m.editedAt || null,
     attachments: m.attachments || [], gif: m.gif || null, sticker: m.sticker || null, reactions: m.reactions || {},
     replyTo: m.replyTo || null, reply, mentions: m.mentions || [], mentionRoles: m.mentionRoles || [],
-    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
+    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, forward: m.forward || undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
   };
 }
 
@@ -547,7 +555,7 @@ export function createServer(owner, { name, icon = null, template = 'default' })
 }
 
 export function addMember(server, user) {
-  server.members[user.id] = { roles: [], joinedAt: Date.now() };
+  server.members[user.id] = { roles: [], joinedAt: Date.now(), ...(server.onboarding?.enabled && !user.bot ? { pending: true } : {}) };   // with onboarding on, a newcomer reads the rules first
   save();
 }
 

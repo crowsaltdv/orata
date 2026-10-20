@@ -1,7 +1,8 @@
 // Orate — Orbit in a server, on the browser side: who may use a command (mirrors server/orbit.js), replies only you can see, and the /settings dialog.
 import { html, useState, cx } from '/js/lib.js';
-import { state, useSel, closeModal, toast } from '/js/store.js';
-import { Modal, Btn, Field, TextInput, Avatar, MODALS } from '/js/ui.js';
+import { state, useSel, closeModal, closePopover, toast } from '/js/store.js';
+import { Modal, Btn, Field, TextInput, Avatar, Dropdown, MODALS } from '/js/ui.js';
+import { Icon } from '/js/icons.js';
 import { api } from '/js/api.js';
 import { act, patchEntry } from '/js/actions.js';
 import { chooseAndUploadImage } from '/js/imageutil.js';
@@ -47,5 +48,31 @@ MODALS['orbit-settings'] = function OrbitSettings({ id, serverId }) {
       ${ORBIT_COMMANDS.map((c) => html`<div class="oc-row" key=${c.name}><div class="oc-name"><b>/${c.name}</b><small>${c.perm ? PERM_INFO[c.perm]?.[0] || c.perm : t('Everyone')}</small></div>
         <div class="oc-roles">${list.length ? list.map((r) => html`<button type="button" key=${r.id} class=${cx('oc-role', (roles[c.name] || []).includes(r.id) && 'on')} style=${{ '--rc': r.color || 'var(--text-3)' }} onClick=${() => flip(c.name, r.id)}><i></i>${r.name}</button>`) : html`<small class="text-muted">${t('Make roles in Server Settings to narrow commands.')}</small>`}</div></div>`)}
     </div>
+  <//>`;
+};
+
+/** /reactionroles: a message from Orbit with one reaction per role; anyone who reacts gets that role (server/orbit.js). */
+MODALS['reaction-roles'] = function ReactionRoles({ id, channelId }) {
+  const ch = state.channelIndex[channelId]; const server = useSel((s) => s.servers[ch?.serverId]);
+  const [text, setText] = useState(t('Pick your roles! React below to get one, take your reaction back to drop it.'));
+  const [rows, setRows] = useState([{ emoji: '', roleId: '' }]); const [busy, setBusy] = useState(false);
+  const close = () => closeModal(id);
+  if (!server) return null;
+  const me = state.me.id; const boss = server.ownerId === me || server.coOwners?.includes(me);
+  const myTop = Math.max(0, ...(server.members.find((m) => m.id === me)?.roles || []).map((rid) => server.roles.find((r) => r.id === rid)?.position || 0));
+  const roles = server.roles.filter((r) => r.id !== server.id && !r.permissions.includes('ADMINISTRATOR') && (boss || r.position < myTop)).sort((a, b) => b.position - a.position);
+  const put = (i, patch) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const pickEmoji = (i, anchor) => import('/js/pickers.js').then((p) => p.openPicker(anchor, (c) => { put(i, { emoji: c }); closePopover(); }, { emojiOnly: true }));
+  const ready = rows.filter((r) => r.emoji && r.roleId);
+  const post = async () => { setBusy(true); const r = await act(api.post(`/channels/${channelId}/reaction-roles`, { content: text, pairs: ready }), { success: t('Reaction roles posted') }); setBusy(false); if (r) close(); };
+  return html`<${Modal} title=${t('Reaction roles')} subtitle=${`${t('Orbit posts this in')} #${ch.name}. ${t('Anyone who reacts gets the role.')}`} width=${520} onClose=${close}
+    footer=${html`<${Btn} variant="ghost" onClick=${close}>${t('Cancel')}<//><${Btn} variant="primary" loading=${busy} disabled=${!ready.length} onClick=${post}>${t('Post')}<//>`}>
+    <${Field} label=${t('Message')}><textarea class="textarea" rows="3" maxlength="1500" value=${text} onInput=${(e) => setText(e.target.value)}></textarea><//>
+    <div class="rr-rows">${rows.map((r, i) => html`<div class="rr-row" key=${i}>
+      <button type="button" class="rr-emoji" aria-label=${t('Pick an emoji')} onClick=${(e) => pickEmoji(i, e.currentTarget)}>${r.emoji ? (r.emoji.startsWith('<') ? `:${r.emoji.split(':')[1]}:` : r.emoji) : html`<${Icon} name="smile-plus" size=${20} />`}</button>
+      <${Dropdown} value=${r.roleId} options=${roles.map((x) => ({ value: x.id, label: x.name }))} onChange=${(v) => put(i, { roleId: v })} placeholder=${t('Pick a role')} />
+      ${rows.length > 1 ? html`<button type="button" class="icon-btn" aria-label=${t('Remove')} onClick=${() => setRows((rs) => rs.filter((_, j) => j !== i))}><${Icon} name="x" size=${16} /></button>` : null}</div>`)}</div>
+    ${rows.length < 10 ? html`<${Btn} size="sm" icon="plus" onClick=${() => setRows((rs) => [...rs, { emoji: '', roleId: '' }])}>${t('Add a role')}<//>` : null}
+    ${!roles.length ? html`<p class="field-hint">${t('No roles you can hand out yet. Make some under Server Settings → Roles. Roles above yours, or that make someone an administrator, can’t be given with a reaction.')}</p>` : null}
   <//>`;
 };
