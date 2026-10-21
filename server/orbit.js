@@ -202,7 +202,7 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
       case 'settings': return res.json(only('Type /settings in the message box to open Orbit’s settings.'));
       case 'reactionroles': return res.json(only('Type /reactionroles in the message box to set up a reaction-roles message.'));
       case 'link': return res.json(only(linkCode(s, ch, me, baseUrl(req))));
-      case 'link-instructions': return res.json(only(linkInstructions(ch)));
+      case 'link-instructions': return res.json(only(linkInstructions(ch, mayUse(s, me, orbitCommand('link')))));   // admins also see the bot's status
       case 'unlink': if (!await unlinkChannel(ch.id, { fromOrata: true, actor: me })) throw bad('This channel isn’t linked with Discord.'); return res.json({ ok: true });
       default: throw new ApiError(400, 'Unknown command');
     }

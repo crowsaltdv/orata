@@ -34,7 +34,8 @@ const links = () => (db.discord ||= { links: {} }).links;   // Orata channel id 
 const linkOf = (discordChannelId) => Object.entries(links()).find(([, l]) => l.channelId === discordChannelId) || [];
 const orbitOf = (s) => (s?.orbitId && s.members[s.orbitId] && db.users[s.orbitId] ? s.orbitId : null);
 const codes = new Map();   // one-time link codes: code -> { channelId, userId, at }
-const bot = { ws: null, seq: null, session: null, resumeUrl: null, appId: null, beat: null, acked: true, backoff: 1000, guilds: new Map(), online: false, error: null };
+const bot = { ws: null, seq: null, session: null, resumeUrl: null, appId: null, beat: null, acked: true, backoff: 1000, guilds: new Map(), online: false, error: null, since: null, lastCommand: null, lastProblem: null };
+const problem = (msg) => { bot.lastProblem = { at: Date.now(), msg: String(msg).slice(0, 200) }; };   // shown to admins in /link-instructions
 const inviteUrl = () => { const id = bot.appId || APP_ID; return id && `https://discord.com/oauth2/authorize?client_id=${id}&permissions=${BOT_PERMISSIONS}&scope=bot%20applications.commands`; };
 /** A warning when the bot isn't connected to Discord right now (null when it is). */
 const offline = () => (bot.error ? `⚠️ The Discord bot can’t log in right now: ${bot.error}.` : bot.online ? null : '⚠️ The Discord bot is still connecting to Discord, so Discord’s commands may not answer for a moment.');
@@ -47,9 +48,11 @@ async function rest(method, route, body, files) {
     let payload;
     if (files?.length) { payload = new FormData(); payload.append('payload_json', JSON.stringify(body)); files.forEach((f, i) => payload.append(`files[${i}]`, new Blob([f.data], { type: f.type }), f.name)); }
     else if (body !== undefined) { headers['content-type'] = 'application/json'; payload = JSON.stringify(body); }
-    const res = await fetch(API + route, { method, headers, body: payload, signal: AbortSignal.timeout(20_000) });   // one stuck request can't hold up a link
+    let res;
+    try { res = await fetch(API + route, { method, headers, body: payload, signal: AbortSignal.timeout(20_000) }); }   // one stuck request can't hold up a link
+    catch (e) { problem(`${method} ${route.split('/').slice(0, 2).join('/')}: ${e.message}`); throw e; }
     if (res.status === 429 && tries < 3) { const j = await res.json().catch(() => ({})); await sleep(Math.min(10, Number(j.retry_after) || 1) * 1000); continue; }
-    if (!res.ok) { const e = new Error(`Discord said ${res.status} to ${method} ${route.split('?')[0].replace(/\/[\w-]{40,}/g, '/…')}`); e.status = res.status; throw e; }
+    if (!res.ok) { const e = new Error(`Discord said ${res.status} to ${method} ${route.split('?')[0].replace(/\/[\w-]{40,}/g, '/…')}`); e.status = res.status; problem(e.message); throw e; }
     return res.status === 204 ? null : res.json();
   }
 }
@@ -73,7 +76,7 @@ function onPacket(p, ws) {
   else if (p.op === 1) send(1, bot.seq);
   else if (p.op === 7) ws.close(4000);   // Discord asks for a reconnect
   else if (p.op === 9) { if (!p.d) { bot.session = null; bot.seq = null; } setTimeout(() => ws.close(4000), 1000 + Math.random() * 4000); }   // invalid session
-  else if (p.op === 0) dispatch(p.t, p.d).catch((e) => console.error(`[discord] ${p.t}:`, e.message));
+  else if (p.op === 0) dispatch(p.t, p.d).catch((e) => { console.error(`[discord] ${p.t}:`, e.message); problem(`${p.t}: ${e.message}`); });
 }
 function beat(ws) {
   if (ws !== bot.ws) return;
@@ -97,7 +100,7 @@ function cacheGuild(g) {
 async function dispatch(t, d) {
   switch (t) {
     case 'READY':
-      Object.assign(bot, { session: d.session_id, resumeUrl: d.resume_gateway_url, appId: d.application.id, backoff: 1000, online: true, error: null });
+      Object.assign(bot, { session: d.session_id, resumeUrl: d.resume_gateway_url, appId: d.application.id, backoff: 1000, online: true, error: null, since: Date.now() });
       console.log(`[discord] connected as ${d.user.username}`);
       await registerCommands().catch((e) => console.error('[discord] could not set up the slash commands:', e.message));
       return catchUp();
@@ -140,8 +143,9 @@ export function linkCode(s, ch, userId, site) {
   return `In the Discord channel you want to link, type:\n\`/orata-link code:${code.slice(0, 4)}-${code.slice(4)}\`\nThe code works for 10 minutes.${invite ? `\nIs the Orata bot not in your Discord server yet? [Add it here](${invite}) first.` : ''}${offline() ? `\n${offline()}` : ''}`;
 }
 
-/** /link-instructions: whether this channel is linked, what a link carries, and how to set one up. */
-export function linkInstructions(ch) {
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60_000); return m < 1 ? 'just now' : m < 120 ? `${m} min ago` : `${Math.round(m / 60)} hours ago`; };
+/** /link-instructions: whether this channel is linked, what a link carries, and how to set one up. Admins also see how the bot is doing. */
+export function linkInstructions(ch, admin = false) {
   const l = links()[ch.id]; const g = l && bot.guilds.get(l.guildId);
   const invite = inviteUrl();
   return [
@@ -158,6 +162,10 @@ export function linkInstructions(ch) {
     '3. In the Discord channel, type `/orata-link code:XXXX-XXXX` with that code.',
     '',
     'To stop, type `/unlink` here or `/orata-unlink` on Discord. A channel can be linked with one Discord channel at a time.',
+    ...(admin ? ['', '**Bot status** (only admins see this):',
+      `• Discord: ${bot.error ? `can’t log in (${bot.error})` : bot.online ? `connected ${ago(bot.since)}` : 'not connected right now'} · version ${String(ENV.RENDER_GIT_COMMIT || 'local').slice(0, 7)}`,
+      `• Last Discord command: ${bot.lastCommand ? `/${bot.lastCommand.name}, ${ago(bot.lastCommand.at)}` : 'none since it started'}`,
+      `• Last problem: ${bot.lastProblem ? `${bot.lastProblem.msg} (${ago(bot.lastProblem.at)})` : 'none'}`] : []),
   ].join('\n');
 }
 
@@ -185,6 +193,7 @@ export async function unlinkChannel(chId, { why = '', fromOrata = false, actor =
 /** /orata-link and /orata-unlink, typed in Discord. */
 async function onCommand(i) {
   if (i.type !== 2 || !['orata-link', 'orata-unlink'].includes(i.data?.name)) return;
+  bot.lastCommand = { at: Date.now(), name: i.data.name };
   const callback = (body) => rest('POST', `/interactions/${i.id}/${i.token}/callback`, body);
   if (!(BigInt(i.member?.permissions || 0) & (MANAGE_GUILD | ADMINISTRATOR))) return callback({ type: 4, data: { content: 'You need the **Manage Server** permission to do that.', flags: 64 } });
   // Discord gives up on an answer after 3 seconds, and a small free host can be slower than that: say "thinking…" at once, fill in the answer after

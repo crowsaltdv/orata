@@ -126,7 +126,9 @@ async function main() {
   ok(notice?.content.includes('#general') && notice.content.includes('Fake Guild'), 'Orbit says so in the Orata channel');
   ok(!!await until(() => hookPosts().find((c) => /now linked/.test(said(c).content))), '… and the same notice shows up on Discord');
   ok(hookPosts().every((c) => !c.auth) && calls.some((c) => c.path.includes('/channels/') && c.auth === 'Bot fake-token'), 'webhook posts don’t send the bot token (a webhook’s address is its key), Discord’s API does');
-  r = await cmd(B.token, 'link-instructions'); ok(r.body.ephemeral.includes('linked with **#general** in **Fake Guild**'), '/link-instructions then says which Discord channel it’s linked with');
+  r = await cmd(B.token, 'link-instructions'); ok(r.body.ephemeral.includes('linked with **#general** in **Fake Guild**') && !r.body.ephemeral.includes('Bot status'), '/link-instructions then says which Discord channel it’s linked with');
+  r = await cmd(A.token, 'link-instructions');
+  ok(/Discord: connected/.test(r.body.ephemeral) && r.body.ephemeral.includes('Last Discord command: /orata-link') && r.body.ephemeral.includes('Last problem: Discord said 403'), 'admins also see the bot’s status: connected, the last command it got and the last problem (here the unreadable channel)', r.body.ephemeral.split('Bot status')[1]);
 
   console.log('\nDiscord → Orata');
   const d1 = snow();
