@@ -39,7 +39,7 @@ export function VoicePage() {
   const thr = v.autoSensitivity ? 0.1 : v.sensitivity / 100;
   return html`<div class="s-page">
     ${!granted ? html`<div class="perm-banner"><${Icon} name="mic" size=${22} /><div><b>${t('Allow microphone & camera access')}</b><small>${t('Your browser hides device names until you grant permission.')}</small></div><${Btn} variant="primary" onClick=${allow}>${t('Allow access')}<//></div>` : null}
-    <div class=${cx('note-chip', state.turn && 'ok')}><${Icon} name=${state.turn ? 'check-circle' : 'info'} size=${15} /> ${state.turn ? 'A TURN relay is configured, so calls can connect even through strict firewalls and NATs.' : 'No TURN relay is configured: calls use direct connections (STUN) only. Add TURN_URLS to .env if friends can’t hear each other — see the README.'}</div>
+    <div class=${cx('note-chip', state.turn && 'ok')}><${Icon} name=${state.turn ? 'check-circle' : 'info'} size=${15} /> ${state.turn ? 'A TURN relay is configured, so calls can connect even through strict firewalls and NATs.' : 'No TURN relay is configured: calls use direct connections (STUN) only, which school and work Wi-Fi often blocks, so friends on them can’t hear each other. Add CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN (a free relay) or TURN_URLS to .env — see the README.'}</div>
     <${Section} title=${t('Voice')}>
       <div class="two-col-set"><div><h5 class="s-label">${t('Input device')}</h5><${Dropdown} value=${v.inputDevice} options=${opts(dev.inputs, 'Microphone')} onChange=${(x) => setV({ inputDevice: x })} /></div>
         <div><h5 class="s-label">${t('Output device')}</h5><${Dropdown} value=${v.outputDevice} options=${opts(dev.outputs, 'Speaker')} onChange=${(x) => setV({ outputDevice: x })} /></div></div>

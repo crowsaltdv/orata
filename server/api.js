@@ -91,6 +91,8 @@ const csv = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolea
  *   METERED_APP (your app name) + METERED_API_KEY             Metered / Open Relay
  */
 const hostedTurnConfigured = () => !!((ENV.CLOUDFLARE_TURN_KEY_ID && ENV.CLOUDFLARE_TURN_API_TOKEN) || (ENV.METERED_APP && ENV.METERED_API_KEY));
+/** Is any relay set up (own TURN server or a hosted one)? Without one, two people on strict networks (school, work) can't hear each other. */
+export const turnConfigured = () => csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0 || hostedTurnConfigured();
 const hostedCache = { at: 0, ttl: 0, servers: null, pending: null };
 /** ICE servers from the hosted relay, fetched with the server's own key and cached; browsers only ever see short-lived credentials. */
 async function hostedTurn() {
@@ -172,7 +174,7 @@ export function createApi() {
   r.use(express.json({ limit: '2mb' }));
 
   r.get('/config', (req, res) => res.json({
-    name: 'Orata', gifs: !!ENV.KLIPY_API_KEY, discord: discordOn, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0 || hostedTurnConfigured(), maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
+    name: 'Orata', gifs: !!ENV.KLIPY_API_KEY, discord: discordOn, turn: turnConfigured(), maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
     users: Object.keys(db.users).length, botId: db.botId,
     emailVerification: verificationMode(),   // { enabled, required, smtp }
     music: musicConfigured(),

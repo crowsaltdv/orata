@@ -234,7 +234,7 @@ export function Composer({ chId }) {
       items = [...cust, ...searchEmoji(q, 8).map((e) => ({ type: 'emoji', id: e.char, label: `:${e.code || e.label}:`, sub: '', insert: e.char + ' ', char: e.char }))].slice(0, 8);
     } else if (trig.kind === '/') {
       items = COMMANDS.filter((c) => c.name.startsWith(q) && (!c.server || server)).map((c) => ({ type: 'cmd', id: c.name, label: '/' + c.name, sub: c.desc, insert: '/' + c.name + ' ' }));
-      if (orbitOn) items = [...ORBIT_COMMANDS.filter((c) => c.name.startsWith(q) && mayUseOrbit(server, c) && (!c.discord || state.discordOk) && !COMMANDS.some((x) => x.name === c.name)).map((c) => ({ type: 'cmd', id: 'orbit-' + c.name, label: '/' + c.name, sub: c.arg ? `${c.desc} · ${c.arg}` : c.desc, insert: '/' + c.name + ' ', icon: 'sparkles' })), ...items];   // this server's Orbit first
+      if (orbitOn) items = [...ORBIT_COMMANDS.filter((c) => c.name.startsWith(q) && mayUseOrbit(server, c) && (!c.discord || state.discordOk) && !COMMANDS.some((x) => x.name === c.name)).map((c) => ({ type: 'cmd', id: 'orbit-' + c.name, label: '/' + c.name, sub: c.arg ? `${c.desc} · ${c.arg}` : c.desc, insert: '/' + c.name + ' ', icon: 'sparkles', user: state.users[server.orbitId] })), ...items];   // this server's Orbit first, with Orbit's own picture beside each command
     }
     if (!items.length) { setAc(null); return; }
     setAc({ items, trig }); setAcIdx(0);
@@ -315,7 +315,7 @@ export function Composer({ chId }) {
     ${ac ? html`<div class="autocomplete pop-in" role="listbox">
       <div class="ac-head">${ac.trig.kind === '@' ? t('Members') : ac.trig.kind === '#' ? t('Channels') : ac.trig.kind === ':' ? t('Emoji matching') + ' :' + ac.trig.query : t('Commands')}</div>
       ${ac.items.map((it, i) => html`<button type="button" class=${cx('ac-item', i === acIdx && 'sel')} onMouseEnter=${() => setAcIdx(i)} onMouseDown=${(e) => { e.preventDefault(); pick(it); }} role="option">
-        ${it.type === 'user' ? html`<${Avatar} user=${it.user} size=${24} />` : it.type === 'cemoji' ? html`<img class="ac-cemoji" src=${it.emoji.url} alt="" />` : it.type === 'emoji' ? html`<span class="ac-emoji">${it.char}</span>` : it.type === 'role' ? html`<span class="ac-role" style=${{ background: it.color || 'var(--accent)' }}></span>` : html`<${Icon} name=${it.icon || (it.type === 'cmd' ? 'bolt' : 'at')} size=${18} />`}
+        ${it.user ? html`<${Avatar} user=${it.user} size=${24} />` : it.type === 'cemoji' ? html`<img class="ac-cemoji" src=${it.emoji.url} alt="" />` : it.type === 'emoji' ? html`<span class="ac-emoji">${it.char}</span>` : it.type === 'role' ? html`<span class="ac-role" style=${{ background: it.color || 'var(--accent)' }}></span>` : html`<${Icon} name=${it.icon || (it.type === 'cmd' ? 'bolt' : 'at')} size=${18} />`}
         <span class="ac-label" style=${it.color ? { color: it.color } : null}>${it.label}</span><span class="ac-sub">${it.sub}</span></button>`)}
     </div>` : null}
     ${replyTo ? html`<div class="reply-bar slide-up"><span>${t('Replying to')} <b>${replyName || '…'}</b></span><span class="reply-ctl"><button type="button" class=${cx('ping-toggle', ping && 'on')} onClick=${() => setPing(!ping)} data-tip=${ping ? 'Mention on' : 'Mention off'}><${Icon} name="at" size=${14} sw=${2.4} />${ping ? 'ON' : 'OFF'}</button><button type="button" class="icon-btn" onClick=${() => set({ replyTo: null })} aria-label="Cancel reply"><${Icon} name="x" size=${15} /></button></span></div>` : null}

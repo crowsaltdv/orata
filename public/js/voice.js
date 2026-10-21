@@ -52,10 +52,12 @@ const me = () => state.me.id;
 const needsSecure = () => (!navigator.mediaDevices?.getUserMedia ? 'Microphone, camera and screen sharing only work on https:// (or localhost). Open Orata over HTTPS to use them.' : null);
 /** How the link to each other person is doing: 'connecting' | 'slow' | 'failed' | 'connected' (shown on their tile). */
 const setLink = (uid, st) => { const cur = state.voice.links || {}; if (cur[uid] === st) return; set({ voice: { ...state.voice, links: { ...cur, [uid]: st } } }); };
-const warned = new Set();
-function warnUnreachable(uid) {
-  if (warned.has(uid)) return; warned.add(uid);
+const warned = new Set(); const nudged = new Set();
+/** `stuck`: still not linked after a while (the browser may take a minute to give up and say "failed", or never say it) — say why while it is happening. */
+function warnUnreachable(uid, stuck = false) {
+  const seen = stuck ? nudged : warned; if (seen.has(uid)) return; seen.add(uid);
   const name = state.users[uid]?.displayName || 'someone';
+  if (stuck) { toast(`Still connecting to ${name}… School and work Wi-Fi often blocks direct calls. If this doesn’t connect, the server needs a TURN relay (see the README).`, 'info', 10000); return; }
   toast(state.turn ? `Couldn’t connect to ${name}, even through the relay. Try leaving and rejoining.` : `Couldn’t connect to ${name}: your two networks can’t link directly. The server needs a TURN relay for calls like this (see the README).`, 'error', 9000);
 }
 
@@ -147,7 +149,7 @@ function getPeer(uid) {
   };
   pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'failed') pc.restartIce(); };
   setLink(uid, 'connecting');
-  p.timer = setTimeout(() => { if (pc.connectionState !== 'connected') setLink(uid, 'slow'); }, 12000);
+  p.timer = setTimeout(() => { if (pc.connectionState !== 'connected') { setLink(uid, 'slow'); if (!state.turn) warnUnreachable(uid, true); } }, 12000);
   pc.onconnectionstatechange = () => {
     const cs = pc.connectionState;
     if (cs === 'connected') { clearTimeout(p.timer); setLink(uid, 'connected'); }
@@ -214,7 +216,7 @@ export function refreshOutputs() { for (const [uid, a] of S.remoteAudio) applyOu
 function dropPeer(uid) {
   const p = S.peers.get(uid); if (p) { clearTimeout(p.timer); try { p.pc.close(); } catch { /* ignore */ } S.peers.delete(uid); }
   if (state.voice.links?.[uid]) { const links = { ...state.voice.links }; delete links[uid]; set({ voice: { ...state.voice, links } }); }
-  warned.delete(uid);
+  warned.delete(uid); nudged.delete(uid);
   const a = S.remoteAudio.get(uid); if (a) { a.srcObject = null; S.remoteAudio.delete(uid); }
   S.remoteMeters.get(uid)?.stop?.(); S.remoteMeters.delete(uid);
   streamStore.byUser.delete(uid); delete S.meta[uid];
@@ -226,7 +228,7 @@ function teardown() {
   for (const k of ['camera', 'screen', 'mic']) { S[k]?.getTracks().forEach((t) => t.stop()); S[k] = null; }
   try { S.audioCtx?.close(); } catch { /* ignore */ }
   Object.assign(S, { audioCtx: null, micSrc: null, gain: null, gate: null, analyser: null, dest: null, outTrack: null, channelId: null, meta: {}, stage: false, roles: new Map() });
-  warned.clear(); streamStore.byUser.clear(); set({ voice: { ...state.voice, speaking: {}, links: {}, conn: null } }); bump();
+  warned.clear(); nudged.clear(); streamStore.byUser.clear(); set({ voice: { ...state.voice, speaking: {}, links: {}, conn: null } }); bump();
 }
 
 /* ------------------------------------------------------------------ public API */

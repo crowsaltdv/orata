@@ -414,7 +414,10 @@ async function main() {
   ok(r.status === 200 && r.body.profile.colors.mode === 'gradient', 'picture mode without a picture falls back to a gradient');
   r = await api('PATCH', '/me', A.token, { profile: { effect: { id: 'lasers' }, avatarFrame: { id: 'ring' } } }); ok(r.status === 200 && r.body.profile === null, 'nothing valid left means no style');
   for (const [id] of EFFECTS) { r = await api('PATCH', '/me', A.token, { profile: { effect: { id, color: '#336699' } } }); if (r.status !== 200 || r.body.profile?.effect?.id !== id) { ok(false, `effect ${id} is accepted`); break; } }
-  ok(EFFECTS.length >= 40, `${EFFECTS.length} effects to choose from, and every one is accepted`);
+  ok(EFFECTS.length >= 30, `${EFFECTS.length} effects to choose from, and every one is accepted`);
+  const gone = ['ambient', 'clouds', 'fire', 'smoke', 'lava', 'fireflies', 'dust'];   // taken out on purpose: nobody can pick them, and a profile that still has one just loses the effect
+  ok(!EFFECTS.some(([id]) => gone.includes(id)) && gone.every((id) => !ENGINES[id]), 'the removed effects are not offered and have no animation');
+  r = await api('PATCH', '/me', A.token, { profile: { effect: { id: 'fire', color: '#336699' }, outline: { style: 'solid' } } }); ok(r.status === 200 && !r.body.profile?.effect, 'a removed effect is dropped when saving');
   const rec = new Proxy(function () {}, { get: (t, k) => (k === 'canvas' ? { width: 300, height: 200 } : rec), apply: () => rec, set: () => true });   // a canvas context that records nothing
   let engineError = null;
   for (const [id] of EFFECTS) { const eng = ENGINES[id]; try { const parts = Array.from({ length: eng.count }, () => eng.make(300, 200, Math.random, true)); for (let k = 0; k < 40; k++) { for (const p of parts) eng.update(p, 0.033, 300, 200, Math.random, k * 0.033); if (eng.drawAll) eng.drawAll(rec, parts, '#336699', null, k * 0.033, 300, 200); else for (const p of parts) eng.draw(rec, p, '#336699', '#cc6699', k * 0.033, 300, 200); } } catch (e) { engineError = `${id}: ${e.message}`; break; } }
