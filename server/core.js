@@ -464,10 +464,7 @@ export function pollView(p) {
   const votes = p.votes || {};
   return {
     question: p.question, multi: !!p.multi, expiresAt: p.expiresAt || null, closed: !!p.closed || !!(p.expiresAt && p.expiresAt <= Date.now()), total: Object.keys(votes).length,
-    answers: p.answers.map((a) => {   // votes from a linked Discord channel are kept as "d:<Discord id>": counted, but they aren't Orata people
-      const who = Object.entries(votes).filter(([, v]) => v.includes(a.id)).map(([uid]) => uid);
-      return { id: a.id, text: a.text, emoji: a.emoji || null, voters: who.filter((uid) => !uid.startsWith('d:')).slice(0, 200), discord: who.filter((uid) => uid.startsWith('d:')).length };
-    }),
+    answers: p.answers.map((a) => ({ id: a.id, text: a.text, emoji: a.emoji || null, voters: Object.entries(votes).filter(([, v]) => v.includes(a.id)).map(([uid]) => uid).slice(0, 200) })),
   };
 }
 /** A forum post as the forum list shows it. */

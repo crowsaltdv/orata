@@ -43,7 +43,7 @@ function said(e, who) {
     case 'discord_unlink': return html`unlinked ${ch(d.channel)} from Discord${d.why ? ` (${d.why})` : ''}`;
     case 'vanity_update': return d.old ? html`changed the custom invite link from <b>${d.old}</b> to <b>${d.code}</b>` : html`set the custom invite link to <b>${d.code}</b>`;
     case 'message_delete': return html`deleted a message by ${T} in ${ch(d.channel)}`;
-    case 'message_bulk_delete': return html`deleted ${d.count} messages in ${ch(d.channel)}`;
+    case 'message_bulk_delete': return html`deleted ${d.count} messages${e.target ? html` by ${T}` : ''} in ${ch(d.channel)}`;
     case 'message_pin': return html`pinned a message by ${T} in ${ch(d.channel)}`;
     case 'message_unpin': return html`unpinned a message by ${T} in ${ch(d.channel)}`;
     case 'automod_block': return html`blocked a message by ${T} in ${ch(d.channel)} (${d.rule})`;

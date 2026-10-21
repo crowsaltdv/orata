@@ -21,11 +21,13 @@ export function verificationMode() {
 /** True when this user may not use the app until they verify (only in REQUIRED mode). */
 export const isGated = (user) => !!user && !user.bot && user.emailVerified === false && verificationMode().required;
 
-/** Base URL for links in emails. PUBLIC_URL is the safe choice; without it we fall back to the address the request came to. */
+/** Orata's public address (links in emails, Orata people's pictures on Discord). PUBLIC_URL is the safe choice; without it we fall back to
+ *  the address the request came to. Hosts like Render handle https in front of Orata and say so in X-Forwarded-Proto, even without TRUST_PROXY. */
 export function baseUrl(req) {
   const fixed = String(ENV.PUBLIC_URL || '').trim().replace(/\/+$/, '');
   if (fixed) return fixed;
-  return `${req.protocol}://${req.get('host')}`;
+  const proto = String(req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim() === 'https' ? 'https' : req.protocol;
+  return `${proto}://${req.get('host')}`;
 }
 
 export const maskEmail = (e) => String(e || '').replace(/^(.{1,2}).*(@.*)$/, (_, a, b) => a + '•••' + b);

@@ -13,6 +13,7 @@ export const ORBIT_COMMANDS = [
   { name: 'joke', desc: 'Hear a joke' },
   { name: 'remind', desc: 'Orbit pings you here later', arg: '10m stretch' },
   { name: 'say', desc: 'Make Orbit post a message', arg: 'message', perm: 'MANAGE_MESSAGES' },
+  { name: 'purge', desc: 'Delete the last messages in this channel (pinned ones stay)', arg: '20 [@member]', perm: 'MANAGE_MESSAGES', only: true },
   { name: 'kick', desc: 'Kick a member', arg: '@member or ID [reason]', perm: 'KICK_MEMBERS' },
   { name: 'ban', desc: 'Ban a member', arg: '@member or ID [reason]', perm: 'BAN_MEMBERS' },
   { name: 'timeout', desc: 'Time a member out', arg: '@member or ID 10m [reason]', perm: 'MODERATE_MEMBERS' },

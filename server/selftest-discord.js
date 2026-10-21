@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import sharp from 'sharp';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'orata-discord-test-'));
@@ -66,7 +67,7 @@ let child = null;
 function startServer() {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '', ACCOUNTS_PER_BROWSER: '1000', ACCOUNTS_PER_HOUR: '1000',
-      DISCORD_BOT_TOKEN: 'fake-token', DISCORD_API: `http://127.0.0.1:${FPORT}/api`, DISCORD_GATEWAY: `ws://127.0.0.1:${FPORT}/gateway`, PUBLIC_URL: '', TRUST_PROXY: '1' },
+      DISCORD_BOT_TOKEN: 'fake-token', DISCORD_API: `http://127.0.0.1:${FPORT}/api`, DISCORD_GATEWAY: `ws://127.0.0.1:${FPORT}/gateway`, PUBLIC_URL: '', TRUST_PROXY: '' },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
 }
@@ -90,7 +91,7 @@ async function main() {
 
   console.log('\nConnecting');
   await until(() => identify);
-  ok(identify?.token === 'fake-token' && identify.intents === (1 | 512 | 32768 | (1 << 24)), 'logs in to Discord with the token, asking for messages, their text and poll votes');
+  ok(identify?.token === 'fake-token' && identify.intents === (1 | 512 | 32768), 'logs in to Discord with the token, asking for messages and their text');
   const put = await until(() => calls.find((c) => c.method === 'PUT' && c.path === '/api/applications/900/commands'));
   ok(put?.body.some((c) => c.name === 'orata-link' && c.default_member_permissions === '32') && put.body.some((c) => c.name === 'orata-unlink'), 'sets up /orata-link and /orata-unlink, shown only to people who can manage the server');
   ok((await api('GET', '/config')).body.discord === true, 'Orata says Discord linking is on');
@@ -99,7 +100,7 @@ async function main() {
   const A = await register('alice'); const B = await register('bob');
   const S = (await api('POST', '/servers', A.token, { name: 'Bridge Town', orbit: true })).body; const text = S.channels.find((c) => c.type === 'text');
   await api('POST', `/invites/${(await api('POST', `/servers/${S.id}/invites`, A.token, {})).body.code}/join`, B.token);
-  const cmd = (tok, name) => api('POST', `/channels/${text.id}/command`, tok, { name, args: '' }, { 'x-forwarded-proto': 'https' });   // like behind Render's proxy
+  const cmd = (tok, name) => api('POST', `/channels/${text.id}/command`, tok, { name, args: '' });
   const msgs = async () => (await api('GET', `/channels/${text.id}/messages?limit=50`, A.token)).body.messages;
   let r = await cmd(B.token, 'link'); ok(r.status === 403, 'a member without Manage Server can’t /link');
   r = await cmd(A.token, 'link'); const code = /code:([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(r.body?.ephemeral || '')?.[1];
@@ -135,11 +136,11 @@ async function main() {
   ok(!hookPosts().some((c) => said(c).content?.includes('hi')), '… and a Discord message isn’t sent back to Discord');
 
   console.log('\nOrata → Discord');
-  r = await api('POST', `/channels/${text.id}/messages`, A.token, { content: `hey <@${B.user.id}> @everyone` });
+  r = await api('POST', `/channels/${text.id}/messages`, A.token, { content: `hey <@${B.user.id}> @everyone` }, { 'x-forwarded-proto': 'https' });   // like behind Render's proxy, without TRUST_PROXY
   const mineId = r.body.id;
   let h = await until(() => hookPosts().find((c) => said(c).content?.startsWith('hey')));
   ok(said(h).content === 'hey @Bob @everyone' && said(h).username === 'Alice', 'an Orata message goes to Discord under the sender’s name, mentions as plain names', said(h || { body: {} }).content);
-  ok(said(h).avatar_url === `https://127.0.0.1:${PORT}/img/icon-192.png` && said(h).allowed_mentions?.parse.length === 0, '… with their picture from the address /link was typed at (the logo without one), and it can’t ping anyone on Discord', said(h || { body: {} }).avatar_url);
+  ok(said(h).avatar_url === `https://127.0.0.1:${PORT}/img/icon-192.png` && said(h).allowed_mentions?.parse.length === 0, '… with their picture from Orata’s https address, learned even behind a proxy without TRUST_PROXY (the logo without one), and it can’t ping anyone on Discord', said(h || { body: {} }).avatar_url);
   const up = await (await fetch(base + '/api/upload', { method: 'POST', headers: { authorization: 'Bearer ' + A.token, 'content-type': 'image/png', 'x-filename': 'dog.png' }, body: PNG })).json();
   r = await api('POST', `/channels/${text.id}/messages`, A.token, { content: 'look', attachments: [up] }); const lookId = r.body.id;
   h = await until(() => hookPosts().find((c) => typeof c.body === 'string' && c.body.includes('look')));
@@ -147,13 +148,19 @@ async function main() {
   await api('PATCH', '/me', A.token, { avatar: up.url }); await api('POST', `/channels/${text.id}/messages`, A.token, { content: 'new face' });
   h = await until(() => hookPosts().find((c) => said(c).content === 'new face'));
   ok(said(h || { body: {} }).avatar_url === `https://127.0.0.1:${PORT}${up.url}`, 'an uploaded profile picture shows on Discord too', said(h || { body: {} }).avatar_url);
+  const webp = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#8b5cf6' } }).webp().toBuffer();   // Orata saves cropped pictures as WebP
+  const upw = await (await fetch(base + '/api/upload', { method: 'POST', headers: { authorization: 'Bearer ' + A.token, 'content-type': 'image/webp', 'x-filename': 'face.webp' }, body: webp })).json();
+  await api('PATCH', '/me', A.token, { avatar: upw.url }); await api('POST', `/channels/${text.id}/messages`, A.token, { content: 'webp face' });
+  h = await until(() => hookPosts().find((c) => said(c).content === 'webp face')); const pngUrl = said(h || { body: {} }).avatar_url || '';
+  const png = pngUrl.startsWith(`https://127.0.0.1:${PORT}/uploads/`) && pngUrl.endsWith('.png') ? Buffer.from(await (await fetch(base + pngUrl.slice(`https://127.0.0.1:${PORT}`.length))).arrayBuffer()) : null;
+  ok(png?.subarray(1, 4).toString() === 'PNG', 'a WebP profile picture goes to Discord as a PNG copy (Discord can’t show WebP ones)', pngUrl);
   await api('PATCH', `/channels/${text.id}/messages/${mineId}`, A.token, { content: 'hey (edited)' });
   const patch = await until(() => calls.find((c) => c.method === 'PATCH' && c.path.includes('/messages/')));
   ok(patch?.body.content === 'hey (edited)', 'editing in Orata edits the Discord copy');
   await api('DELETE', `/channels/${text.id}/messages/${mineId}`, A.token);
   ok(!!await until(() => calls.find((c) => c.method === 'DELETE' && c.path.includes(`/webhooks/wh1/${HOOK_TOKEN}/messages/`))), 'deleting in Orata deletes the Discord copy');
 
-  console.log('\nGIFs, stickers and polls');
+  console.log('\nGIFs');
   const gifv = (n) => ({ type: 'gifv', url: `https://tenor.com/view/cat-gif-${n}`, provider: { name: 'Tenor' }, thumbnail: { url: `https://media.tenor.com/x/cat${n}.png`, width: 220, height: 200 }, video: { url: `https://media.tenor.com/x/cat${n}.mp4`, width: 220, height: 200 } });
   const dana = { id: '1001', username: 'dana', global_name: 'Dana' };
   dispatch('MESSAGE_CREATE', { id: snow(), channel_id: '2001', guild_id: '4001', type: 0, content: 'https://tenor.com/view/cat-gif-1', author: dana, mentions: [], attachments: [], embeds: [gifv(1)] });
@@ -165,28 +172,15 @@ async function main() {
   dispatch('MESSAGE_UPDATE', { id: late, channel_id: '2001', guild_id: '4001', embeds: [gifv(2)] });
   const g2 = await until(async () => (await msgs()).find((m) => m.gif?.mp4 === 'https://media.tenor.com/x/cat2.mp4'));
   ok(g2 && g2.content === '' && !g2.editedAt, '… also when Discord adds the GIF a moment later (and it isn’t marked edited)');
+  console.log('\nStickers');
   dispatch('MESSAGE_CREATE', { id: snow(), channel_id: '2001', guild_id: '4001', type: 0, content: '', author: dana, mentions: [], attachments: [], sticker_items: [{ id: '5001', name: 'party', format_type: 1 }] });
   const s1 = await until(async () => (await msgs()).find((m) => m.sticker?.title === 'party'));
   ok(s1?.sticker.url.startsWith('/uploads/') && !s1.sticker.lottie && (await fetch(base + s1.sticker.url)).status === 200, 'a server sticker comes across as an Orata sticker');
   dispatch('MESSAGE_CREATE', { id: snow(), channel_id: '2001', guild_id: '4001', type: 0, content: '', author: dana, mentions: [], attachments: [], sticker_items: [{ id: '5002', name: 'wave', format_type: 3 }] });
   const s2 = await until(async () => (await msgs()).find((m) => m.sticker?.title === 'wave'));
   ok(s2?.sticker.lottie && (await (await fetch(base + s2.sticker.url)).json()).w === 160, '… and Discord’s own (animated Lottie) stickers too');
-  const pd = snow();
-  dispatch('MESSAGE_CREATE', { id: pd, channel_id: '2001', guild_id: '4001', type: 0, content: '', author: dana, mentions: [], attachments: [],
-    poll: { question: { text: 'Best pet?' }, answers: [{ answer_id: 1, poll_media: { text: 'Cat', emoji: { name: '🐱' } } }, { answer_id: 2, poll_media: { text: 'Dog' } }], expiry: new Date(Date.now() + 3600_000).toISOString(), allow_multiselect: false } });
-  const p1 = await until(async () => (await msgs()).find((m) => m.poll?.question === 'Best pet?'));
-  ok(p1 && p1.poll.answers.map((a) => a.id + a.text + (a.emoji || '')).join() === '1Cat🐱,2Dog' && p1.poll.expiresAt > Date.now(), 'a Discord poll becomes a real poll in Orata');
-  dispatch('MESSAGE_POLL_VOTE_ADD', { user_id: '1005', channel_id: '2001', message_id: pd, guild_id: '4001', answer_id: 2 });
-  const p2 = await until(async () => (await msgs()).find((m) => m.id === p1.id && m.poll.total === 1));
-  ok(p2?.poll.answers[1].discord === 1 && !p2.poll.answers[1].voters.length, 'votes on Discord count in Orata');
-  dispatch('MESSAGE_POLL_VOTE_REMOVE', { user_id: '1005', channel_id: '2001', message_id: pd, guild_id: '4001', answer_id: 2 });
-  ok(!!await until(async () => (await msgs()).find((m) => m.id === p1.id && m.poll.total === 0)), '… and taking a vote back takes it off');
-  r = await api('POST', `/channels/${text.id}/messages`, A.token, { poll: { question: 'Lunch?', answers: [{ text: 'Pizza', emoji: '🍕' }, { text: 'Tacos' }], hours: 4 } }); const lunchId = r.body.id;
-  h = await until(() => hookPosts().find((c) => said(c).poll?.question?.text === 'Lunch?'));
-  ok(said(h).poll.answers[0].poll_media.emoji.name === '🍕' && said(h).poll.answers[1].poll_media.text === 'Tacos' && said(h).poll.duration === 4, 'an Orata poll goes to Discord as a real poll');
-  dispatch('MESSAGE_POLL_VOTE_ADD', { user_id: '1006', channel_id: '2001', message_id: h.id, guild_id: '4001', answer_id: 1 });
-  ok(!!await until(async () => (await msgs()).find((m) => m.id === lunchId && m.poll.answers[0].discord === 1)), '… and votes on the Discord copy count in Orata');
-
+  dispatch('MESSAGE_CREATE', { id: snow(), channel_id: '2001', guild_id: '4001', type: 0, content: '', author: dana, mentions: [], attachments: [], poll: { question: { text: 'Nope?' }, answers: [{ answer_id: 1, poll_media: { text: 'a' } }] } });
+  await sleep(400); ok(!(await msgs()).some((m) => m.poll), 'polls aren’t mirrored');
   console.log('\nEdits, replies and deletes from Discord');
   dispatch('MESSAGE_UPDATE', { id: d1, channel_id: '2001', guild_id: '4001', content: 'hi again', mentions: [] });
   const e1 = await until(async () => (await msgs()).find((m) => m.id === m1.id && m.content === 'hi again'));

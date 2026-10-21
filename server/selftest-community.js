@@ -616,6 +616,33 @@ async function main() {
   r = await api('GET', `/users/${MB.user.id}`, PL.token); ok(!r.body.user.tag, 'leaving the server takes the tag off');
   r = await api('PATCH', '/me', PL.token, { tagServer: null }); ok(r.status === 200 && !r.body.tag, 'it can be taken off');
 
+  /* ---------------------------------------------------------------- /purge, and bans that delete everything */
+  console.log('\nPurge and ban options');
+  const sayBg = (tok, content) => api('POST', `/channels/${bgText.id}/messages`, tok, { content });
+  const pinMsg = (await sayBg(A.token, 'keep me (pinned)')).body; await api('PUT', `/channels/${bgText.id}/pins/${pinMsg.id}`, A.token);
+  for (const x of ['p1', 'p2', 'p3', 'p4']) await sayBg(A.token, x);
+  await sayBg(PL.token, 'pl1'); await sayBg(PL.token, 'pl2');
+  r = await cmd(PL.token, 'purge', '2'); ok(r.status === 403, 'a member without Manage Messages can’t /purge');
+  r = await cmd(A.token, 'purge', 'lots'); ok(r.status === 400, '/purge needs a number from 1 to 100');
+  r = await cmd(A.token, 'purge', `2 <@${PL.user.id}>`); let remaining = (await bgMsgs()).map((m) => m.content);
+  ok(r.status === 200 && /Deleted \*\*2\*\*/.test(r.body.ephemeral) && !remaining.includes('pl1') && !remaining.includes('pl2') && remaining.includes('p4'), '/purge 2 @member deletes only that member’s last two messages');
+  r = await cmd(A.token, 'purge', '3'); remaining = (await bgMsgs()).map((m) => m.content);
+  ok(['p2', 'p3', 'p4'].every((x) => !remaining.includes(x)) && remaining.includes('p1') && remaining.includes('keep me (pinned)'), '/purge 3 deletes the last three messages, but never pinned ones');
+  r = await api('GET', `/servers/${BG.id}/audit-log?action=message_`, A.token);
+  ok(r.body.entries.some((e) => e.action === 'message_bulk_delete' && e.target === PL.user.id && e.details.count === 2), '/purge is in the audit log');
+  const devZ = 'device-zedzedzedzedzedz1';
+  const Z1 = await register('zed', { dev: devZ, ip: '198.51.100.71' }); const Z2 = await register('zedalt', { dev: devZ, ip: '198.51.100.72' });
+  await joinWith(Z1.token, devZ, '198.51.100.71'); await joinWith(Z2.token, devZ, '198.51.100.72');
+  const zChans = S.channels.filter((c) => c.type === 'text').slice(0, 2);
+  for (const c of zChans) await api('POST', `/channels/${c.id}/messages`, Z1.token, { content: 'zed was here' }, hdr(devZ));
+  await api('POST', `/channels/${zChans[0].id}/messages`, Z2.token, { content: 'alt was here' }, hdr(devZ));
+  r = await api('GET', `/servers/${S.id}/bans/${Z1.user.id}/alts`, Z2.token); ok(r.status === 403, 'only people who can ban see someone’s other accounts');
+  r = await api('GET', `/servers/${S.id}/bans/${Z1.user.id}/alts`, A.token, null, hdr(devOwner));
+  ok(r.status === 200 && r.body.alts.length === 1 && r.body.alts[0].id === Z2.user.id && !JSON.stringify(r.body).includes('device'), 'the ban dialog lists the other accounts on their browser (and nothing about the browser itself)');
+  r = await api('PUT', `/servers/${S.id}/bans/${Z1.user.id}`, A.token, { deleteAll: true }, hdr(devOwner));
+  let zLeft = false; for (const c of zChans) if ((await api('GET', `/channels/${c.id}/messages?limit=50`, A.token)).body.messages.some((m) => /was here/.test(m.content))) zLeft = true;
+  ok(r.status === 200 && r.body.alts.some((a) => a.id === Z2.user.id) && !zLeft, '“Delete all their messages” deletes everything they (and their banned alts) posted, in every channel');
+
   /* ---------------------------------------------------------------- Orate → Orata */
   console.log('\nRenamed to Orata');
   await stopServer();

@@ -2,7 +2,7 @@
 // slash commands. Each server's Orbit is its own bot account, so renaming it or changing its picture in /settings only changes it there.
 // Who may use a command: its permission by default (see public/js/orbit-commands.js), narrowed to chosen roles in /settings; owners and admins always may.
 import { db, save, newId, emitTo, publicUser, memberView, messageView, serverAudience, audienceOf, can, needIn, need, isOwner, topRolePos, audit, randomAvatarBg, bad, forbidden, ApiError } from './core.js';
-import { postMessage } from './messages.js';
+import { postMessage, messagesDeleted } from './messages.js';
 import { JOKES, BALL, rollDice } from './bot.js';
 import { ORBIT_COMMANDS, orbitCommand, parseDuration, formatDuration } from '../public/js/orbit-commands.js';
 import { discordOn, linkCode, unlinkChannel } from './discord.js';
@@ -158,6 +158,21 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
       case 'say': {
         if (!args) throw bad('What should Orbit say? /say hello everyone');
         return res.json(post(text(args)));
+      }
+      case 'purge': {   // the last 1–100 messages here (only one member's, with @member); pinned messages stay
+        needIn(me, ch, 'MANAGE_MESSAGES');
+        const n = Number(first);
+        if (!Number.isInteger(n) || n < 1 || n > 100) throw bad('Say how many, from 1 to 100: /purge 20 (add @member to delete only theirs)');
+        const whose = tail ? memberFrom(s, tail) : null;
+        if (tail && !whose) throw bad('Orbit can’t find that member: /purge 20 @member');
+        const list = db.messages[ch.id] || [];
+        const ids = new Set(list.filter((m) => !m.pinned && (!whose || m.authorId === whose)).slice(-n).map((m) => m.id));
+        if (!ids.size) return res.json(only('There’s nothing to delete here.'));
+        db.messages[ch.id] = list.filter((m) => !ids.has(m.id));
+        for (const id of ids) emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: id });
+        audit(s, me, 'message_bulk_delete', { channel: ch.name, count: ids.size, ...(whose ? { target: whose } : {}) });
+        save(); messagesDeleted(ch, [...ids]);
+        return res.json(only(`🧹 Deleted **${ids.size}** message${ids.size === 1 ? '' : 's'}${whose ? ` from **${nameIn(s, whose)}**` : ''}.`));
       }
       case 'remind': {
         const ms = parseDuration(first);

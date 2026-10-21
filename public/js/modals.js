@@ -168,18 +168,25 @@ MODALS['edit-channel'] = function EditChannel({ id, channelId, tab: startTab }) 
 MODALS.ban = function BanModal({ id, serverId, userId }) {
   const u = state.users[userId]; const server = state.servers[serverId];
   const [reason, setReason] = useState(''); const [del, setDel] = useState(0); const [busy, setBusy] = useState(false); const [alts, setAlts] = useState(true);
+  const [all, setAll] = useState(false); const [others, setOthers] = useState(null);   // the other accounts on their browser (null while loading)
+  useEffect(() => { api.get(`/servers/${serverId}/bans/${userId}/alts`).then((r) => setOthers(r.alts), () => setOthers([])); }, [serverId, userId]);
   if (!u || !server) return null;
   const DEL = [{ value: 0, label: t('Don’t delete any') }, { value: 1, label: t('Previous hour') }, { value: 24, label: t('Previous 24 hours') }, { value: 168, label: t('Previous 7 days') }];
   const go2 = async () => {
-    setBusy(true); const r = await act(api.put(`/servers/${serverId}/bans/${userId}`, { reason: reason.trim(), deleteHours: del, alts }));
+    setBusy(true); const r = await act(api.put(`/servers/${serverId}/bans/${userId}`, { reason: reason.trim(), deleteHours: del, deleteAll: all, alts }));
     setBusy(false);
     if (r) { toast(r.alts?.length ? `${u.displayName} and ${r.alts.length} other account${r.alts.length === 1 ? '' : 's'} (${r.alts.map((a) => a.displayName).join(', ')}) were banned` : `${u.displayName} was banned`, 'success', 4500); closeModal(id); }
   };
   return html`<${Modal} title=${`${t('Ban')} ${u.displayName}`} subtitle=${t('They are removed from the server and can’t rejoin — with this account or any other from the same browser — until you unban them.')} width=${460} onClose=${() => closeModal(id)}
     footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="danger" icon="ban" loading=${busy} onClick=${go2}>${t('Ban')}<//>`}>
     <${Field} label=${t('Reason (only moderators see it)')}><${TextInput} value=${reason} onInput=${setReason} maxlength="200" placeholder=${t('Optional')} autofocus onKeyDown=${(e) => e.key === 'Enter' && go2()} /><//>
-    <${Field} label=${t('Delete their recent messages')}><${Dropdown} value=${del} options=${DEL} onChange=${setDel} /><//>
+    <label class="orbit-check"><input type="checkbox" checked=${all} onChange=${(e) => setAll(e.target.checked)} /><span class="box"><${Icon} name="check" size=${14} sw=${3} /></span>
+      <span><b>${t('Delete all their messages')}</b><small>${t('Everything they ever posted in this server, in every channel (and from their other accounts, if those are banned too).')}</small></span></label>
+    ${all ? null : html`<${Field} label=${t('Delete their recent messages')}><${Dropdown} value=${del} options=${DEL} onChange=${setDel} /><//>`}
     <${SettingRow} title=${t('Also ban their other accounts')} desc=${t('Accounts that share their browser (their alts) are banned too. Turn this off to ban just this one.')}><${Toggle} checked=${alts} onChange=${setAlts} /><//>
+    <div class=${cx('ban-alts', !alts && 'off')}>${others === null ? html`<${Spinner} size=${18} />`
+      : others.length ? html`<small>${t('Other accounts on their browser')} (${others.length})</small>${others.map((a) => html`<div class="ban-alt" key=${a.id}><${Avatar} user=${a} size=${28} /><b>${a.displayName}</b><span>@${a.username}</span></div>`)}`
+      : html`<small>${t('No other accounts on their browser.')}</small>`}</div>
   <//>`;
 };
 

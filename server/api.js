@@ -14,10 +14,10 @@ import {
 import { automodRule } from './automod.js';
 import { formatDuration } from '../public/js/orbit-commands.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt, messageEdited, messagesDeleted } from './messages.js';
-import { startDiscord, discordOn } from './discord.js';
+import { startDiscord, discordOn, noteSite } from './discord.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 import { hasProfanity, censor, cleanBlockedWords } from './profanity.js';   // the same checker the browser uses
-import { verificationMode, isGated, issueVerification, consumeVerification, resendWait, maskEmail } from './verify.js';
+import { verificationMode, isGated, issueVerification, consumeVerification, resendWait, maskEmail, baseUrl } from './verify.js';
 import { beginSignup, confirmSignup, resendSignup } from './signup.js';
 import { closeConns, storeUpload, restoreUpload } from './core.js';
 import { createSession, findSession, touchSession, endSession, endUserSessions, listSessions } from './sessions.js';
@@ -1088,11 +1088,22 @@ export function createApi() {
   r.delete('/servers/:id/members/:uid', h(async (req, res) => {
     kickMember(req, getServer(req, req.params.id), req.params.uid); res.json({ ok: true });
   }));
+  /** The other accounts on the browser(s) of `uid` that a ban would take with them (never the server's owners or anyone ranked above you). */
+  function bannableAlts(req, s, uid) {
+    const { alts, safe } = altAccounts(s, uid, req.user.id, req);
+    return { alts: alts.filter((id) => !(s.members[id] && topRolePos(s, req.user.id) <= topRolePos(s, id))), safe };
+  }
+  // the ban dialog shows them before you ban (accounts only: the browser ids themselves are never shown)
+  r.get('/servers/:id/bans/:uid/alts', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'BAN_MEMBERS');
+    if (!db.users[req.params.uid]) throw notFound('Unknown user');
+    res.json({ alts: bannableAlts(req, s, req.params.uid).alts.map((id) => publicUser(db.users[id])) });
+  }));
   r.put('/servers/:id/bans/:uid', h(async (req, res) => {
     const alts = banMember(req, getServer(req, req.params.id), req.params.uid, req.body || {});
     res.json({ ok: true, alts: alts.map((id) => ({ id, displayName: db.users[id].displayName })) });
   }));
-  /** Bans `uid` (with { reason, deleteHours, alts }); returns the ids of the alt accounts banned along with them. */
+  /** Bans `uid` (with { reason, deleteHours, deleteAll, alts }); returns the ids of the alt accounts banned along with them. */
   function banMember(req, s, uid, b = {}) {
     need(s, req.user.id, 'BAN_MEMBERS');
     if (!db.users[uid]) throw notFound('Unknown user');
@@ -1101,9 +1112,9 @@ export function createApi() {
     // remember why and by whom, and which browsers the person used — they can't come back with another account from those,
     // and the accounts they already have on them (their alts) are banned along with them
     s.banInfo ||= {}; s.bannedDevices ||= {}; s.bans ||= [];
-    const { alts: found, safe } = altAccounts(s, uid, req.user.id, req);
-    const alts = b.alts === false ? [] : found.filter((id) => !(s.members[id] && topRolePos(s, req.user.id) <= topRolePos(s, id)));
-    const hours = clampInt(b.deleteHours, 0, 168, 0); const reason = String(b.reason || '').trim().slice(0, 200); const at = Date.now();
+    const { alts: found, safe } = bannableAlts(req, s, uid);
+    const alts = b.alts === false ? [] : found;
+    const hours = b.deleteAll ? Infinity : clampInt(b.deleteHours, 0, 168, 0); const reason = String(b.reason || '').trim().slice(0, 200); const at = Date.now();   // deleteAll: everything they ever posted here
     for (const target of [uid, ...alts]) {
       s.banInfo[target] = { reason: target === uid ? reason : `Alt of ${db.users[uid].displayName}${reason ? ` — ${reason}` : ''}`.slice(0, 200), by: req.user.id, at, ...(target === uid ? {} : { altOf: uid }) };
       for (const h of deviceHashesOf(db.users[target])) if (!safe.has(h)) s.bannedDevices[h] = uid;
@@ -1114,7 +1125,7 @@ export function createApi() {
     save();
     return alts;
   }
-  /** Deletes what a person posted in this server during the last `hours` hours (0 = nothing). */
+  /** Deletes what a person posted in this server during the last `hours` hours (0 = nothing, Infinity = all of it). */
   function purgeMessages(s, uid, hours) {
     if (!hours) return;
     const cutoff = Date.now() - hours * 3600_000;
@@ -1224,7 +1235,7 @@ export function createApi() {
   }));
 
   r.post('/channels/:id/messages', limit('msg', 12, 6000, (req) => req.user.id), h(async (req, res) => {
-    const ch = getChannel(req, req.params.id);
+    const ch = getChannel(req, req.params.id); noteSite(ch.id, baseUrl(req));   // a Discord-linked channel learns Orata's address for pictures
     if (ch.type === 'voice' && !ch.serverId) throw bad('Cannot post here');
     if (ch.type === 'category') throw bad('Cannot post to a category');
     if (ch.type === 'stage') throw bad('A stage has no messages — it is for talking');
