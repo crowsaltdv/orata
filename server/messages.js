@@ -1,7 +1,11 @@
 // Orata — message creation shared by the REST API and the built-in bot.
 import { db, newId, save, emitTo, audienceOf, messageView, publicUser, canIn, channelView, customEmojisIn, postView, removeUpload } from './core.js';
 
-export const hooks = { onMessage: [] };
+export const hooks = { onMessage: [], onEdit: [], onDelete: [] };   // onDelete gets (channel, ids)
+const run = (list, ...args) => { for (const fn of list) { try { fn(...args); } catch (e) { console.error('[hook]', e); } } };
+/** Tells the hooks (the Discord bridge) that a message was edited, or that messages were deleted. */
+export const messageEdited = (ch, m) => run(hooks.onEdit, ch, m);
+export const messagesDeleted = (ch, ids) => { if (ids.length) run(hooks.onDelete, ch, ids); };
 /** Audio messages (recorded, or an audio file dropped in) are at most 3 minutes long and delete themselves a day after they are sent. */
 export const VOICE_MAX_SECONDS = 180;
 export const VOICE_TTL = 86400_000;
@@ -38,7 +42,7 @@ export function sanitizeAttachments(list, fs, path, uploadDir) {
   return out;
 }
 
-export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce, poll = null, theme = null, forward = null } = {}) {
+export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce, poll = null, theme = null, forward = null, bridge = null } = {}) {
   content = String(content).replace(/\r\n/g, '\n').slice(0, 4000);
   const server = ch.serverId ? db.servers[ch.serverId] : null;
   const author = db.users[authorId];
@@ -70,6 +74,7 @@ export function postMessage(ch, authorId, { content = '', attachments = [], gif 
   if (poll) msg.poll = poll;
   if (theme) msg.theme = theme;
   if (forward) msg.forward = forward;   // a copy of a message forwarded from elsewhere
+  if (bridge) msg.bridge = bridge;   // posted from a linked Discord channel: { id, name, avatar } of the Discord sender
   if (attachments.some((a) => a.voice)) { msg.expiresAt = msg.createdAt + VOICE_TTL; expiring.set(msg.id, { channelId: ch.id, at: msg.expiresAt }); }
   (db.messages[ch.id] ||= []).push(msg);
   if (ch.type === 'post') { ch.lastActivity = msg.createdAt; emitTo(audienceOf(ch), 'post_update', { post: postView(ch) }); }   // keeps the forum list's "last activity" and reply counts live
@@ -86,7 +91,7 @@ export function postMessage(ch, authorId, { content = '', attachments = [], gif 
   save();
   const view = messageView(msg); view.nonce = nonce;
   emitTo(audienceOf(ch), 'message_create', { message: view, users: author ? [publicUser(author)] : [] });
-  for (const fn of hooks.onMessage) { try { fn(ch, msg); } catch (e) { console.error('[hook]', e); } }
+  run(hooks.onMessage, ch, msg);
   return msg;
 }
 
@@ -105,7 +110,7 @@ function sweepExpired() {
     m.attachments = (m.attachments || []).filter((y) => !y.voice); delete m.expiresAt;
     if (!m.content?.trim() && !m.attachments.length && !m.gif && !m.sticker && !m.poll && !m.theme) {
       list.splice(list.indexOf(m), 1);
-      emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: id });
+      emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: id }); messagesDeleted(ch, [id]);
     } else emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
     save();
   }

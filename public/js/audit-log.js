@@ -8,10 +8,10 @@ import { errMsg } from '/js/actions.js';
 import { formatDuration } from '/js/orbit-commands.js';
 import { t } from '/js/i18n.js';
 
-const KINDS = [['', 'Everything'], ['member_', 'Members'], ['role_', 'Roles'], ['channel_', 'Channels'], ['message_', 'Messages'], ['automod', 'AutoMod'], ['server_,invite_,vanity_,tag_,orbit_,reaction_', 'Server & Orbit']];
+const KINDS = [['', 'Everything'], ['member_', 'Members'], ['role_', 'Roles'], ['channel_', 'Channels'], ['message_', 'Messages'], ['automod', 'AutoMod'], ['server_,invite_,vanity_,tag_,orbit_,reaction_,discord_', 'Server & Orbit']];
 const ICON = { member_kick: 'log-out', member_ban: 'ban', member_unban: 'user-check', member_timeout: 'clock', member_timeout_remove: 'clock', member_role_add: 'tag', member_role_remove: 'tag', member_nick: 'edit',
   role_create: 'tag', role_update: 'tag', role_delete: 'tag', channel_create: 'hash', channel_update: 'hash', channel_delete: 'hash', server_update: 'settings', server_transfer: 'crown',
-  invite_create: 'link', invite_delete: 'link', vanity_update: 'link', tag_update: 'tag', message_delete: 'trash', message_bulk_delete: 'trash', message_pin: 'pin', message_unpin: 'pin', automod_block: 'shield', orbit_add: 'sparkles', orbit_remove: 'sparkles', orbit_update: 'sparkles', reaction_roles_create: 'smile' };
+  invite_create: 'link', invite_delete: 'link', vanity_update: 'link', tag_update: 'tag', discord_link: 'link', discord_unlink: 'link', message_delete: 'trash', message_bulk_delete: 'trash', message_pin: 'pin', message_unpin: 'pin', automod_block: 'shield', orbit_add: 'sparkles', orbit_remove: 'sparkles', orbit_update: 'sparkles', reaction_roles_create: 'smile' };
 const FIELD = { name: 'name', description: 'description', icon: 'icon', banner: 'banner', accent: 'color', systemChannelId: 'join messages channel', profanity: 'swearing protection', blockedWords: 'blocked words', automod: 'AutoMod', onboarding: 'onboarding', topic: 'topic', slowmode: 'slowmode', nsfw: 'age limit', parentId: 'category', overwrites: 'permissions', synced: 'permissions', tags: 'tags', requireTag: 'tags', color: 'color', hoist: 'shown separately', position: 'order', permissions: 'permissions', displayName: 'name', bio: 'about', avatar: 'picture', roles: 'command roles' };
 const fields = (list) => (list?.length ? ` (${[...new Set(list.map((f) => FIELD[f] || f))].join(', ')})` : '');
 const BAD = new Set(['member_kick', 'member_ban', 'member_timeout', 'role_delete', 'channel_delete', 'message_delete', 'message_bulk_delete', 'automod_block', 'invite_delete', 'orbit_remove']);
@@ -39,6 +39,8 @@ function said(e, who) {
     case 'invite_create': return html`created the invite <b>${d.code}</b>`;
     case 'invite_delete': return html`deleted the invite <b>${d.code}</b>`;
     case 'tag_update': return d.old ? html`changed the server tag from <b>${d.old}</b> to <b>${d.text}</b>` : html`set the server tag to <b>${d.text}</b>`;
+    case 'discord_link': return html`linked ${ch(d.channel)} with <b>#${d.discordChannel}</b>${d.guild ? ` (${d.guild})` : ''} on Discord`;
+    case 'discord_unlink': return html`unlinked ${ch(d.channel)} from Discord${d.why ? ` (${d.why})` : ''}`;
     case 'vanity_update': return d.old ? html`changed the custom invite link from <b>${d.old}</b> to <b>${d.code}</b>` : html`set the custom invite link to <b>${d.code}</b>`;
     case 'message_delete': return html`deleted a message by ${T} in ${ch(d.channel)}`;
     case 'message_bulk_delete': return html`deleted ${d.count} messages in ${ch(d.channel)}`;
@@ -72,7 +74,7 @@ export function AuditLog({ server }) {
     ${!rows ? html`<div class="pk-center"><${Spinner} /></div>` : !rows.length && !err ? html`<${Empty} icon="list" title=${t('Nothing here yet')}>${t('Moderator actions and AutoMod blocks will show up here.')}<//>`
       : html`<div class="al-list">${rows.map((e) => html`<div class="al-row" key=${e.id}>
         <span class=${`al-ic ${BAD.has(e.action) ? 'bad' : ''}`}><${Icon} name=${ICON[e.action] || 'info'} size=${16} /></span>
-        <div class="al-text"><div>${e.actorId ? who(e.actorId) : html`<b>AutoMod</b>`} ${said(e, who)}</div>
+        <div class="al-text"><div>${e.actorId ? who(e.actorId) : e.details?.discordUser ? html`<b>${e.details.discordUser}</b> (Discord)` : html`<b>${e.action.startsWith('discord_') ? 'Orbit' : 'AutoMod'}</b>`} ${said(e, who)}</div>
           ${e.reason ? html`<small>${t('Reason')}: ${e.reason}</small>` : null}${e.details?.excerpt ? html`<small class="al-ex">“${e.details.excerpt}”</small>` : null}</div>
         <time title=${formatFull(e.at)}>${relTime(e.at)}</time></div>`)}</div>`}
     ${more ? html`<${Btn} size="sm" loading=${busy} onClick=${() => load(rows[rows.length - 1]?.id)}>${t('Show older')}<//>` : null}

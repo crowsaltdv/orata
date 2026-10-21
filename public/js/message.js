@@ -2,7 +2,7 @@
 import { html, useState, useEffect, useRef, useMemo, memo, cx, formatStamp, formatClock, formatFull, fileSize, copyText, isImageType, shallowEq } from '/js/lib.js';
 import { state, set, useSel, nameOf, roleColor, openContext, openPopover, openModal, toast, getChannel, hasPerm, hasChannelPerm, dmName, goChannel, goDm, go, emojiById } from '/js/store.js';
 import { Icon } from '/js/icons.js';
-import { Avatar, IconBtn } from '/js/ui.js';
+import { Avatar, IconBtn, POPOVERS } from '/js/ui.js';
 import { renderMarkdown, emojiOnlyCount, plainPreview, decodeMentions } from '/js/markdown.js';
 import { toggleReaction, deleteMessage, pinMessage, editMessage, jumpToMessage, retryMessage, discardMessage, mapMessage } from '/js/actions.js';
 import { openProfile } from '/js/sidebar.js';
@@ -214,8 +214,11 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
   const invites = [...new Set(links.map(inviteCodeOf).filter(Boolean))].slice(0, 2);   // invite links become join cards, whatever the link-preview setting says
   const urls = showEmbeds ? links.filter((u) => !inviteCodeOf(u)).slice(0, 2) : [];
   const onImage = (a) => { const imgs = (m.attachments || []).filter((x) => isImageType(x.type)).map((x) => ({ url: x.url, name: x.name })); const i = imgs.findIndex((x) => x.url === a.url); set({ lightbox: { items: i >= 0 ? imgs : [a], index: Math.max(0, i) } }); };
-  const name = nick || author?.displayName || 'Unknown User';
-  const open = (e) => openProfile(m.authorId, e.currentTarget);
+  const b = m.bridge;   // from a linked Discord channel: shown as the Discord sender, not as Orbit who posted it
+  const who = b ? discordUser(b) : author;
+  const name = b ? b.name : nick || author?.displayName || 'Unknown User';
+  const open = (e) => (b ? openPopover(e.currentTarget, 'discord-user', { b }, { placement: 'right' }) : openProfile(m.authorId, e.currentTarget));
+  const rb = m.reply?.bridge; const replyWho = rb ? discordUser(rb) : replyAuthor;
   const onCtx = (e) => { if (m.ephemeral || e.target.closest('a, .mention')) return; openContext(e, messageMenu(m, ch)); };
   const timeEl = html`<time class="msg-time" title=${formatFull(m.createdAt)}>${formatStamp(m.createdAt, hour12)}</time>`;
   const toolbar = !m.pending && !m.failed && !m.ephemeral ? html`<div class="msg-toolbar glass glass-toolbar">
@@ -229,12 +232,12 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
     ${m.reply ? html`<div class="msg-reply" onClick=${() => m.reply.id && !m.reply.deleted && jumpToMessage(ch.id, m.reply.id)}>
       <span class="reply-hook"></span>
       ${m.reply.deleted ? html`<span class="reply-deleted"><${Icon} name="reply" size=${13} /> Original message was deleted</span>`
-        : html`<${Avatar} user=${replyAuthor} size=${16} /><span class="reply-name" style=${replyColor ? { color: replyColor } : null}>${m.reply.authorId === me ? '@' : ''}<${UserName} user=${replyAuthor} text=${replyNick || replyAuthor?.displayName || 'Unknown'} /></span>
+        : html`<${Avatar} user=${replyWho} size=${16} /><span class="reply-name" style=${replyColor && !rb ? { color: replyColor } : null}>${m.reply.authorId === me && !rb ? '@' : ''}<${UserName} user=${replyWho} text=${rb ? rb.name : replyNick || replyAuthor?.displayName || 'Unknown'} /></span>
           <span class="reply-text">${m.reply.content ? plainPreview(m.reply.content, ch.serverId, 120) : m.reply.gif ? 'Click to see GIF' : m.reply.sticker ? 'Click to see sticker' : m.reply.attachments ? 'Click to see attachment' : ''}</span>${m.reply.attachments ? html`<${Icon} name="image" size=${14} />` : null}`}</div>` : null}
     <div class="msg-main">
-      <div class="msg-gutter">${head ? (state.settings.chat.showAvatars ? html`<${Avatar} user=${author} size=${40} onClick=${open} onContextMenu=${(e) => openContext(e, [{ label: 'Profile', icon: 'user', onClick: () => openProfile(m.authorId) }, { label: 'Message', icon: 'message', onClick: () => import('/js/actions.js').then((a) => a.openDm(m.authorId)), disabled: m.authorId === me }])} />` : null) : html`<time class="msg-time hover-time">${formatClock(m.createdAt, hour12)}</time>`}</div>
+      <div class="msg-gutter">${head ? (state.settings.chat.showAvatars ? html`<${Avatar} user=${who} size=${40} onClick=${open} onContextMenu=${(e) => !b && openContext(e, [{ label: 'Profile', icon: 'user', onClick: () => openProfile(m.authorId) }, { label: 'Message', icon: 'message', onClick: () => import('/js/actions.js').then((a) => a.openDm(m.authorId)), disabled: m.authorId === me }])} />` : null) : html`<time class="msg-time hover-time">${formatClock(m.createdAt, hour12)}</time>`}</div>
       <div class="msg-body">
-        ${head ? html`<div class="msg-head"><span class="msg-author" style=${color ? { color } : null} role="button" tabindex="0" onClick=${open}><${UserName} user=${author} text=${name} /></span>${author?.tag ? html`<${ServerTag} tag=${author.tag} />` : null}${author?.bot ? html`<span class="bot-tag">APP</span>` : null}${timeEl}</div>` : null}
+        ${head ? html`<div class="msg-head"><span class="msg-author" style=${color && !b ? { color } : null} role="button" tabindex="0" onClick=${open}><${UserName} user=${who} text=${name} /></span>${b ? html`<span class="bot-tag discord-tag">DISCORD</span>` : html`${author?.tag ? html`<${ServerTag} tag=${author.tag} />` : null}${author?.bot ? html`<span class="bot-tag">APP</span>` : null}`}${timeEl}</div>` : null}
         ${editing ? html`<${InlineEditor} m=${m} ch=${ch} onDone=${() => set({ editing: null })} />`
           : htmlContent ? html`<div class=${cx('msg-content', jumbo && 'jumbo')} onClick=${(e) => onBodyClick(e, ch)} dangerouslySetInnerHTML=${{ __html: htmlContent }}></div>` : null}
         ${m.editedAt && !editing ? html`<span class="edited" data-tip=${formatFull(m.editedAt)}>(${t('edited')})</span>` : null}
@@ -255,6 +258,13 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
     </div>
   </div>`;
 }, (a, b) => shallowEq(a, b));
+
+const discordUser = (b) => ({ id: 'discord-' + b.id, displayName: b.name, avatar: b.avatar });
+/** Clicking a Discord sender: who they are (they have no Orata account, so no profile). */
+POPOVERS['discord-user'] = function DiscordUser({ b }) {
+  return html`<div class="pop-card discord-pop"><${Avatar} user=${discordUser(b)} size=${64} />
+    <div><div class="dp-name">${b.name}<span class="bot-tag discord-tag">DISCORD</span></div><p>${t('Writes in a Discord channel linked with this one. Orbit brings their messages here, and yours to them.')}</p></div></div>`;
+};
 
 export const dmTitle = dmName;
 void go; void openModal; void openPopover; void mapMessage;

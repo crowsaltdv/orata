@@ -127,7 +127,7 @@ function bootstrap(d) {
   }
   if (state.settings.notif.desktop && 'Notification' in window && Notification.permission === 'default') { /* asked from settings, never on load */ }
 }
-gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, musicOk: !!c.music, maxUpload: c.maxUpload, turn: !!c.turn, emailVerif: { enabled: !!c.emailVerification?.enabled, required: !!c.emailVerification?.required, smtp: !!c.emailVerification?.smtp } })).catch(() => {}); });
+gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, musicOk: !!c.music, discordOk: !!c.discord, maxUpload: c.maxUpload, turn: !!c.turn, emailVerif: { enabled: !!c.emailVerification?.enabled, required: !!c.emailVerification?.required, smtp: !!c.emailVerification?.smtp } })).catch(() => {}); });
 
 /* ------------------------------------------------------------ helpers */
 function isMentioned(m, ch) {
@@ -151,10 +151,10 @@ function notifyMessage(m, ch, mentioned) {
   if (here) return;
   playSound(mentioned ? 'mention' : 'message');
   if (n.desktop && 'Notification' in window && Notification.permission === 'granted' && (!state.focused || document.hidden)) {
-    const author = nameOf(m.authorId, ch.serverId);
+    const author = m.bridge?.name || nameOf(m.authorId, ch.serverId);
     const title = dm ? (ch.type === 'group' ? `${author} · ${dmName(ch)}` : author) : `${author} (#${ch.name}, ${state.servers[ch.serverId]?.name})`;
     try {
-      const note = new Notification(title, { body: previewText(m), icon: state.users[m.authorId]?.avatar || '/img/icon-192.png', tag: ch.id, silent: true });
+      const note = new Notification(title, { body: previewText(m), icon: m.bridge?.avatar || state.users[m.authorId]?.avatar || '/img/icon-192.png', tag: ch.id, silent: true });
       note.onclick = () => { window.focus(); go(dm ? { view: 'dm', serverId: '@me', channelId: ch.id } : { view: 'channel', serverId: ch.serverId, channelId: ch.id }); note.close(); };
     } catch { /* ignore */ }
   }

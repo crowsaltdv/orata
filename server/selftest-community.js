@@ -479,6 +479,7 @@ async function main() {
   r = await cmd(PL.token, 'ping'); ok(r.status === 200 && /Pong/.test(r.body.ephemeral) && !(await bgMsgs()).some((m) => /Pong/.test(m.content)), '/ping answers only the person who asked');
   r = await cmd(PL.token, 'help'); ok(r.body.ephemeral.includes('/roll') && !r.body.ephemeral.includes('/kick'), '/help lists only the commands you can use');
   r = await cmd(A.token, 'help'); ok(r.body.ephemeral.includes('/kick') && r.body.ephemeral.includes('/settings'), '… and moderators see theirs');
+  ok(!r.body.ephemeral.includes('/link') && (await cmd(A.token, 'link')).status === 400, 'without a Discord bot set up there is no /link');
   r = await cmd(PL.token, 'roll', '2d6'); ok(r.status === 200 && (await bgMsgs()).some((m) => m.authorId === BG.orbitId && m.content.includes('🎲')), 'fun commands answer in the channel, for everyone');
   r = await cmd(PL.token, 'say', 'hello'); ok(r.status === 403, 'a member can’t make Orbit /say things');
   r = await cmd(A.token, 'say', 'Welcome everyone'); ok(r.status === 200 && (await bgMsgs()).some((m) => m.authorId === BG.orbitId && m.content === 'Welcome everyone'), '… a moderator can');

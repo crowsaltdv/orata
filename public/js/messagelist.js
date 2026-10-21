@@ -16,7 +16,7 @@ function buildRows(list, lastRead, meId) {
     }
     if (!prev || !sameDay(prev.createdAt, m.createdAt)) { rows.push({ type: 'date', key: 'd' + m.id, ts: m.createdAt }); prev = null; }
     const sys = m.type && m.type !== 'default';
-    const head = !prev || sys || prev.type !== 'default' && prev.type !== undefined || prev.authorId !== m.authorId || m.createdAt - prev.createdAt > 7 * 60_000 || !!m.reply;
+    const head = !prev || sys || prev.type !== 'default' && prev.type !== undefined || prev.authorId !== m.authorId || prev.bridge?.id !== m.bridge?.id || m.createdAt - prev.createdAt > 7 * 60_000 || !!m.reply;
     rows.push({ type: 'msg', key: m.id.startsWith('n:') ? m.id : m.id, m, head });
     prev = m;
   }

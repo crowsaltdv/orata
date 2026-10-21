@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import { ROOT, UPLOAD_DIR, ENV, ensureBot, db, pg, restoreUpload, storageSummary } from './core.js';
+import { discordOn } from './discord.js';
 import { createApi } from './api.js';
 import { attachGateway } from './gateway.js';
 import './bot.js';
@@ -86,6 +87,7 @@ server.listen(PORT, HOST, () => {
   if (!useTls && lan.length) console.log('    (voice/video/notifications on other devices need HTTPS — see README)');
   console.log(`\n    ${Object.values(db.users).filter((u) => !u.bot).length} user(s) · GIFs ${ENV.KLIPY_API_KEY ? 'enabled' : 'disabled (set KLIPY_API_KEY in .env)'}`);
   console.log(`    Storage: ${storageSummary()}`);
+  console.log(`    Discord bridge: ${discordOn ? 'on — /link in a channel (Orbit) links it with a Discord channel' : 'off (set DISCORD_BOT_TOKEN in .env, see README → "Discord bridge")'}`);
   console.log(`    Music: ${musicConfigured() ? 'Apple Music previews (no key needed) — MUSIC=off in .env turns it off' : 'off (MUSIC=off)'}`);
   const vm = verificationMode(); const mc = mailConfig();
   console.log(`    Email verification: ${vm.enabled ? (mc ? `ON — sign-up needs a code emailed via ${mc.host}:${mc.port}` : 'ON (dev mode) — no SMTP_HOST, so sign-up codes are printed in this console') : 'OFF — add SMTP_HOST to .env to require an emailed code at sign-up (see README)'}\n`);

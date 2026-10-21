@@ -1,5 +1,6 @@
 // Orata — the commands Orbit answers in a server (shared by the server, which runs them, and the message box, which suggests them).
 // `perm` is the permission a command needs by default; Orbit's /settings can narrow any command to chosen roles. `only` = the reply only shows to whoever used it.
+// `discord` = only there when the Orata server has a Discord bot set up (DISCORD_BOT_TOKEN).
 // No browser or server APIs in here on purpose.
 
 export const ORBIT_COMMANDS = [
@@ -17,6 +18,8 @@ export const ORBIT_COMMANDS = [
   { name: 'timeout', desc: 'Time a member out', arg: '@member or ID 10m [reason]', perm: 'MODERATE_MEMBERS' },
   { name: 'reactionroles', desc: 'Post a message where reacting gives a role', perm: 'MANAGE_ROLES', only: true },
   { name: 'settings', desc: 'Change Orbit’s name, picture and who can use each command', perm: 'MANAGE_SERVER', only: true },
+  { name: 'link', desc: 'Link this channel with a Discord channel', perm: 'MANAGE_SERVER', only: true, discord: true },
+  { name: 'unlink', desc: 'Stop mirroring this channel with Discord', perm: 'MANAGE_SERVER', discord: true },
 ];
 export const orbitCommand = (name) => ORBIT_COMMANDS.find((c) => c.name === String(name || '').toLowerCase()) || null;
 

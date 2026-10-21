@@ -234,7 +234,7 @@ export function Composer({ chId }) {
       items = [...cust, ...searchEmoji(q, 8).map((e) => ({ type: 'emoji', id: e.char, label: `:${e.code || e.label}:`, sub: '', insert: e.char + ' ', char: e.char }))].slice(0, 8);
     } else if (trig.kind === '/') {
       items = COMMANDS.filter((c) => c.name.startsWith(q) && (!c.server || server)).map((c) => ({ type: 'cmd', id: c.name, label: '/' + c.name, sub: c.desc, insert: '/' + c.name + ' ' }));
-      if (orbitOn) items = [...ORBIT_COMMANDS.filter((c) => c.name.startsWith(q) && mayUseOrbit(server, c) && !COMMANDS.some((x) => x.name === c.name)).map((c) => ({ type: 'cmd', id: 'orbit-' + c.name, label: '/' + c.name, sub: c.arg ? `${c.desc} · ${c.arg}` : c.desc, insert: '/' + c.name + ' ', icon: 'sparkles' })), ...items];   // this server's Orbit first
+      if (orbitOn) items = [...ORBIT_COMMANDS.filter((c) => c.name.startsWith(q) && mayUseOrbit(server, c) && (!c.discord || state.discordOk) && !COMMANDS.some((x) => x.name === c.name)).map((c) => ({ type: 'cmd', id: 'orbit-' + c.name, label: '/' + c.name, sub: c.arg ? `${c.desc} · ${c.arg}` : c.desc, insert: '/' + c.name + ' ', icon: 'sparkles' })), ...items];   // this server's Orbit first
     }
     if (!items.length) { setAc(null); return; }
     setAc({ items, trig }); setAcIdx(0);

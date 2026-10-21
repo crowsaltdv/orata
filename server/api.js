@@ -13,7 +13,8 @@ import {
 } from './core.js';
 import { automodRule } from './automod.js';
 import { formatDuration } from '../public/js/orbit-commands.js';
-import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt } from './messages.js';
+import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt, messageEdited, messagesDeleted } from './messages.js';
+import { startDiscord, discordOn } from './discord.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 import { hasProfanity, censor, cleanBlockedWords } from './profanity.js';   // the same checker the browser uses
 import { verificationMode, isGated, issueVerification, consumeVerification, resendWait, maskEmail } from './verify.js';
@@ -171,7 +172,7 @@ export function createApi() {
   r.use(express.json({ limit: '2mb' }));
 
   r.get('/config', (req, res) => res.json({
-    name: 'Orata', gifs: !!ENV.KLIPY_API_KEY, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0 || hostedTurnConfigured(), maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
+    name: 'Orata', gifs: !!ENV.KLIPY_API_KEY, discord: discordOn, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0 || hostedTurnConfigured(), maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
     users: Object.keys(db.users).length, botId: db.botId,
     emailVerification: verificationMode(),   // { enabled, required, smtp }
     music: musicConfigured(),
@@ -367,6 +368,7 @@ export function createApi() {
   mountMusic(r, { h, limit });
   mountBadges(r, { h });
   mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdate, guardText, automod, kickMember, banMember, timeoutMember });
+  startDiscord({ guardText });
 
   r.post('/auth/logout', h(async (req, res) => { await endSession(req.sessionId); res.json({ ok: true }); }));
   r.get('/ready', (req, res) => { noteDevice(req.user, req); res.json(buildReady(req.user)); });   // (also remembers the browser, for the alt checks)
@@ -1122,6 +1124,7 @@ export function createApi() {
       if (!gone.length) continue;
       db.messages[c.id] = list.filter((m) => !gone.includes(m));
       for (const m of gone) emitTo(audienceOf(c), 'message_delete', { channelId: c.id, messageId: m.id });
+      messagesDeleted(c, gone.map((m) => m.id));
     }
     save();
   }
@@ -1285,7 +1288,7 @@ export function createApi() {
     m.content = content; m.editedAt = Date.now();
     m.emojis = customEmojisIn(content, req.user.id, m.emojis || []) || undefined;
     m.mentions = [...new Set([...content.matchAll(/<@!?(\d{10,20})>/g)].map((x) => x[1]))].filter((id) => db.users[id] && id !== req.user.id);
-    save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
+    save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) }); messageEdited(ch, m);
     res.json(messageView(m));
   }));
   r.delete('/channels/:id/messages/:mid', h(async (req, res) => {
@@ -1294,7 +1297,7 @@ export function createApi() {
     if (m.authorId !== req.user.id && !(s && canIn(req.user.id, ch, 'MANAGE_MESSAGES'))) throw forbidden();
     if (s && m.authorId !== req.user.id) audit(s, req.user.id, 'message_delete', { target: m.authorId, channel: ch.name });
     db.messages[ch.id] = db.messages[ch.id].filter((x) => x.id !== m.id); save();
-    emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: m.id });
+    emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: m.id }); messagesDeleted(ch, [m.id]);
     res.json({ ok: true });
   }));
   r.post('/channels/:id/messages/bulk-delete', h(async (req, res) => {
@@ -1304,7 +1307,7 @@ export function createApi() {
     db.messages[ch.id] = (db.messages[ch.id] || []).filter((x) => !ids.has(x.id));
     audit(s, req.user.id, 'message_bulk_delete', { channel: ch.name, count: ids.size }); save();
     for (const id of ids) emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: id });
-    res.json({ ok: true });
+    messagesDeleted(ch, [...ids]); res.json({ ok: true });
   }));
 
   const reaction = (add) => h(async (req, res) => {

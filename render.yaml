@@ -32,6 +32,9 @@ services:
       #   sync: false
       # - key: METERED_API_KEY
       #   sync: false
+      # Optional: the Discord bridge (README → "Discord bridge"): the bot token from the Discord Developer Portal
+      # - key: DISCORD_BOT_TOKEN
+      #   sync: false
       # Optional: sign-up codes by email (see README → "Email verification")
       # - key: SMTP_HOST
       #   value: smtp.gmail.com

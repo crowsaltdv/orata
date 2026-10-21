@@ -43,6 +43,7 @@ npm run reset-password <user>    # forgot a password? prints a new one
 | `TURN_TTL` | `86400` | Lifetime of generated TURN credentials, in seconds |
 | `ICE_TRANSPORT_POLICY` | `all` | Set to `relay` to force every call through TURN (testing / hiding IP addresses) |
 | `MUSIC` | on | `MUSIC=off` turns the Music player off — see [Music](#music-apple-music-previews--no-key-needed) |
+| `DISCORD_BOT_TOKEN` | – | Turns on the [Discord bridge](#discord-bridge): `/link` mirrors an Orata channel with a Discord channel |
 
 > **Microphone, camera, screen sharing and desktop notifications only work on `localhost` or over HTTPS.** To use voice with other devices on your network, set `HTTPS_KEY`/`HTTPS_CERT`, or put Orata behind a TLS reverse proxy (Caddy, nginx, Cloudflare Tunnel …). Make sure it forwards WebSocket upgrades on `/gateway`.
 
@@ -159,6 +160,20 @@ Orata uses Apple's public, keyless [iTunes Search API](https://performance-partn
 
 **What others see:** the title, artist, artwork and a progress bar, only while it plays. They always come from Apple via the server — a client can't make up a "listening to" status — and disappear when you pause, stop, close the last tab or the preview ends. Nothing is shown when **Settings → Privacy → Show my status to everyone** is off or you are *Invisible* (the switch is also on the Music page). The player links every track back to Apple Music.
 
+## Discord bridge
+
+Link an Orata channel with a Discord channel and they act as one conversation: messages, pictures, files, replies, edits and deletes go both ways. Discord people show up in Orata with their Discord name and picture and a **DISCORD** tag; Orata people show up in Discord with their Orata name and picture (Discord adds its usual **APP** label). Mentions become plain names on the other side, custom Discord emoji plain `:name:` text, and nothing from Orata can ping anyone on Discord. Bots' messages aren't mirrored.
+
+**Set it up once (the host):**
+1. On the [Discord Developer Portal](https://discord.com/developers/applications) make a **New Application** (call it Orbit and give it Orbit's picture if you like).
+2. On its **Bot** page, switch on **Message Content Intent** (under *Privileged Gateway Intents*), then **Reset Token** and copy the token.
+3. Put it in `.env` (or your host's environment) as `DISCORD_BOT_TOKEN=…` and restart Orata. The console says `[discord] connected as …`. Keep the token secret: anyone with it controls the bot.
+4. Set `PUBLIC_URL` to Orata's public address, so Discord can show Orata people's pictures.
+
+**Link a channel (any admin):** Orbit has to be in the Orata server. In the Orata channel type **`/link`** (needs *Manage Server*): Orbit privately gives you a code that works for 10 minutes, plus a link to add the bot to your Discord server if it isn't there yet. In the Discord channel, someone with *Manage Server* types **`/orata-link code:XXXX-XXXX`**. To stop, type `/unlink` in Orata or `/orata-unlink` in Discord. Links and unlinks go in the audit log.
+
+**Limits:** files bigger than `MAX_UPLOAD_MB` (from Discord) or 10 MB (to Discord) come across as links. Text over 2,000 characters is split for Discord. Edits and deletes sync for the last 3,000 messages of each link. On a host that sleeps (Render's free plan), the bot is offline while Orata sleeps: when it wakes up it posts what was said on Discord in the meantime (up to 500 messages per channel), and Discord's commands only answer while Orata is awake.
+
 ## Free hosting with a free database
 
 Hosts like Render's free plan wipe the app's folder on every restart, so Orata's usual `data/` folder would lose everything. Set **`DATABASE_URL`** and Orata keeps *all* its data — accounts, servers, messages, sessions and uploaded files — in a PostgreSQL database instead (a free one is enough). Without `DATABASE_URL` nothing changes: it uses local files.
@@ -215,6 +230,8 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 **Orbit in your server** — tick *Add Orbit* when you create a server (or use *Server Settings → Overview → Orbit* later) and the server gets its own Orbit that answers slash commands: `/help`, `/ping`, `/roll 2d6`, `/flip`, `/8ball`, `/choose a | b`, `/joke`, `/remind 10m stretch`, and for moderators `/say`, `/reactionroles`, `/kick @member [reason]`, `/ban @member [reason]` and `/timeout @member 10m [reason]` (a member can be an @mention, a username or an ID). `/help`, `/ping`, reminders being set and any error are shown **only to you** ("Only you can see this"); everything else is posted for the channel. `/settings` (Manage Server) changes that server's Orbit's **name, picture and about text** — it is its own bot, so everyone's DM Orbit stays the same — and **which roles may use each command**: by default a command needs its permission (Kick, Ban, Timeout Members, Manage Messages for `/say`), and picking roles narrows it to them; owners and admins can always use everything.
 
 **Server tags** — an admin gives the server a tag of up to 5 letters or numbers with an icon and a color (*Server Settings → Overview*; it can be changed once a week). Members can wear one server's tag next to their name — in messages, the member list and on their profile — from *User Settings → Profile* or the server menu (*Wear server tag*). Leaving the server takes it off; hovering it shows which server it belongs to.
+
+**Discord bridge** — `/link` (Orbit) mirrors a channel with a Discord channel both ways, with names, pictures, files, replies, edits and deletes (see [Discord bridge](#discord-bridge)).
 
 **Custom invite link** — *Server Settings → Invites* lets an admin pick one custom link for the server, like `yoursite.com/invite/my-server` (3–32 letters, numbers or dashes; it works however it's typed). It never expires, every server's link is unique, each person (every account on one browser) can have a custom link on one server only, and it can be changed only once every 7 days — the old link stops working when it changes. It's also shown in the *Invite People* dialog, and every change is in the audit log.
 
@@ -290,6 +307,7 @@ server/
   verify.js     email verification tokens, modes and gating
   sessions.js   sign-in sessions (never expire; in their own Postgres table when DATABASE_URL is set)
   music.js      Apple Music (iTunes Search API) search + preview relay + "listening to" status
+  discord.js    the Discord bridge: gateway connection, /link codes, mirroring both ways
   badges.js     profile badges: the catalog, developers (the "dev" badge) and their routes
   automod.js    AutoMod's rules (links, invites, mentions, spam)
   orbit.js      a server's own Orbit: its slash commands (shared list: public/js/orbit-commands.js), /settings and reminders

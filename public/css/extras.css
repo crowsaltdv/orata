@@ -449,3 +449,9 @@ html[data-mode="light"] .pc-badges { background: rgb(0 0 0 / .06); }
 .stag-ic { width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--input-bg); color: var(--text-3); border: 1.5px solid transparent; transition: all var(--t-fast); }
 .stag-ic:hover:not(:disabled) { color: var(--text); } .stag-ic.on { color: var(--tc); border-color: var(--tc); background: color-mix(in srgb, var(--tc) 16%, transparent); } .stag-ic:disabled { opacity: .5; }
 .stag-pick { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* Discord bridge: messages from a linked Discord channel */
+.bot-tag.discord-tag { background: #5865f2; color: #fff; }
+.discord-pop { display: flex; align-items: center; gap: 14px; padding: 16px; max-width: 320px; }
+.discord-pop .dp-name { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 16px; }
+.discord-pop p { margin: 4px 0 0; font-size: 13px; color: var(--text-2); line-height: 1.4; }

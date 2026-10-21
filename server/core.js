@@ -483,14 +483,14 @@ export function messageView(m) {
   let reply = null;
   if (m.replyTo) {
     const ref = (db.messages[m.channelId] || []).find((x) => x.id === m.replyTo);
-    reply = ref ? { id: ref.id, authorId: ref.authorId, content: (ref.content || '').slice(0, 160), attachments: (ref.attachments || []).length, gif: !!ref.gif, sticker: !!ref.sticker }
+    reply = ref ? { id: ref.id, authorId: ref.authorId, bridge: ref.bridge, content: (ref.content || '').slice(0, 160), attachments: (ref.attachments || []).length, gif: !!ref.gif, sticker: !!ref.sticker }
       : { id: m.replyTo, deleted: true };
   }
   return {
     id: m.id, channelId: m.channelId, authorId: m.authorId, content: m.content, createdAt: m.createdAt, editedAt: m.editedAt || null,
     attachments: m.attachments || [], gif: m.gif || null, sticker: m.sticker || null, reactions: m.reactions || {},
     replyTo: m.replyTo || null, reply, mentions: m.mentions || [], mentionRoles: m.mentionRoles || [],
-    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, forward: m.forward || undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
+    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, forward: m.forward || undefined, bridge: m.bridge || undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
   };
 }
 
