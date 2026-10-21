@@ -1,7 +1,8 @@
 // Orata — Orbit in a server: a server can add its own copy of Orbit (ticked when the server is made, or later in Server Settings) that answers
 // slash commands. Each server's Orbit is its own bot account, so renaming it or changing its picture in /settings only changes it there.
 // Who may use a command: its permission by default (see public/js/orbit-commands.js), narrowed to chosen roles in /settings; owners and admins always may.
-import { db, save, newId, emitTo, publicUser, memberView, messageView, serverAudience, audienceOf, can, needIn, need, isOwner, topRolePos, audit, randomAvatarBg, bad, forbidden, ApiError } from './core.js';
+import { db, save, newId, emitTo, publicUser, memberView, messageView, serverAudience, audienceOf, can, needIn, need, isOwner, topRolePos, audit, randomAvatarBg, bad, forbidden, notFound, ApiError } from './core.js';
+import { isStaff } from './names.js';
 import { postMessage, messagesDeleted } from './messages.js';
 import { JOKES, BALL, rollDice } from './bot.js';
 import { ORBIT_COMMANDS, orbitCommand, parseDuration, formatDuration } from '../public/js/orbit-commands.js';
@@ -117,11 +118,19 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
     if (!Object.keys(map).length) throw bad('Add at least one emoji with a role');
     const intro = guardText(ch, req.user.id, String(req.body?.content || '').trim().slice(0, 1500)) || 'React to get a role:';
     const lines = Object.entries(map).map(([e, rid]) => `${e} → **${s.roles.find((x) => x.id === rid).name}**`);
-    const msg = postMessage(ch, s.orbitId, { content: `${intro}\n\n${lines.join('\n')}` });
+    const msg = postMessage(ch, s.orbitId, { content: `${intro}\n\n${lines.join('\n')}`, command: { name: 'reactionroles', by: req.user.id } });
     msg.reactionRoles = map; msg.reactions = Object.fromEntries(Object.keys(map).map((e) => [e, [s.orbitId]]));   // Orbit reacts first, so everyone just clicks
     audit(s, req.user.id, 'reaction_roles_create', { channel: ch.name, count: lines.length });
     save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(msg) });
     res.json(messageView(msg));
+  }));
+
+  // who used the command a message of Orbit's answers: only for the server's admins and Orata staff
+  r.get('/channels/:id/messages/:mid/command', h(async (req, res) => {
+    const ch = getChannel(req, req.params.id); const s = ch.serverId && db.servers[ch.serverId];
+    const m = (db.messages[ch.id] || []).find((x) => x.id === req.params.mid); if (!m?.command) throw notFound('Unknown message');
+    if (!(s && can(s, req.user.id, 'MANAGE_SERVER') || isStaff(req.user))) throw forbidden('Only server admins and Orata staff can see who used a command');
+    res.json({ user: publicUser(db.users[m.command.by]) });
   }));
 
   r.post('/channels/:id/command', limit('orbit', 12, 10_000, (req) => req.user.id), h(async (req, res) => {
@@ -133,7 +142,11 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
     const args = String(req.body?.args || '').trim().slice(0, 2000);
     const me = req.user.id; const who = `**${nameIn(s, me)}**`;
     const text = (v) => { automod(ch, me, v, { host: req.get('host') }); return guardText(ch, me, v); };   // AutoMod and swearing protection apply to what Orbit repeats for you
-    const post = (content) => { postMessage(ch, s.orbitId, { content }); return { ok: true }; };
+    const post = (content) => {
+      postMessage(ch, s.orbitId, { content, command: { name: cmd.name, by: me } });
+      if (!['kick', 'ban', 'timeout'].includes(cmd.name)) audit(s, me, 'orbit_command', { command: cmd.name, channel: ch.name });   // those write their own entry
+      return { ok: true };
+    };
     const only = (content) => ({ ephemeral: content });
     const [first = '', ...rest] = args.split(/\s+/); const tail = rest.join(' ').trim();
     const target = () => { const id = memberFrom(s, first); if (!id) throw bad(`Tell Orbit who: /${cmd.name} @member${cmd.name === 'timeout' ? ' 10m' : ''} (or their ID)`); return id; };

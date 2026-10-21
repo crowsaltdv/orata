@@ -148,6 +148,30 @@ async function main() {
   r = await api('POST', '/reports', E.token, { userId: E.user.id, reason: 'spam' }); ok(r.status === 400, 'you can’t report yourself');
   r = await api('GET', '/staff/log', Y.token); ok(['lock', 'unlock', 'terminate', 'unterminate', 'delete_message'].every((a) => r.body.log.some((e) => e.action === a && e.by === Y.user.id)), 'every staff action is in the staff log');
 
+  console.log('\nServers, ghosting, and who used a command');
+  r = await api('POST', '/reports', B.token, { serverId: S.id, reason: 'scam', note: 'fake giveaways' }); ok(r.status === 200, 'anyone can report a server');
+  r = await api('POST', '/reports', A.token, { serverId: S.id, reason: 'spam' }); ok(r.status === 400, '… but not their own');
+  r = await api('GET', '/staff/servers', B.token); ok(r.status === 403, 'only staff see every server');
+  r = await api('GET', '/staff/servers', Y.token); const club = r.body.find?.((s) => s.id === S.id);
+  ok(club?.reports === 1 && club.score > 0 && r.body[0].id === S.id, 'a reported server comes first on the staff list', JSON.stringify(club));
+  r = await api('GET', `/channels/${text.id}/messages`, Y.token); ok(r.status === 404, 'staff can’t read a server they aren’t in…');
+  r = await api('POST', `/staff/servers/${S.id}/ghost`, Y.token);
+  ok(r.status === 200 && r.body.server.channels.some((c) => c.id === text.id) && !r.body.server.members.some((m) => m.id === Y.user.id), '… until they ghost in, without becoming a member');
+  ok((await msgs(Y.token, text.id)).length > 0, 'a ghost reads the messages');
+  r = await say(Y.token, 'boo'); ok(r.status === 403, 'a ghost can’t post');
+  r = await api('POST', `/channels/${text.id}/typing`, Y.token); ok(r.status === 403, '… or show up typing');
+  r = await api('GET', '/staff/log', Y.token); ok(r.body.log.some((e) => e.action === 'ghost' && e.serverName === 'Club'), 'ghosting goes in the staff log');
+  await api('PUT', `/servers/${S.id}/orbit`, A.token);
+  r = await api('POST', `/channels/${text.id}/command`, A.token, { name: 'say', args: 'hello from orbit' });
+  const said = (await msgs(B.token, text.id)).find((m) => m.content === 'hello from orbit');
+  ok(said?.command?.name === 'say' && !said.command.by, 'Orbit’s answer shows a command was used, not who', JSON.stringify(r.body));
+  r = await api('GET', `/channels/${text.id}/messages/${said?.id}/command`, B.token); ok(r.status === 403, 'members can’t find out who used it');
+  r = await api('GET', `/channels/${text.id}/messages/${said?.id}/command`, A.token); ok(r.body?.user?.id === A.user.id, 'the server’s admins can');
+  r = await api('GET', `/channels/${text.id}/messages/${said?.id}/command`, Y.token); ok(r.body?.user?.id === A.user.id, '… and so can Orata staff');
+  r = await api('GET', `/servers/${S.id}/audit-log`, A.token); ok(r.body.entries.some((e) => e.action === 'orbit_command' && e.actorId === A.user.id && e.details?.command === 'say'), 'it’s in the audit log too');
+  await api('DELETE', `/staff/servers/${S.id}/ghost`, Y.token);
+  r = await api('GET', `/channels/${text.id}/messages`, Y.token); ok(r.status === 404, 'leaving ghost mode closes the server again');
+
   await stopServer();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

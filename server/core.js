@@ -219,11 +219,15 @@ export function audit(server, actorId, action, { target = null, reason = '', ...
   (server.auditLog ||= []).unshift({ id: newId(), at: Date.now(), actorId, action, target, ...(reason ? { reason: String(reason).slice(0, 200) } : {}), ...(Object.keys(details).length ? { details } : {}) });
   if (server.auditLog.length > 500) server.auditLog.length = 500;
 }
+/** Orata staff looking around a server they aren't in (Staff page → Servers → Ghost in, server/staff.js): user id → { serverId, at }.
+ * A ghost can see every channel and message there and nothing more: read only, not in the member list, over after 2 hours. */
+export const ghosts = new Map();
+export const ghostIn = (userId, serverId) => { const g = ghosts.get(userId); return !!g && g.serverId === serverId && Date.now() - g.at < 2 * 3600_000; };
 export function permsOf(server, userId) {
   if (!server) return new Set();
   if (isOwner(server, userId)) return new Set(PERMS);
   const m = server.members[userId];
-  if (!m) return new Set();
+  if (!m) return ghostIn(userId, server.id) ? new Set(['VIEW_CHANNEL']) : new Set();
   const set = new Set(server.roles.find((r) => r.id === server.id)?.permissions || []);
   for (const rid of m.roles) for (const p of server.roles.find((r) => r.id === rid)?.permissions || []) set.add(p);
   if (set.has('ADMINISTRATOR')) return new Set(PERMS);
@@ -278,7 +282,7 @@ export function canView(userId, ch) {
   if (!ch) return false;
   if (!ch.serverId) return (ch.recipients || []).includes(userId);
   const server = db.servers[ch.serverId];
-  if (!server || !server.members[userId]) return false;
+  if (!server || !(server.members[userId] || ghostIn(userId, server.id))) return false;
   return permsIn(server, userId, ch).has('VIEW_CHANNEL');
 }
 /** In the channel list a category is shown when you can see it or any channel inside it. */
@@ -355,7 +359,9 @@ function migrateDb() {
 export function audienceOf(ch) {
   if (!ch.serverId) return ch.recipients || [];
   const server = db.servers[ch.serverId]; if (!server) return [];
-  return Object.keys(server.members).filter((uid) => canView(uid, ch));
+  const out = Object.keys(server.members).filter((uid) => canView(uid, ch));
+  for (const uid of ghosts.keys()) if (!server.members[uid] && ghostIn(uid, server.id)) out.push(uid);   // staff ghosting here see new messages live
+  return out;
 }
 export function serverAudience(server) { return Object.keys(server.members); }
 export function channelsOfServer(serverId) { return Object.values(db.channels).filter((c) => c.serverId === serverId); }
@@ -497,7 +503,7 @@ export function messageView(m) {
     id: m.id, channelId: m.channelId, authorId: m.authorId, content: m.content, createdAt: m.createdAt, editedAt: m.editedAt || null,
     attachments: m.attachments || [], gif: m.gif || null, sticker: m.sticker || null, reactions: m.reactions || {},
     replyTo: m.replyTo || null, reply, mentions: m.mentions || [], mentionRoles: m.mentionRoles || [],
-    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, forward: m.forward || undefined, bridge: m.bridge || undefined, application: m.application ? applicationView(m) : undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
+    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, forward: m.forward || undefined, bridge: m.bridge || undefined, application: m.application ? applicationView(m) : undefined, command: m.command ? { name: m.command.name } : undefined /* who used it: only server admins and staff may ask (orbit.js) */, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
   };
 }
 

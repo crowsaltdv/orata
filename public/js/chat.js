@@ -50,6 +50,7 @@ export function ChatView() {
   const roomCount = useSel((s) => (ch ? Object.keys(s.voice.states[ch.id] || {}).length : 0));
   const connection = useSel((s) => s.connection);
   const query = useSel((s) => s.searchQuery);
+  const ghost = useSel((s) => !!s.servers[ch?.serverId]?.ghost);   // Orata staff reading a server they aren't in (staff.js)
   const [Stage, setStage] = useState(null);
   useEffect(() => { if (ch && !ch.serverId && roomCount) import('/js/voiceview.js').then((m) => setStage(() => m.CallStage)); }, [ch?.id, roomCount]);
   // type anywhere to focus the composer
@@ -94,8 +95,9 @@ export function ChatView() {
         <label class="m-search"><${Icon} name="search" size=${15} /><input placeholder=${isDm ? `${t('Search')}` : `${t('Search')} ${state.servers[ch.serverId]?.name || ''}`} value=${query} onFocus=${() => set({ panel: 'search' })} onInput=${(e) => set({ searchQuery: e.target.value, panel: 'search' })} /></label>
       </div>
     </header>
+    ${ghost ? html`<div class="ghost-banner"><${Icon} name="eye" size=${16} /><span>${t('Ghost mode: nobody here can see you, and you can only read.')}</span><button type="button" class="btn btn-sm" onClick=${() => import('/js/staff.js').then((m) => m.leaveGhost(ch.serverId))}>${t('Leave')}</button></div>` : null}
     ${showStage ? html`<${Stage} chId=${ch.id} />` : null}
-    <div class="chat-col"><${MessageList} chId=${ch.id} key=${ch.id} /><${Composer} chId=${ch.id} /></div>
+    <div class="chat-col"><${MessageList} chId=${ch.id} key=${ch.id} />${ghost ? null : html`<${Composer} chId=${ch.id} />`}</div>
   </main>`;
 }
 void go; void hasPerm; void toast; void copyText;

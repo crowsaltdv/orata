@@ -66,6 +66,7 @@ const newSession = (user, req) => { noteDevice(user, req); return createSession(
 function getChannel(req, id) {
   const ch = db.channels[id];
   if (!ch || !canView(req.user.id, ch)) throw notFound('Unknown channel');
+  if (req.method !== 'GET' && ch.serverId && !db.servers[ch.serverId]?.members[req.user.id]) throw forbidden('Ghost mode is read only');   // staff ghosting (core.js ghosts)
   return ch;
 }
 function getServer(req, id) {

@@ -4,7 +4,9 @@
 // accounts on one browser, a day-old account messaging lots of people) plus what people report to staff. Server rules (NSFW channels and the
 // like) are each server's business, not this. DMs are only seen here when someone in them reports a message; for the "messaging lots of
 // people" check only who and how many are counted, never what. Every staff action goes in the staff log.
-import { db, save, newId, emitTo, audienceOf, effectiveStatus, publicUser, deviceHashesOf, canView, closeConns, bad, forbidden, notFound } from './core.js';
+// Servers: every server, fishy ones first (reported, flagged messages, terminated members, a scam-looking name), and "ghosting" into one to read
+// it without joining (core.js ghosts: read only and invisible; each time goes in the staff log).
+import { db, save, newId, emitTo, audienceOf, effectiveStatus, publicUser, deviceHashesOf, canView, closeConns, serverView, ghosts, bad, forbidden, notFound } from './core.js';
 import { hooks, messagesDeleted } from './messages.js';
 import { endUserSessions } from './sessions.js';
 import { isFounder, isStaff } from './names.js';
@@ -65,7 +67,7 @@ hooks.onMessage.push((ch, m) => {
 });
 
 export function mountStaff(r, { h, limit, removeMember }) {
-  // anyone: report a message or an account to Orata staff
+  // anyone: report a message, an account or a server to Orata staff
   r.post('/reports', limit('report', 10, 600_000, (req) => req.user.id), h(async (req, res) => {
     const b = req.body || {}; const reason = REASONS.includes(b.reason) ? b.reason : null; if (!reason) throw bad('Pick what’s wrong');
     const note = String(b.note || '').trim().slice(0, 500);
@@ -74,6 +76,10 @@ export function mountStaff(r, { h, limit, removeMember }) {
       if (!m || !canView(req.user.id, ch)) throw notFound('Unknown message');
       if (m.authorId === req.user.id) throw bad('You can’t report your own message');
       flag({ kind: 'message', reason, detail: 'reported', note, reportedBy: req.user.id, userId: m.authorId, messageId: m.id, channelId: ch.id, serverId: ch.serverId || null, excerpt: excerptOf(m) });
+    } else if (b.serverId) {
+      const s = db.servers[String(b.serverId)]; if (!s) throw notFound('Unknown server');
+      if (s.ownerId === req.user.id) throw bad('You can’t report your own server');
+      flag({ kind: 'server', reason, detail: 'reported', note, reportedBy: req.user.id, userId: s.ownerId, serverId: s.id });
     } else {
       const u = db.users[String(b.userId)]; if (!u || u.bot || u.deleted) throw notFound('Unknown user');
       if (u.id === req.user.id) throw bad('You can’t report yourself');
@@ -153,10 +159,38 @@ export function mountStaff(r, { h, limit, removeMember }) {
     log(req.user.id, 'unlock', u.id); save(); res.json(row(u));
   }));
 
+  /** Every server (or those matching ?q), fishiest first: reports about it, flagged messages in it, terminated members, a scam-looking name. */
+  r.get('/staff/servers', h(async (req, res) => {
+    staff(req); const q = String(req.query.q || '').trim().toLowerCase();
+    const open = (db.flags || []).filter((f) => f.status === 'open' && f.serverId);
+    const list = Object.values(db.servers).filter((s) => !q || s.id === q || s.name.toLowerCase().includes(q)).map((s) => {
+      const ids = Object.keys(s.members).filter((id) => !db.users[id]?.bot);
+      const reports = open.filter((f) => f.kind === 'server' && f.serverId === s.id).length;
+      const flagged = open.filter((f) => f.kind === 'message' && f.serverId === s.id).length;
+      const terminated = ids.filter((id) => db.users[id]?.terminated).length;
+      const scamName = SCAM.test(`${s.name} ${s.description || ''}`);
+      return { id: s.id, name: s.name, icon: s.icon || null, tag: s.tag || null, joinMode: s.joinMode || 'invite', createdAt: s.createdAt, members: ids.length,
+        owner: publicUser(db.users[s.ownerId]), reports, flagged, terminated, scamName, score: reports * 3 + flagged + terminated * 2 + (scamName ? 3 : 0) };
+    });
+    res.json(list.sort((a, b) => b.score - a.score || b.members - a.members).slice(0, 100));
+  }));
+  r.post('/staff/servers/:id/ghost', h(async (req, res) => {
+    staff(req); const s = db.servers[String(req.params.id)]; if (!s) throw notFound('Unknown server');
+    if (s.members[req.user.id]) throw bad('You’re in this server already');
+    ghosts.set(req.user.id, { serverId: s.id, at: Date.now() });
+    log(req.user.id, 'ghost', s.ownerId, '', { server: s.id, serverName: s.name }); save();
+    res.json({ server: serverView(s, req.user.id), users: Object.keys(s.members).map((id) => publicUser(db.users[id])).filter(Boolean) });
+  }));
+  r.delete('/staff/servers/:id/ghost', h(async (req, res) => {
+    staff(req); if (ghosts.get(req.user.id)?.serverId === String(req.params.id)) ghosts.delete(req.user.id);
+    res.json({ ok: true });
+  }));
+
   /** A flag with what staff need to judge it: who, where, and (for messages) the words. */
   const flagView = (f) => {
     const ch = f.channelId && db.channels[f.channelId]; const s = f.serverId && db.servers[f.serverId];
-    return { ...f, label: f.reportedBy ? `Reported: ${f.reason}` : LABEL[f.reason] || f.reason, where: s ? `#${ch?.name || '?'} in ${s.name}` : f.channelId ? 'a DM' : null,
+    return { ...f, label: f.kind === 'server' ? `Server reported: ${f.reason}` : f.reportedBy ? `Reported: ${f.reason}` : LABEL[f.reason] || f.reason,
+      where: f.kind === 'server' ? `the server ${s?.name || '(deleted)'}` : s ? `#${ch?.name || '?'} in ${s.name}` : f.channelId ? 'a DM' : null,
       gone: f.messageId ? !(db.messages[f.channelId] || []).some((m) => m.id === f.messageId) : false };
   };
   r.get('/staff/flags', h(async (req, res) => {

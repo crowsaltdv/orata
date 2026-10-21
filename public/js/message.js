@@ -18,6 +18,7 @@ import { dismissEphemeral } from '/js/orbit.js';
 import '/js/forward.js';   // the Forward dialog
 import { ServerTag } from '/js/server-tag.js';
 import { ApplicationCard } from '/js/applications.js';
+import { isStaffMe } from '/js/staff.js';
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -204,6 +205,17 @@ function SystemMessage({ m, ch }) {
   return html`<div class="msg system" data-mid=${m.id}><span class="sys-ic ${m.type}"><${Icon} name=${icon} size=${18} sw=${2.2} /></span><span class="sys-text">${body}</span><time class="sys-time" title=${formatFull(m.createdAt)}>${formatStamp(m.createdAt, !state.settings.chat.hour24)}</time></div>`;
 }
 
+/** "used /say" above Orbit's answer to a command. Server admins and Orata staff also see who used it (only they may ask the server). */
+const usedBy = new Map();
+function CommandUsed({ m, ch }) {
+  const may = isStaffMe() || !!state.servers[ch.serverId]?.perms.includes('MANAGE_SERVER');
+  const [by, setBy] = useState(() => usedBy.get(m.id));
+  useEffect(() => { if (may && !by) api.get(`/channels/${ch.id}/messages/${m.id}/command`).then((r) => { if (r.user) { usedBy.set(m.id, r.user); setBy(r.user); } }, () => {}); }, [m.id]);
+  return html`<div class="msg-reply cmd-used"><span class="reply-hook"></span>
+    ${by ? html`<${Avatar} user=${by} size=${16} /><span class="reply-name" onClick=${(e) => openProfile(by.id, e.currentTarget)}>${by.displayName}</span>${t('used')}` : t('Someone used')}
+    <span class="cmd-name">/${m.command.name}</span></div>`;
+}
+
 function onBodyClick(e, ch) {
   const sp = e.target.closest('[data-spoiler]'); if (sp) { sp.classList.toggle('revealed'); if (!sp.classList.contains('revealed')) return; e.preventDefault(); return; }
   const cp = e.target.closest('[data-copy]'); if (cp) { const code = cp.closest('.codeblock').querySelector('code').innerText; copyText(code).then(() => { cp.textContent = 'Copied!'; setTimeout(() => (cp.textContent = 'Copy'), 1400); }); return; }
@@ -251,6 +263,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
       ${m.reply.deleted ? html`<span class="reply-deleted"><${Icon} name="reply" size=${13} /> Original message was deleted</span>`
         : html`<${Avatar} user=${replyWho} size=${16} /><span class="reply-name" style=${replyColor && !rb ? { color: replyColor } : null}>${m.reply.authorId === me && !rb ? '@' : ''}<${UserName} user=${replyWho} text=${rb ? rb.name : replyNick || replyAuthor?.displayName || 'Unknown'} /></span>
           <span class="reply-text">${m.reply.content ? plainPreview(m.reply.content, ch.serverId, 120) : m.reply.gif ? 'Click to see GIF' : m.reply.sticker ? 'Click to see sticker' : m.reply.attachments ? 'Click to see attachment' : ''}</span>${m.reply.attachments ? html`<${Icon} name="image" size=${14} />` : null}`}</div>` : null}
+    ${m.command ? html`<${CommandUsed} m=${m} ch=${ch} />` : null}
     <div class="msg-main">
       <div class="msg-gutter">${head ? (state.settings.chat.showAvatars ? html`<${Avatar} user=${who} size=${40} onClick=${open} onContextMenu=${(e) => !b && openContext(e, [{ label: 'Profile', icon: 'user', onClick: () => openProfile(m.authorId) }, { label: 'Message', icon: 'message', onClick: () => import('/js/actions.js').then((a) => a.openDm(m.authorId)), disabled: m.authorId === me }])} />` : null) : html`<time class="msg-time hover-time">${formatClock(m.createdAt, hour12)}</time>`}</div>
       <div class="msg-body">

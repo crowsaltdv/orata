@@ -531,3 +531,7 @@ button.stat-tile { text-align: left; font: inherit; } button.stat-tile:disabled 
 .pc-terminated { display: flex; align-items: center; gap: 6px; margin-top: 6px; padding: 6px 10px; border-radius: 10px; background: rgb(255 123 147 / .12); color: #ff7b93; font-size: 13px; font-weight: 600; }
 .staff-acts { margin-left: auto; display: inline-flex; gap: 6px; flex: none; }
 .intro-emoji { font-size: 40px; line-height: 1; }
+
+/* staff ghost mode (staff.js) and "used /command" above Orbit's answers (message.js) */
+.ghost-banner { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 7px 14px; font-size: 13px; font-weight: 600; background: rgb(139 92 246 / .2); color: #c9b5ff; animation: slide-down var(--t-med) var(--ease); }
+.msg-reply.cmd-used { cursor: default; color: var(--text-2); } .cmd-used .reply-name { cursor: pointer; } .cmd-used .cmd-name { color: var(--accent); font-weight: 600; }

@@ -11,7 +11,7 @@ import { t } from '/js/i18n.js';
 const KINDS = [['', 'Everything'], ['member_,application_', 'Members'], ['role_', 'Roles'], ['channel_', 'Channels'], ['message_', 'Messages'], ['automod', 'AutoMod'], ['server_,invite_,vanity_,tag_,orbit_,reaction_,discord_,join_', 'Server & Orbit']];
 const ICON = { member_kick: 'log-out', member_ban: 'ban', member_unban: 'user-check', member_timeout: 'clock', member_timeout_remove: 'clock', member_role_add: 'tag', member_role_remove: 'tag', member_nick: 'edit',
   role_create: 'tag', role_update: 'tag', role_delete: 'tag', channel_create: 'hash', channel_update: 'hash', channel_delete: 'hash', server_update: 'settings', server_transfer: 'crown',
-  invite_create: 'link', invite_delete: 'link', vanity_update: 'link', tag_update: 'tag', join_mode: 'link', application_accept: 'user-check', application_reject: 'user-x', discord_link: 'link', discord_unlink: 'link', message_delete: 'trash', message_bulk_delete: 'trash', message_pin: 'pin', message_unpin: 'pin', automod_block: 'shield', orbit_add: 'sparkles', orbit_remove: 'sparkles', orbit_update: 'sparkles', reaction_roles_create: 'smile' };
+  invite_create: 'link', invite_delete: 'link', vanity_update: 'link', tag_update: 'tag', join_mode: 'link', application_accept: 'user-check', application_reject: 'user-x', discord_link: 'link', discord_unlink: 'link', message_delete: 'trash', message_bulk_delete: 'trash', message_pin: 'pin', message_unpin: 'pin', automod_block: 'shield', orbit_add: 'sparkles', orbit_remove: 'sparkles', orbit_update: 'sparkles', reaction_roles_create: 'smile', orbit_command: 'sparkles' };
 const FIELD = { name: 'name', description: 'description', icon: 'icon', banner: 'banner', accent: 'color', systemChannelId: 'join messages channel', profanity: 'swearing protection', blockedWords: 'blocked words', automod: 'AutoMod', onboarding: 'onboarding', topic: 'topic', slowmode: 'slowmode', nsfw: 'age limit', parentId: 'category', overwrites: 'permissions', synced: 'permissions', tags: 'tags', requireTag: 'tags', color: 'color', hoist: 'shown separately', position: 'order', permissions: 'permissions', displayName: 'name', bio: 'about', avatar: 'picture', roles: 'command roles' };
 const fields = (list) => (list?.length ? ` (${[...new Set(list.map((f) => FIELD[f] || f))].join(', ')})` : '');
 const BAD = new Set(['member_kick', 'member_ban', 'member_timeout', 'role_delete', 'channel_delete', 'message_delete', 'message_bulk_delete', 'automod_block', 'invite_delete', 'orbit_remove']);
@@ -54,6 +54,7 @@ function said(e, who) {
     case 'orbit_remove': return html`removed Orbit from the server`;
     case 'orbit_update': return html`changed Orbit’s settings${fields(d.fields)}`;
     case 'reaction_roles_create': return html`posted reaction roles (${d.count}) in ${ch(d.channel)}`;
+    case 'orbit_command': return html`used <b>/${d.command}</b> in ${ch(d.channel)}`;
     default: return html`did ${e.action}`;
   }
 }

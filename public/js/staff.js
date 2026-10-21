@@ -1,9 +1,10 @@
 // Orata — the Staff page (/staff, the shield under the + in the server rail) for holders of the staff or dev badge, and the "Report to Orata
 // staff" window everyone has. The server (server/staff.js) decides who may do what; this only shows it.
 import { html, useState, useEffect, relTime, formatFull, cx } from '/js/lib.js';
-import { state, set, useSel, openModal, closeModal, addUsers } from '/js/store.js';
+import { state, set, useSel, openModal, closeModal, addUsers, rebuildIndex, go, goChannel } from '/js/store.js';
 import { Icon } from '/js/icons.js';
-import { Modal, Btn, Spinner, Avatar, Empty, Dropdown, Field, MODALS } from '/js/ui.js';
+import { Modal, Btn, Spinner, Avatar, Empty, Dropdown, Field, ServerIcon, MODALS } from '/js/ui.js';
+import { ServerTag } from '/js/server-tag.js';
 import { api } from '/js/api.js';
 import { act, errMsg } from '/js/actions.js';
 import { openProfile } from '/js/sidebar.js';
@@ -13,11 +14,11 @@ import { t } from '/js/i18n.js';
 export const isStaffMe = () => !!state.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev');
 
 const REASONS = [['spam', 'Spam'], ['scam', 'Scam or phishing'], ['harassment', 'Harassment or threats'], ['hate', 'Hate speech'], ['impersonation', 'Pretending to be someone'], ['self-harm', 'Someone may hurt themselves'], ['other', 'Something else']];
-/** Report a message (messageId + channelId) or an account (userId) to Orata staff. */
-MODALS.report = function Report({ id, messageId, channelId, userId }) {
+/** Report a message (messageId + channelId), an account (userId) or a server (serverId) to Orata staff. */
+MODALS.report = function Report({ id, messageId, channelId, userId, serverId }) {
   const [reason, setReason] = useState(''); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [done, setDone] = useState(false);
-  const send = async () => { setBusy(true); if (await act(api.post('/reports', { messageId, channelId, userId, reason, note }))) setDone(true); setBusy(false); };
-  return html`<${Modal} title=${messageId ? t('Report message') : t('Report account')} subtitle=${t('Goes to Orata staff, not to the server’s moderators. Use it for things against Orata’s rules; a server’s own rules are up to its moderators.')} width=${460} onClose=${() => closeModal(id)}
+  const send = async () => { setBusy(true); if (await act(api.post('/reports', { messageId, channelId, userId, serverId, reason, note }))) setDone(true); setBusy(false); };
+  return html`<${Modal} title=${messageId ? t('Report message') : serverId ? t('Report server') : t('Report account')} subtitle=${t('Goes to Orata staff, not to the server’s moderators. Use it for things against Orata’s rules; a server’s own rules are up to its moderators.')} width=${460} onClose=${() => closeModal(id)}
     footer=${done ? html`<${Btn} variant="primary" onClick=${() => closeModal(id)}>${t('Done')}<//>` : html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="danger" icon="flag" loading=${busy} disabled=${!reason} onClick=${send}>${t('Send report')}<//>`}>
     ${done ? html`<div class="rep-done"><${Icon} name="check-circle" size=${40} sw=${1.6} /><b>${t('Thanks, staff will take a look.')}</b><p>${t('If it was in a DM, staff can see the message you reported, nothing else.')}</p></div>`
       : html`<div class="rep-reasons">${REASONS.map(([k, label]) => html`<button type="button" key=${k} class=${cx('rep-opt', reason === k && 'on')} onClick=${() => setReason(k)}><span class="radio"></span>${t(label)}</button>`)}</div>
@@ -25,7 +26,7 @@ MODALS.report = function Report({ id, messageId, channelId, userId }) {
   <//>`;
 };
 
-const TABS = [['overview', 'bar-chart', 'Overview'], ['accounts', 'users', 'Accounts'], ['flags', 'flag', 'Flags & reports'], ['log', 'list', 'Staff log']];
+const TABS = [['overview', 'bar-chart', 'Overview'], ['accounts', 'users', 'Accounts'], ['servers', 'server', 'Servers'], ['flags', 'flag', 'Flags & reports'], ['log', 'list', 'Staff log']];
 export function StaffPage() {
   const [tab, setTab] = useState('overview');
   if (!isStaffMe()) return html`<main class="main panel staff-page"><${Empty} icon="shield" title=${t('Staff only')}>${t('This page is for Orata staff.')}<//></main>`;
@@ -35,7 +36,7 @@ export function StaffPage() {
       <div class="m-title"><${Icon} name="shield" size=${23} /><span class="name">${t('Staff')}</span></div>
       <div class="staff-tabs">${TABS.map(([k, ic, label]) => html`<button type="button" key=${k} class=${cx('staff-tab', tab === k && 'on')} onClick=${() => setTab(k)}><${Icon} name=${ic} size=${16} />${t(label)}</button>`)}</div>
     </header>
-    <div class="staff-scroll">${tab === 'overview' ? html`<${Overview} go=${setTab} />` : tab === 'accounts' ? html`<${Accounts} />` : tab === 'flags' ? html`<${Flags} />` : html`<${Log} />`}</div>
+    <div class="staff-scroll">${tab === 'overview' ? html`<${Overview} go=${setTab} />` : tab === 'accounts' ? html`<${Accounts} />` : tab === 'servers' ? html`<${Servers} />` : tab === 'flags' ? html`<${Flags} />` : html`<${Log} />`}</div>
   </main>`;
 }
 
@@ -47,7 +48,7 @@ function Overview({ go }) {
   if (!d) return html`<div class="pk-center"><${Spinner} /></div>`;
   if (d.error) return html`<p class="text-danger">${t('Couldn’t load the numbers.')}</p>`;
   const s = d.stats;
-  const tiles = [['users', s.accounts, 'Active accounts'], ['globe', s.online, 'Online now'], ['user-plus', s.newToday, 'New today'], ['server', s.servers, 'Servers'],
+  const tiles = [['users', s.accounts, 'Active accounts'], ['globe', s.online, 'Online now'], ['user-plus', s.newToday, 'New accounts today'], ['server', s.servers, 'Servers'],
     ['flag', s.openFlags, 'Open flags', 'flags'], ['alert-triangle', s.openReports, 'Open reports', 'flags'], ['lock', s.locked, 'Locked accounts'], ['ban', s.terminated, 'Terminated accounts']];
   return html`<div class="staff-grid">${tiles.map(([ic, n, label, tab]) => html`<button type="button" class=${cx('stat-tile', tab && n && 'link')} key=${label} disabled=${!(tab && n)} onClick=${() => go(tab)}><${Icon} name=${ic} size=${20} /><b>${Number(n).toLocaleString()}</b><span>${t(label)}</span></button>`)}</div>
     <h3 class="staff-h">${t('Needs a look')}</h3>
@@ -121,6 +122,32 @@ function AccountDetail({ d }) {
   </div>`;
 }
 
+/** Opens a server you aren't in, read only and invisible (the server writes it in the staff log). Leave from the banner or the server's menu. */
+export async function ghostIn(serverId) {
+  const r = await act(api.post(`/staff/servers/${serverId}/ghost`)); if (!r) return;
+  addUsers(r.users); set({ servers: { ...state.servers, [r.server.id]: { ...r.server, ghost: true } } }); rebuildIndex(); goChannel(r.server.id, null);
+}
+export function leaveGhost(serverId) {
+  api.del(`/staff/servers/${serverId}/ghost`).catch(() => {});
+  const servers = { ...state.servers }; delete servers[serverId]; set({ servers }); rebuildIndex(); go({ view: 'staff', serverId: '@me', channelId: null });
+}
+
+function Servers() {
+  const [q, setQ] = useState(''); const [list, setList] = useState(null);
+  useEffect(() => { const id = setTimeout(() => api.get(`/staff/servers?q=${encodeURIComponent(q)}`).then(setList, () => setList([])), 250); return () => clearTimeout(id); }, [q]);
+  const row = (s) => html`<div class="mem-row staff-row" key=${s.id}><${ServerIcon} server=${s} size=${36} />
+    <div class="mem-name"><b>${s.name}${s.tag ? html`<${ServerTag} tag=${s.tag} />` : null}</b><small>${s.members} ${t('members')} · ${t('owner')} @${s.owner?.username || '?'} · ${t('made')} ${relTime(s.createdAt)}${s.joinMode === 'apply' ? ` · ${t('apply to join')}` : ''}</small>
+      ${s.score ? html`<span class="staff-why">${[s.reports && [`${s.reports} ${s.reports === 1 ? t('report') : t('reports')}`, 'report'], s.flagged && [`${s.flagged} ${s.flagged === 1 ? t('flagged message') : t('flagged messages')}`], s.terminated && [`${s.terminated} ${s.terminated === 1 ? t('terminated member') : t('terminated members')}`, 'report'], s.scamName && [t('Scam-looking name')]]
+        .filter(Boolean).map(([w, c]) => html`<span class=${cx('flag-kind', c)} key=${w}>${w}</span>`)}</span>` : null}</div>
+    <span class="staff-acts"><${Btn} size="sm" icon="eye" onClick=${() => ghostIn(s.id)}>${t('Ghost in')}<//></span></div>`;
+  const fishy = (list || []).filter((s) => s.score); const rest = (list || []).filter((s) => !s.score);
+  return html`<div class="staff-bar"><div class="input-wrap staff-search"><${Icon} name="search" size=${18} class="in-icon" /><input class="input" placeholder=${t('Search servers by name or ID…')} value=${q} onInput=${(e) => setQ(e.target.value)} /></div></div>
+    <p class="text-muted">${t('Ghosting lets you read a server without joining: nobody there sees you, you can’t post or react, and it goes in the staff log.')}</p>
+    ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : !list.length ? html`<${Empty} icon="server" title=${t('No servers found')} />` : html`
+      ${fishy.length ? html`<h3 class="staff-h">${t('Looks fishy')}</h3><div class="mem-table">${fishy.map(row)}</div>` : null}
+      ${rest.length ? html`<h3 class="staff-h">${fishy.length ? t('Everything else') : t('All servers')}</h3><div class="mem-table">${rest.map(row)}</div>` : null}`}`;
+}
+
 function Flags() {
   const [all, setAll] = useState(false); const [d, setD] = useState(null);
   const load = () => api.get(`/staff/flags${all ? '?status=all' : ''}`).then((r) => { addUsers(r.users); setD(r); }, (e) => setD({ error: errMsg(e) }));
@@ -142,6 +169,7 @@ function Flags() {
         ${by ? html`<div class="flag-detail">${t('Reported by')} ${by.displayName}${f.note ? `: “${f.note}”` : ''}</div>` : null}
         <div class="flag-acts">${f.status === 'open' ? html`
           ${f.messageId && !f.gone ? html`<${Btn} size="sm" variant="danger" icon="trash" onClick=${() => handle(f, 'delete')}>${t('Delete message')}<//>` : null}
+          ${f.kind === 'server' ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(f.serverId)}>${t('Ghost in')}<//>` : null}
           <${Btn} size="sm" icon="lock" onClick=${() => userAct(f.userId, 'lock')}>${t('Lock account')}<//>
           <${Btn} size="sm" variant="danger" icon="ban" onClick=${() => userAct(f.userId, 'terminate')}>${t('Terminate')}<//>
           <${Btn} size="sm" variant="ghost" onClick=${() => handle(f, 'dismiss')}>${t('Dismiss')}<//>`
@@ -149,14 +177,14 @@ function Flags() {
       </div>`; })}</div>`}`;
 }
 
-const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about' };
+const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into' };
 function Log() {
   const [d, setD] = useState(null);
   useEffect(() => { api.get('/staff/log').then((r) => { addUsers(r.users); setD(r); }, () => setD({ log: [] })); }, []);
   const users = useSel((s) => s.users);
   if (!d) return html`<div class="pk-center"><${Spinner} /></div>`;
   if (!d.log.length) return html`<${Empty} icon="list" title=${t('No staff actions yet')} />`;
-  return html`<div class="al-list">${d.log.map((e) => html`<div class="al-row" key=${e.id}><span class=${cx('al-ic', ['terminate', 'lock', 'delete_message'].includes(e.action) && 'bad')}><${Icon} name=${e.action.includes('lock') ? 'lock' : e.action.includes('terminate') ? 'ban' : 'flag'} size=${16} /></span>
-    <div class="al-text"><div><b>${users[e.by]?.displayName || '?'}</b> ${t(ACTION[e.action] || e.action)} <b>${users[e.target]?.displayName || '?'}</b>${e.hours ? ` ${t('for')} ${HOURS.find(([h]) => h === e.hours)?.[1] || `${e.hours}h`}` : ''}</div>${e.reason ? html`<small>${t('Reason')}: ${e.reason}</small>` : null}</div>
+  return html`<div class="al-list">${d.log.map((e) => html`<div class="al-row" key=${e.id}><span class=${cx('al-ic', ['terminate', 'lock', 'delete_message'].includes(e.action) && 'bad')}><${Icon} name=${e.action.includes('lock') ? 'lock' : e.action.includes('terminate') ? 'ban' : e.action === 'ghost' ? 'eye' : 'flag'} size=${16} /></span>
+    <div class="al-text"><div><b>${users[e.by]?.displayName || '?'}</b> ${t(ACTION[e.action] || e.action)} <b>${e.action === 'ghost' ? e.serverName : users[e.target]?.displayName || '?'}</b>${e.hours ? ` ${t('for')} ${HOURS.find(([h]) => h === e.hours)?.[1] || `${e.hours}h`}` : ''}</div>${e.reason ? html`<small>${t('Reason')}: ${e.reason}</small>` : null}</div>
     <time title=${formatFull(e.at)}>${relTime(e.at)}</time></div>`)}</div>`;
 }

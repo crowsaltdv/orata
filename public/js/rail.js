@@ -86,6 +86,7 @@ export const folderOps = {
 };
 
 export function serverMenu(server) {
+  if (server.ghost) return [{ label: t('Leave ghost mode'), icon: 'log-out', onClick: () => import('/js/staff.js').then((m) => m.leaveGhost(server.id)) }];   // staff reading a server they aren't in
   const me = state.me; const owner = server.ownerId === me.id;
   const muted = !!state.settings.mutedServers[server.id];
   const canSettings = hasPerm(server.id, 'MANAGE_SERVER') || hasPerm(server.id, 'MANAGE_CHANNELS') || hasPerm(server.id, 'MANAGE_ROLES');
@@ -108,6 +109,7 @@ export function serverMenu(server) {
     hasPerm(server.id, 'MANAGE_CHANNELS') && { label: t('Create Channel'), icon: 'plus', onClick: () => openModal('create-channel', { serverId: server.id }) },
     { type: 'sep' },
     { label: t('Copy Server ID'), icon: 'copy', onClick: async () => { await copyText(server.id); toast('Copied', 'success', 1500); } },
+    !owner && { label: t('Report server to Orata staff'), icon: 'flag', danger: true, onClick: () => openModal('report', { serverId: server.id }) },
     owner
       ? { label: t('Delete Server'), icon: 'trash', danger: true, onClick: () => deleteServer(server) }
       : { label: t('Leave Server'), icon: 'log-out', danger: true, onClick: () => leaveServer(server) },

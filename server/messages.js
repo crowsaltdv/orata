@@ -42,7 +42,7 @@ export function sanitizeAttachments(list, fs, path, uploadDir) {
   return out;
 }
 
-export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce, poll = null, theme = null, forward = null, bridge = null, application = null } = {}) {
+export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce, poll = null, theme = null, forward = null, bridge = null, application = null, command = null } = {}) {
   content = String(content).replace(/\r\n/g, '\n').slice(0, 4000);
   const server = ch.serverId ? db.servers[ch.serverId] : null;
   const author = db.users[authorId];
@@ -75,6 +75,7 @@ export function postMessage(ch, authorId, { content = '', attachments = [], gif 
   if (theme) msg.theme = theme;
   if (forward) msg.forward = forward;   // a copy of a message forwarded from elsewhere
   if (bridge) msg.bridge = bridge;
+  if (command) msg.command = command;   // Orbit's answer to a command: { name, by } (by: who used it)
   if (application) msg.application = application;   // an application to join the server (server/applications.js)   // posted from a linked Discord channel: { id, name, avatar } of the Discord sender
   if (attachments.some((a) => a.voice)) { msg.expiresAt = msg.createdAt + VOICE_TTL; expiring.set(msg.id, { channelId: ch.id, at: msg.expiresAt }); }
   (db.messages[ch.id] ||= []).push(msg);
