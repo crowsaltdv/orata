@@ -71,9 +71,21 @@ async function main() {
   const added = await wa.wait('member_add', (d) => d.serverId === S.id).catch(() => null);
   ok(!!added, 'alice receives member_add');
   r = await api('POST', `/servers/${S.id}/channels`, A, { name: 'Dev Talk', type: 'text', parentId: text.parentId });
-  ok(r.body.name === 'dev-talk', 'channel names are slugified');
+  ok(r.body.name === 'dev-talk', 'channel names are slugified'); const dev = r.body;
   r = await api('PATCH', `/servers/${S.id}`, B, { name: 'hax' });
   ok(r.status === 403, 'non-admin cannot edit server');
+  // dragging channels around the sidebar: a new order, and a channel moved into a different category
+  const cats = S.channels.filter((c) => c.type === 'category').sort((a, b) => a.position - b.position);
+  r = await api('PUT', `/servers/${S.id}/channel-order`, B, { items: [{ id: dev.id, position: 0, parentId: null }] });
+  ok(r.status === 403, 'non-admin cannot reorder channels');
+  r = await api('PUT', `/servers/${S.id}/channel-order`, A, { items: [{ id: dev.id, position: 0, parentId: cats[1].id }, { id: cats[1].id, position: 0, parentId: null }, { id: cats[0].id, position: 1, parentId: 'x' }] });
+  const moved = await wa.wait('server_update', (d) => d.server.id === S.id && d.server.channels.find((c) => c.id === dev.id)?.parentId === cats[1].id).catch(() => null);
+  const chOf = (id) => moved?.server.channels.find((c) => c.id === id);
+  ok(r.status === 200 && !!moved, 'reorder channels: members hear about the new order');
+  ok(chOf(dev.id)?.position === 0 && chOf(cats[1].id)?.position === 0 && chOf(cats[0].id)?.position === 1 && chOf(cats[0].id)?.parentId == null, 'reorder channels: positions saved (a category stays top-level)');
+  r = await api('PUT', `/servers/${S.id}/channel-order`, A, { items: [{ id: dev.id, position: 3, parentId: '123' }, { id: '999', position: 1, parentId: null }] });
+  const back = await wa.wait('server_update', (d) => d.server.id === S.id && d.server.channels.find((c) => c.id === dev.id)?.position === 3).catch(() => null);
+  ok(r.status === 200 && back?.server.channels.find((c) => c.id === dev.id)?.parentId == null, 'reorder channels: unknown categories and channels are ignored');
 
   console.log('\nMessages');
   r = await api('POST', `/channels/${text.id}/messages`, B, { content: `hello <@${alice.id}> **world** https://example.com`, nonce: 'n1' });

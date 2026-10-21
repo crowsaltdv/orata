@@ -725,7 +725,11 @@ export function createApi() {
     for (const it of items) {
       const ch = db.channels[it.id]; if (!ch || ch.serverId !== s.id) continue;
       ch.position = clampInt(it.position, 0, 100000, ch.position);
-      if (ch.type !== 'category') ch.parentId = it.parentId && db.channels[it.parentId]?.type === 'category' && db.channels[it.parentId].serverId === s.id ? it.parentId : null;
+      if (ch.type === 'category') continue;
+      const parentId = it.parentId && db.channels[it.parentId]?.type === 'category' && db.channels[it.parentId].serverId === s.id ? it.parentId : null;
+      if ((ch.parentId || null) === parentId) continue;
+      ch.parentId = parentId; audit(s, req.user.id, 'channel_update', { target: ch.id, name: ch.name, fields: ['parentId'] });
+      revalidateVoice(s);   // a channel that follows its category's permissions may now be hidden from people sitting in it
     }
     save(); pushServerUpdate(s); res.json({ ok: true });
   }));

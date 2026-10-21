@@ -10,6 +10,8 @@ import { voice } from '/js/voice.js';
 import { copyText, cmpId } from '/js/lib.js';
 import { t } from '/js/i18n.js';
 import { UserName } from '/js/profile-style.js';
+import { useChannelDnd } from '/js/channel-dnd.js';
+import { buildLayout } from '/js/channel-order.js';
 
 /* ------------------------------------------------------------------ DM list */
 export function dmMenu(ch) {
@@ -111,14 +113,14 @@ function VoiceUsers({ channelId, serverId }) {
       <span class="vc-ic">${st.speaker ? html`<${Icon} name="mic" size=${14} />` : st.hand ? html`<${Icon} name="hand" size=${14} />` : null}${st.screen ? html`<span class="live">LIVE</span>` : st.video ? html`<${Icon} name="video" size=${14} />` : null}${st.deafened ? html`<${Icon} name="headphones-off" size=${14} />` : st.muted ? html`<${Icon} name="mic-off" size=${14} />` : null}</span></div>`; })}</div>`;
 }
 
-const ChannelItem = memo(function ChannelItem({ ch, active, serverId }) {
+const ChannelItem = memo(function ChannelItem({ ch, active, serverId, dragging, onGrab }) {
   const info = useSel((s) => { const u = unreadInfo(ch.id); return `${u.unread ? 1 : 0}:${u.mentions}:${isMuted(ch) ? 1 : 0}`; });
   const [unread, mentions, muted] = info.split(':');
   const inCall = useSel((s) => s.voice.conn?.channelId === ch.id);
   const isVoice = ch.type === 'voice';
   const click = () => { if (isVoice) { if (!inCall) voice.join(ch.id); } goChannel(serverId, ch.id); };
-  return html`<div>
-    <div class=${cx('ch-item', active && 'active', unread === '1' && muted === '0' && 'unread', muted === '1' && 'muted', inCall && 'in-call')} role="button" tabindex="0" onClick=${click} onKeyDown=${(e) => e.key === 'Enter' && click()} onContextMenu=${(e) => openContext(e, channelMenu(ch))}>
+  return html`<div data-dnd=${ch.id} data-kind="channel">
+    <div class=${cx('ch-item', active && 'active', unread === '1' && muted === '0' && 'unread', muted === '1' && 'muted', inCall && 'in-call', dragging && 'dnd-placeholder')} role="button" tabindex="0" onClick=${click} onKeyDown=${(e) => e.key === 'Enter' && click()} onContextMenu=${(e) => openContext(e, channelMenu(ch))} onPointerDown=${onGrab ? (e) => onGrab(e, 'channel', ch.id) : null}>
       <${Icon} name=${isVoice ? 'volume' : ch.type === 'stage' ? 'stage' : ch.type === 'forum' ? 'forum' : ch.private ? 'hash-lock' : 'hash'} size=${19} class="ch-icon" />
       <span class="ch-name">${ch.name}</span>
       ${Number(mentions) ? html`<${Badge} n=${Number(mentions)} />` : null}
@@ -137,15 +139,20 @@ export function ChannelSidebar() {
   const collapsed = useSel((s) => s.settings.collapsed);
   const activeForum = useSel((s) => s.channelIndex[s.route.channelId]?.forumId);   // while a post is open its forum stays highlighted
   const [menuOpen, setMenuOpen] = useState(false); const hdr = useRef(null);
+  const dnd = useChannelDnd(server, !!server && hasPerm(server.id, 'MANAGE_CHANNELS'));   // managers can drag channels and categories into a new order
   const groups = useMemo(() => {
     if (!server) return [];
-    const cats = server.channels.filter((c) => c.type === 'category').sort((a, b) => a.position - b.position);
-    const rest = server.channels.filter((c) => c.type !== 'category');
-    const g = []; const loose = rest.filter((c) => !c.parentId || !cats.some((x) => x.id === c.parentId)).sort((a, b) => a.position - b.position);
-    if (loose.length) g.push({ cat: null, items: loose });
-    for (const c of cats) g.push({ cat: c, items: rest.filter((x) => x.parentId === c.id).sort((a, b) => a.position - b.position) });
+    const by = new Map(server.channels.map((c) => [c.id, c]));
+    const g = []; const layout = dnd.layout || buildLayout(server.channels);   // while a drag is under way the list shows its live preview
+    for (const { catId, ids } of layout) {
+      if (catId && !by.has(catId)) continue;
+      const items = ids.map((id) => by.get(id)).filter(Boolean);
+      if (catId || items.length) g.push({ cat: catId ? by.get(catId) : null, items });
+    }
     return g;
-  }, [server]);
+  }, [server, dnd.layout]);
+  const moving = dnd.drag?.id;   // the row being dragged stays in the list as an empty slot
+  const hot = dnd.drag?.kind === 'channel' ? dnd.layout?.find((g) => g.ids.includes(moving))?.catId : null;   // a collapsed category the channel would drop into
   if (!server) return null;
   const openMenu = (e) => { e.stopPropagation(); setMenuOpen(true); const rect = e.currentTarget.getBoundingClientRect(); openContext({ clientX: rect.left + 8, clientY: rect.bottom + 6, preventDefault() {}, stopPropagation() {} }, serverMenu(server)); setTimeout(() => setMenuOpen(false), 0); };
   return html`<aside class="sidebar panel" aria-label="Channels">
@@ -153,12 +160,12 @@ export function ChannelSidebar() {
       ${server.banner ? html`<span class="banner" style=${{ backgroundImage: `url("${server.banner}")` }}></span>` : null}
       <span class="sbh-name">${server.name}</span><${Icon} name="chevron-down" size=${18} />
     </button>
-    <div class="sb-scroll" style="padding-top:2px">
+    <div class=${cx('sb-scroll', dnd.drag && 'dnd', dnd.drag?.kind === 'category' && 'dnd-cats')} ref=${dnd.root} style="padding-top:2px">
       ${groups.map(({ cat, items }) => html`<div key=${cat?.id || 'loose'}>
-        ${cat ? html`<div class=${cx('cat-head', collapsed[cat.id] && 'collapsed')} role="button" tabindex="0" onClick=${() => updateSettings({ collapsed: { [cat.id]: !collapsed[cat.id] } }, { sync: false })} onContextMenu=${(e) => openContext(e, channelMenu(cat))}>
+        ${cat ? html`<div class=${cx('cat-head', collapsed[cat.id] && 'collapsed', moving === cat.id && 'dnd-placeholder', hot === cat.id && collapsed[cat.id] && 'dnd-hot')} data-dnd=${cat.id} data-kind="category" onPointerDown=${dnd.enabled ? (e) => dnd.down(e, 'category', cat.id) : null} role="button" tabindex="0" onClick=${() => updateSettings({ collapsed: { [cat.id]: !collapsed[cat.id] } }, { sync: false })} onContextMenu=${(e) => openContext(e, channelMenu(cat))}>
           <${Icon} name="chevron-down" size=${13} sw=${3} /><span>${cat.name}</span>
           ${hasChannelPerm(cat, 'MANAGE_CHANNELS') ? html`<span class="cat-add" data-tip="Create Channel" onClick=${(e) => { e.stopPropagation(); openModal('create-channel', { serverId: server.id, parentId: cat.id }); }}><${Icon} name="plus" size=${16} sw=${2.4} /></span>` : null}</div>` : null}
-        <div class=${cx('ch-list', cat && collapsed[cat.id] && 'collapsed')}><div>${items.map((c) => html`<${ChannelItem} key=${c.id} ch=${c} active=${chId === c.id || activeForum === c.id} serverId=${server.id} />`)}</div></div>
+        <div class=${cx('ch-list', cat && collapsed[cat.id] && 'collapsed')}><div>${items.map((c) => html`<${ChannelItem} key=${c.id} ch=${c} active=${chId === c.id || activeForum === c.id} serverId=${server.id} dragging=${moving === c.id} onGrab=${dnd.enabled ? dnd.down : null} />`)}</div></div>
       </div>`)}
       ${!server.channels.length ? html`<div class="empty small"><p>No channels yet.</p></div>` : null}
     </div>
