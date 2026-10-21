@@ -60,6 +60,7 @@ export function userMenu(userId, serverId) {
   }
   if (isDev(me) && !u.bot) items.push({ type: 'sep' }, { label: t('Edit Badges'), icon: 'award', onClick: () => openModal('badges', { userId }) });
   items.push({ type: 'sep' }, { label: t('Copy User ID'), icon: 'copy', onClick: async () => { await copyText(userId); toast('Copied', 'success', 1400); } });
+  if (userId !== me.id && !u.bot) items.push({ label: t('Report to Orata staff'), icon: 'flag', danger: true, onClick: () => openModal('report', { userId }) });
   return items.filter(Boolean);
 }
 
@@ -101,6 +102,7 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
     <div class="pc-body">
       <div class="pc-name"><${NameText} text=${nick || user.displayName} profile=${user.profile} />${user.bot ? html`<span class="bot-tag">APP</span>` : null}${user.tag ? html`<${ServerTag} tag=${user.tag} />` : null}<${Badges} user=${user} /></div>
       <div class="pc-user">${user.username}${user.pronouns ? html`<i> • ${user.pronouns}</i>` : null}</div>
+      ${user.terminated ? html`<div class="pc-terminated"><${Icon} name="ban" size=${15} />${t('Account terminated by Orata staff')}</div>` : null}
       ${cs ? html`<div class="pc-status"><span>${cs.emoji}</span>${cs.text}</div>` : null}
       ${listening ? html`<${ListeningCard} listening=${listening} />` : null}
       ${mode === 'panel' && d ? html`<div class="pc-mutual-row">${d.mutualServers.length ? html`<span class="mut-avs">${d.mutualServers.slice(0, 3).map((s) => html`<span class="mut-av" title=${s.name}>${s.icon ? html`<img src=${s.icon} alt="" />` : s.name[0]}</span>`)}</span><span>${d.mutualServers.length} ${t('Mutual Servers')}</span>` : null}</div>` : null}

@@ -193,6 +193,7 @@ export function ServerRail() {
   const route = useSel((s) => s.route.serverId);
   const view = useSel((s) => s.route.view);
   const musicOpen = view === 'music'; const playing = useSel((s) => s.music.playing);
+  const staff = useSel((s) => !!s.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev'));   // the Staff page (staff.js) for Orata staff
   const layout = useMemo(() => railLayout(servers, order, folders), [servers, order, folders]);
   const badges = useSel((s) => Object.keys(s.servers).map((id) => { const u = serverUnread(id); return `${id}:${u.unread ? 1 : 0}:${u.mentions}`; }).join('|'));
   const dmBadge = useSel((s) => Object.values(s.dms).reduce((n, c) => { const u = unreadInfo(c.id); return n + (u.mentions || (u.unread && !s.settings.mutedChannels[c.id] ? 1 : 0)); }, 0));
@@ -239,6 +240,7 @@ export function ServerRail() {
       ? html`<${FolderItem} key=${it.id} folder=${it} info=${info} route=${route} dnd=${dnd} />`
       : html`<${ServerButton} key=${it.id} id=${it.id} active=${route === it.id} unread=${info[it.id]?.unread} mentions=${info[it.id]?.mentions || 0} dnd=${dnd} />`))}
     <div class="rail-item"><button type="button" class="rail-btn add glass glass-rail" data-tip=${t('Add a Server')} data-tip-pos="right" aria-label="Add a server" onClick=${() => openModal('add-server')}><${Icon} name="plus" size=${24} sw=${2.4} /></button></div>
+    ${staff ? html`<div class=${cx('rail-item', view === 'staff' && 'active')}><button type="button" class=${cx('rail-btn staff glass glass-rail', view === 'staff' && 'active')} data-tip=${t('Staff tools')} data-tip-pos="right" aria-label=${t('Staff tools')} onClick=${() => go({ view: 'staff', serverId: '@me', channelId: null })}><${Icon} name="shield" size=${22} sw=${2.2} /></button></div>` : null}
   </nav>`;
 }
 void openSettings; void unreadInfo; void ColorSwatch;

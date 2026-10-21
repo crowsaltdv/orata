@@ -138,7 +138,7 @@ export function encodeMentions(text, ch) {
     for (const r of roles) { const re = new RegExp(`@${r.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'giu'); t = t.replace(re, `<@&${r.id}>`); }
     t = t.replace(/(^|[\s(])@([a-z0-9_.]{2,32})(?![a-z0-9_])/gi, (all, pre, name) => { const id = userByName.get(name.toLowerCase().replace(/\.+$/, '')); return id ? `${pre}<@${id}>${name.endsWith('.') ? '.' : ''}` : all; });
     if (allCustomEmojis().length) t = t.replace(/(^|[^<\w]):([A-Za-z0-9_]{2,32}):/g, (all, pre, name) => { const tok = customToken(name, ch.serverId); return tok ? pre + tok : all; });   // typed :name: → the custom emoji
-    if (chans.length) t = t.replace(/(^|[\s(])#([\p{L}\p{N}_-]+)/gu, (all, pre, name) => { const c = chans.find((x) => x.name.toLowerCase() === name.toLowerCase()); return c ? `${pre}<#${c.id}>` : all; });
+    if (chans.length) t = t.replace(/(^|[\s(])#([\p{L}\p{N}_\-│·・\p{Extended_Pictographic}‍️]+)/gu, (all, pre, name) => { const c = chans.find((x) => x.name.toLowerCase() === name.toLowerCase()); return c ? `${pre}<#${c.id}>` : all; });
     return t;
   }).join('');
 }

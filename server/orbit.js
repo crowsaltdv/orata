@@ -132,7 +132,7 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
     if (!mayUse(s, req.user.id, cmd)) throw forbidden(`You can’t use /${cmd.name} in this server.`);
     const args = String(req.body?.args || '').trim().slice(0, 2000);
     const me = req.user.id; const who = `**${nameIn(s, me)}**`;
-    const text = (v) => { automod(ch, me, v); return guardText(ch, me, v); };   // AutoMod and swearing protection apply to what Orbit repeats for you
+    const text = (v) => { automod(ch, me, v, { host: req.get('host') }); return guardText(ch, me, v); };   // AutoMod and swearing protection apply to what Orbit repeats for you
     const post = (content) => { postMessage(ch, s.orbitId, { content }); return { ok: true }; };
     const only = (content) => ({ ephemeral: content });
     const [first = '', ...rest] = args.split(/\s+/); const tail = rest.join(' ').trim();

@@ -5,6 +5,7 @@ import { Icon } from '/js/icons.js';
 import { ServerIcon, Btn, Spinner } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
+import { joinInvite } from '/js/applications.js';
 
 /** The invite code in `https://<this site>/invite/<code>`, or null. Only links to this Orata count — a code means nothing elsewhere. */
 export function inviteCodeOf(url) {
@@ -34,7 +35,7 @@ export function InviteCard({ code, mine }) {
     <div class="ie-row"><span class="ie-bad"><${Icon} name="link" size=${22} /></span><div class="ie-info"><b class="ie-name">${res.e.status === 404 ? t('Invite invalid') : t('Invite unavailable')}</b><div class="ie-sub">${res.e.status === 404 ? t('This invite is invalid or has expired.') : res.e.message}</div></div></div></div>`;
   const join = async () => {
     setBusy(true);
-    try { const s = await api.post(`/invites/${code}/join`); cache.delete(code); goChannel(s.id, null); toast(`${t('Joined')} ${s.name}!`, 'success', 2500); } catch (e) { toast(e.message, 'error'); }
+    try { const s = await joinInvite(code); if (s) { cache.delete(code); goChannel(s.id, null); toast(`${t('Joined')} ${s.name}!`, 'success', 2500); } } catch (e) { toast(e.message, 'error'); }
     setBusy(false);
   };
   const est = server.createdAt ? new Date(server.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : null;
@@ -44,7 +45,7 @@ export function InviteCard({ code, mine }) {
       <${ServerIcon} server=${server} size=${54} class="ie-icon" />
       <div class="ie-info"><b class="ie-name" title=${server.name}>${server.name}</b>
         <div class="ie-stats"><span><i class="on"></i>${server.onlineCount.toLocaleString()} ${t('Online')}</span><span><i></i>${server.memberCount.toLocaleString()} ${server.memberCount === 1 ? t('Member') : t('Members')}</span>${est ? html`<span class="ie-est">${t('Est.')} ${est}</span>` : null}</div></div>
-      ${inServer ? html`<${Btn} class="ie-btn" onClick=${() => goChannel(server.id, null)}>${t('Go to Server')}<//>` : html`<${Btn} class="ie-btn" variant="success" loading=${busy} onClick=${join}>${t('Join')}<//>`}
+      ${inServer ? html`<${Btn} class="ie-btn" onClick=${() => goChannel(server.id, null)}>${t('Go to Server')}<//>` : html`<${Btn} class="ie-btn" variant="success" loading=${busy} onClick=${join}>${server.joinMode === 'apply' ? t('Apply') : t('Join')}<//>`}
     </div>
   </div>`;
 }

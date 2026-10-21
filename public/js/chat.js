@@ -76,7 +76,7 @@ export function ChatView() {
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label="Menu"><${Icon} name="menu" size=${22} /></button>
       <div class="m-title">
-        ${isPost ? html`<button type="button" class="icon-btn" data-tip=${t('Back to forum')} aria-label=${t('Back to forum')} onClick=${() => goChannel(ch.serverId, ch.forumId)}><${Icon} name="arrow-left" size=${20} /></button>` : isDm ? (isGroup ? html`<span class="group-av sm"><${Icon} name="users" size=${15} /></span>` : html`<${Avatar} user=${other} size=${28} status=${other?.status || 'offline'} />`) : html`<${Icon} name=${ch.private ? 'hash-lock' : 'hash'} size=${23} />`}
+        ${isPost ? html`<button type="button" class="icon-btn" data-tip=${t('Back to forum')} aria-label=${t('Back to forum')} onClick=${() => goChannel(ch.serverId, ch.forumId)}><${Icon} name="arrow-left" size=${20} /></button>` : isDm ? (isGroup ? html`<span class="group-av sm"><${Icon} name="users" size=${15} /></span>` : html`<${Avatar} user=${other} size=${28} status=${other?.status || 'offline'} />`) : ch.emoji ? html`<span class="m-emoji" aria-hidden="true">${ch.emoji}</span>` : html`<${Icon} name=${ch.private ? 'hash-lock' : 'hash'} size=${23} />`}
         <span class="name">${isDm ? dmName(ch, 5) : ch.name}</span>
         ${isPost && ch.locked ? html`<span class="post-lock" data-tip=${t('This post is locked')}><${Icon} name="lock" size=${15} /></span>` : null}
         ${postTags.length ? html`<span class="post-hdr-tags">${postTags.map((tg) => html`<${TagChip} key=${tg.id} tag=${tg} small=${true} />`)}</span>` : null}

@@ -8,10 +8,10 @@ import { errMsg } from '/js/actions.js';
 import { formatDuration } from '/js/orbit-commands.js';
 import { t } from '/js/i18n.js';
 
-const KINDS = [['', 'Everything'], ['member_', 'Members'], ['role_', 'Roles'], ['channel_', 'Channels'], ['message_', 'Messages'], ['automod', 'AutoMod'], ['server_,invite_,vanity_,tag_,orbit_,reaction_,discord_', 'Server & Orbit']];
+const KINDS = [['', 'Everything'], ['member_,application_', 'Members'], ['role_', 'Roles'], ['channel_', 'Channels'], ['message_', 'Messages'], ['automod', 'AutoMod'], ['server_,invite_,vanity_,tag_,orbit_,reaction_,discord_,join_', 'Server & Orbit']];
 const ICON = { member_kick: 'log-out', member_ban: 'ban', member_unban: 'user-check', member_timeout: 'clock', member_timeout_remove: 'clock', member_role_add: 'tag', member_role_remove: 'tag', member_nick: 'edit',
   role_create: 'tag', role_update: 'tag', role_delete: 'tag', channel_create: 'hash', channel_update: 'hash', channel_delete: 'hash', server_update: 'settings', server_transfer: 'crown',
-  invite_create: 'link', invite_delete: 'link', vanity_update: 'link', tag_update: 'tag', discord_link: 'link', discord_unlink: 'link', message_delete: 'trash', message_bulk_delete: 'trash', message_pin: 'pin', message_unpin: 'pin', automod_block: 'shield', orbit_add: 'sparkles', orbit_remove: 'sparkles', orbit_update: 'sparkles', reaction_roles_create: 'smile' };
+  invite_create: 'link', invite_delete: 'link', vanity_update: 'link', tag_update: 'tag', join_mode: 'link', application_accept: 'user-check', application_reject: 'user-x', discord_link: 'link', discord_unlink: 'link', message_delete: 'trash', message_bulk_delete: 'trash', message_pin: 'pin', message_unpin: 'pin', automod_block: 'shield', orbit_add: 'sparkles', orbit_remove: 'sparkles', orbit_update: 'sparkles', reaction_roles_create: 'smile' };
 const FIELD = { name: 'name', description: 'description', icon: 'icon', banner: 'banner', accent: 'color', systemChannelId: 'join messages channel', profanity: 'swearing protection', blockedWords: 'blocked words', automod: 'AutoMod', onboarding: 'onboarding', topic: 'topic', slowmode: 'slowmode', nsfw: 'age limit', parentId: 'category', overwrites: 'permissions', synced: 'permissions', tags: 'tags', requireTag: 'tags', color: 'color', hoist: 'shown separately', position: 'order', permissions: 'permissions', displayName: 'name', bio: 'about', avatar: 'picture', roles: 'command roles' };
 const fields = (list) => (list?.length ? ` (${[...new Set(list.map((f) => FIELD[f] || f))].join(', ')})` : '');
 const BAD = new Set(['member_kick', 'member_ban', 'member_timeout', 'role_delete', 'channel_delete', 'message_delete', 'message_bulk_delete', 'automod_block', 'invite_delete', 'orbit_remove']);
@@ -39,6 +39,9 @@ function said(e, who) {
     case 'invite_create': return html`created the invite <b>${d.code}</b>`;
     case 'invite_delete': return html`deleted the invite <b>${d.code}</b>`;
     case 'tag_update': return d.old ? html`changed the server tag from <b>${d.old}</b> to <b>${d.text}</b>` : html`set the server tag to <b>${d.text}</b>`;
+    case 'join_mode': return d.mode === 'apply' ? html`made people apply to join the server` : html`let anyone with an invite join the server`;
+    case 'application_accept': return e.actorId ? html`accepted the application of ${T}` : html`let ${T} in (applying was switched off)`;
+    case 'application_reject': return html`rejected the application of ${T}`;
     case 'discord_link': return html`linked ${ch(d.channel)} with <b>#${d.discordChannel}</b>${d.guild ? ` (${d.guild})` : ''} on Discord`;
     case 'discord_unlink': return html`unlinked ${ch(d.channel)} from Discord${d.why ? ` (${d.why})` : ''}`;
     case 'vanity_update': return d.old ? html`changed the custom invite link from <b>${d.old}</b> to <b>${d.code}</b>` : html`set the custom invite link to <b>${d.code}</b>`;

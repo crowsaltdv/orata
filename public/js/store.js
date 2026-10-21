@@ -179,6 +179,7 @@ export function parseRoute(path) {
   if ((m = p.match(/^\/channels\/(\d+)$/))) return { view: 'channel', serverId: m[1], channelId: null };
   if ((m = p.match(/^\/invite\/([\w-]+)$/))) return { view: 'invite', serverId: '@me', channelId: null, param: m[1] };
   if (p === '/music') return { view: 'music', serverId: '@me', channelId: null };
+  if (p === '/staff') return { view: 'staff', serverId: '@me', channelId: null };   // Orata staff tools (staff.js)
   if (p === '/login' || p === '/register') return { view: p.slice(1), serverId: '@me', channelId: null };
   if (p === '/verify') return { view: 'verify', serverId: '@me', channelId: null };   // the link in the verification email (the token is read from the query string)
   return { view: 'friends', serverId: '@me', channelId: null };
@@ -188,6 +189,7 @@ export function routePath(r) {
     case 'dm': return `/channels/@me/${r.channelId}`;
     case 'friends': return '/channels/@me';
     case 'music': return '/music';
+    case 'staff': return '/staff';
     case 'channel': return r.channelId ? `/channels/${r.serverId}/${r.channelId}` : `/channels/${r.serverId}`;
     default: return '/channels/@me';
   }

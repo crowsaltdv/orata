@@ -204,7 +204,7 @@ export function emitTo(userIds, op, d, exceptConn) {
 }
 
 /* -------------------------------------------------------- permissions */
-export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES', 'VIEW_CHANNEL', 'MODERATE_MEMBERS', 'MANAGE_EXPRESSIONS', 'SEND_GIFS'];
+export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES', 'VIEW_CHANNEL', 'MODERATE_MEMBERS', 'MANAGE_EXPRESSIONS', 'SEND_GIFS', 'ACCESS_APPLICATIONS'];
 export const DEFAULT_PERMS = ['VIEW_CHANNEL', 'CREATE_INVITE', 'SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
 /** The permissions a channel (or category) can override per role / member — MANAGE_ROLES doubles as "Manage Permissions" there. */
 export const CHANNEL_PERMS = ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK'];
@@ -265,6 +265,7 @@ export function permsIn(server, userId, ch) {
     apply(allow, deny);
     const mo = ows.find((o) => o.type === 'member' && o.id === userId); if (mo) apply(mo.allow, mo.deny);
   }
+  if (ch.applications) { if (base.has('ACCESS_APPLICATIONS')) out.add('VIEW_CHANNEL'); else out.delete('VIEW_CHANNEL'); }   // the applications channel follows the permission, not overwrites
   if (isTimedOut(server, userId)) return out.has('VIEW_CHANNEL') ? new Set(['VIEW_CHANNEL']) : new Set();   // overwrites cannot lift a timeout
   return out.has('VIEW_CHANNEL') ? out : new Set();   // a channel you cannot see grants nothing
 }
@@ -398,7 +399,7 @@ export function publicUser(u) {
     banner: u.banner || null, bannerColor: u.bannerColor || null, accentColor: u.accentColor || null,
     bio: u.bio || '', pronouns: u.pronouns || '', profile: u.profile ? sanitizeProfileStyle(u.profile) : null, avatarBg: u.avatarBg || null, createdAt: u.createdAt,   // (re-checked on the way out so styles saved by older versions, e.g. frames, simply disappear)
     bot: !!u.bot, status: effectiveStatus(u), customStatus: u.customStatus || null, listening: visibleListening(u),
-    badges: (u.badges || []).map((id) => db.badges?.[id]).filter(Boolean), tag: wornTag(u),   // whole badges (see badges.js), so a profile can show them without the catalog
+    badges: (u.badges || []).map((id) => db.badges?.[id]).filter(Boolean), tag: wornTag(u), terminated: u.terminated ? true : undefined,   // whole badges (see badges.js), so a profile can show them without the catalog
   };
 }
 export function selfUser(u) {
@@ -413,6 +414,7 @@ export function serverView(server, userId) {
     accent: server.accent || null, roles: server.roles, channels: chans,
     orbitId: server.orbitId && server.members[server.orbitId] ? server.orbitId : null, orbitRoles: server.orbit?.roles || {},   // this server's Orbit (server/orbit.js)
     automod: server.automod || null, onboarding: server.onboarding || null, vanity: server.vanity || null, tag: server.tag || null,
+    joinMode: server.joinMode || 'invite', applyQuestion: server.applyQuestion || '', applicationsChannelId: server.joinMode === 'apply' ? server.applicationsChannelId || null : null,
     members: Object.entries(server.members).map(([id, m]) => memberView(id, m)),
     perms: [...permsOf(server, userId)], systemChannelId: server.systemChannelId || null,
     emojis: server.emojis || [], stickers: server.stickers || [],
@@ -426,7 +428,7 @@ export function channelView(c, userId) {
     id: c.id, serverId: c.serverId || null, type: c.type, name: c.name || null, topic: c.topic || '',
     parentId: c.parentId || null, position: c.position || 0,
     recipients: c.recipients || undefined, ownerId: c.ownerId || undefined,
-    icon: c.icon || undefined, lastMessageId: lastMessageId(c.id), nsfw: !!c.nsfw, slowmode: c.slowmode || 0,
+    icon: c.icon || undefined, emoji: c.emoji || undefined, lastMessageId: lastMessageId(c.id), nsfw: !!c.nsfw, slowmode: c.slowmode || 0,
   };
   if (c.serverId) {
     const ows = overwritesOf(c);
@@ -479,6 +481,11 @@ export function postView(p) {
 }
 export function lastMessageId(channelId) { const a = db.messages[channelId]; return a?.length ? a[a.length - 1].id : null; }
 
+/** The application a card in the applications channel is about (server/applications.js). */
+function applicationView(m) {
+  const a = db.servers[db.channels[m.channelId]?.serverId]?.applications?.[m.application];
+  return a ? { id: a.id, userId: a.userId, message: a.message, at: a.at, status: a.status, by: a.by || null, decidedAt: a.decidedAt || null, reason: a.reason || '' } : { id: m.application, status: 'gone' };
+}
 export function messageView(m) {
   let reply = null;
   if (m.replyTo) {
@@ -490,7 +497,7 @@ export function messageView(m) {
     id: m.id, channelId: m.channelId, authorId: m.authorId, content: m.content, createdAt: m.createdAt, editedAt: m.editedAt || null,
     attachments: m.attachments || [], gif: m.gif || null, sticker: m.sticker || null, reactions: m.reactions || {},
     replyTo: m.replyTo || null, reply, mentions: m.mentions || [], mentionRoles: m.mentionRoles || [],
-    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, forward: m.forward || undefined, bridge: m.bridge || undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
+    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, forward: m.forward || undefined, bridge: m.bridge || undefined, application: m.application ? applicationView(m) : undefined, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined,
   };
 }
 

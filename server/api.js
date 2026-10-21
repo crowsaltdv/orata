@@ -12,6 +12,9 @@ import {
   ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteDevice, deviceHashesOf, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView, isOwner, audit,
 } from './core.js';
 import { automodRule } from './automod.js';
+import { nameProblem } from './names.js';
+import { mountApplications, publicServerInfo } from './applications.js';
+import { mountStaff, accountBlock, noteNewAccount } from './staff.js';
 import { formatDuration } from '../public/js/orbit-commands.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt, messageEdited, messagesDeleted } from './messages.js';
 import { startDiscord, discordOn, noteSite } from './discord.js';
@@ -184,7 +187,7 @@ export function createApi() {
   r.post('/auth/check', limit('check', 60, 60_000), h(async (req, res) => {
     const { username, email } = req.body || {};
     res.json({
-      username: username ? !byUsername.has(String(username).toLowerCase()) && !RESERVED.has(String(username).toLowerCase()) : undefined,
+      username: username ? !byUsername.has(String(username).toLowerCase()) && !RESERVED.has(String(username).toLowerCase()) && !nameProblem(username) : undefined,
       email: email ? !byEmail.has(String(email).toLowerCase()) : undefined,
     });
   }));
@@ -203,6 +206,7 @@ export function createApi() {
     if (!/^[a-z0-9_.]+$/.test(username) || /\.\./.test(username)) throw bad('Usernames can only use letters, numbers, underscores and single periods', 'username');
     if (byUsername.has(username) || RESERVED.has(username)) throw bad('That username is taken', 'username');
     const displayName = str(b.displayName || b.username, 1, 32, 'Display name');
+    for (const [field, v] of [['username', username], ['displayName', displayName]]) { const np = nameProblem(v); if (np) throw bad(np, field); }
     const password = typeof b.password === 'string' ? b.password : '';
     if (password.length < 8) throw bad('Password must be at least 8 characters', 'password');
     if (password.length > 128) throw bad('Password is too long', 'password');
@@ -267,6 +271,7 @@ export function createApi() {
     };
     db.users[id] = user; byUsername.set(username, id); if (email) byEmail.set(email, id);
     noteDevice(user, req);   // the browser this account starts on: the ban check below needs it
+    noteNewAccount(user);   // four or more accounts on one browser: a flag for Orata staff
 
     // First user owns the shared community server; everybody after joins it — unless they are banned there from this browser.
     let community = db.defaultServerId && db.servers[db.defaultServerId]; let inCommunity = true;
@@ -307,6 +312,7 @@ export function createApi() {
     const id = byUsername.get(key) || byEmail.get(key);
     const user = id && db.users[id];
     if (!user || user.bot || !(await checkPassword(user, password))) throw new ApiError(401, 'Invalid login or password', 'invalid_login');
+    const blocked = accountBlock(user); if (blocked) throw new ApiError(403, blocked, 'account_blocked');   // terminated, or locked for now, by Orata staff
     res.json({ token: await newSession(user, req), user: selfUser(user) });
   }));
 
@@ -344,7 +350,7 @@ export function createApi() {
     const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
     const found = await findSession(m?.[1]);
     const user = found && db.users[found.rec.userId];
-    if (!user || user.deleted) throw new ApiError(401, 'Not signed in', 'unauthorized');
+    if (!user || user.deleted || accountBlock(user)) throw new ApiError(401, 'Not signed in', 'unauthorized');
     req.user = user; req.session = found.rec; req.sessionId = found.hash;
     touchSession(found.hash, found.rec);
     noteDevice(user, req);   // the browser this account uses (hashed; only ever compared, to find ban evaders and alts)
@@ -383,7 +389,11 @@ export function createApi() {
 
   r.patch('/me', h(async (req, res) => {
     const u = req.user; const b = req.body || {}; let emailChanged = false;
-    if (b.displayName !== undefined) u.displayName = str(b.displayName, 1, 32, 'Display name');
+    if (b.displayName !== undefined) {
+      const name = str(b.displayName, 1, 32, 'Display name');
+      if (name !== u.displayName) { const np = nameProblem(name, u); if (np) throw bad(np, 'displayName'); }
+      u.displayName = name;
+    }
     if (b.bio !== undefined) u.bio = String(b.bio).slice(0, 400);
     if (b.pronouns !== undefined) u.pronouns = String(b.pronouns).slice(0, 40);
     if (b.avatarBg === 'random') u.avatarBg = randomAvatarBg();
@@ -407,6 +417,7 @@ export function createApi() {
       const name = str(b.username, 2, 32, 'Username').toLowerCase();
       if (!/^[a-z0-9_.]+$/.test(name) || /\.\./.test(name)) throw bad('Usernames can only use letters, numbers, underscores and single periods', 'username');
       if (byUsername.has(name) || RESERVED.has(name)) throw bad('That username is taken', 'username');
+      const np = nameProblem(name, u); if (np) throw bad(np, 'username');
       byUsername.delete(u.username); byUsername.set(name, u.id); u.username = name;
     }
     if (b.email !== undefined && String(b.email ?? '').trim().toLowerCase() !== (u.email || '')) {
@@ -541,8 +552,7 @@ export function createApi() {
   r.get('/invites/:code', h(async (req, res) => {
     const inv = findInvite(req.params.code); if (!inv || (inv.expiresAt && inv.expiresAt < Date.now()) || (inv.maxUses && inv.uses >= inv.maxUses && !db.servers[inv.serverId]?.members[req.user.id])) throw notFound('This invite is invalid or has expired');
     const s = db.servers[inv.serverId]; if (!s) throw notFound('This invite is invalid or has expired');
-    const ids = Object.keys(s.members);
-    res.json({ code: inv.code, server: { id: s.id, name: s.name, icon: s.icon, banner: s.banner, accent: s.accent || null, createdAt: s.createdAt, description: s.description, memberCount: ids.length, onlineCount: ids.filter((id) => effectiveStatus(db.users[id]) !== 'offline').length }, inviter: publicUser(db.users[inv.inviterId]), joined: !!s.members[req.user.id] });
+    res.json({ code: inv.code, server: publicServerInfo(s, req.user.id), inviter: publicUser(db.users[inv.inviterId]), joined: !!s.members[req.user.id] });
   }));
   /** The server's swearing protection (Server Settings → Safety, off by default): returns `text` unchanged, censored, or throws, depending on the mode. The owner and administrators are not filtered. */
   function guardText(ch, userId, text) {
@@ -589,22 +599,31 @@ export function createApi() {
     const s = db.servers[inv.serverId]; if (!s) throw notFound('This invite is invalid or has expired');
     noteDevice(req.user, req);
     if (isBannedFrom(s, req.user, req)) throw forbidden('You are banned from this server');
-    if (!s.members[req.user.id]) {
-      addMember(s, req.user); inv.uses++;
-      linkedTimeout(s, req.user.id, deviceHashesOf(req.user, requestHashes(req)));   // someone who is timed out here can't dodge it with another account
-      save();
-      emitTo(serverAudience(s).filter((id) => id !== req.user.id), 'member_add', { serverId: s.id, member: memberView(req.user.id, s.members[req.user.id]), user: publicUser(req.user) });
-      emitTo([req.user.id], 'server_create', { server: serverView(s, req.user.id), users: usersFor(Object.keys(s.members)) });
-      if (s.systemChannelId) systemMessage(s.systemChannelId, 'join', req.user.id);
-    }
+    if (!s.members[req.user.id] && s.joinMode === 'apply') throw new ApiError(403, 'This server asks people to apply first', 'apply_required');
+    if (!s.members[req.user.id]) { joinServer(s, req.user, req); inv.uses++; save(); }
     res.json(serverView(s, req.user.id));
   }));
+  /** `user` becomes a member of `s` (an invite, a server tag, or an accepted application — then there is no request of theirs). */
+  function joinServer(s, user, req) {
+    addMember(s, user);
+    linkedTimeout(s, user.id, deviceHashesOf(user, req ? requestHashes(req) : []));   // someone who is timed out here can't dodge it with another account
+    save();
+    emitTo(serverAudience(s).filter((id) => id !== user.id), 'member_add', { serverId: s.id, member: memberView(user.id, s.members[user.id]), user: publicUser(user) });
+    emitTo([user.id], 'server_create', { server: serverView(s, user.id), users: usersFor(Object.keys(s.members)) });
+    if (s.systemChannelId) systemMessage(s.systemChannelId, 'join', user.id);
+  }
+  const apps = mountApplications(r, { h, getServer, findInvite, isBannedFrom: (s, user, req) => isBannedFrom(s, user, req || { headers: {} }), joinServer, pushChannelEvent });
 
   r.patch('/servers/:id', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_SERVER');
     const b = req.body || {};
     if (b.name !== undefined) s.name = str(b.name, 2, 100, 'Server name');
     if (b.description !== undefined) s.description = String(b.description).slice(0, 300);
+    if (b.applyQuestion !== undefined) s.applyQuestion = String(b.applyQuestion || '').trim().slice(0, 300);
+    if (b.joinMode !== undefined && (b.joinMode === 'apply' ? 'apply' : 'invite') !== (s.joinMode || 'invite')) {   // anyone with an invite, or apply first
+      if (b.joinMode === 'apply') { apps.ensureChannel(s, req.user.id); s.joinMode = 'apply'; } else { s.joinMode = 'invite'; apps.acceptAll(s, req.user.id); }   // switching it off lets everyone waiting in
+      audit(s, req.user.id, 'join_mode', { mode: s.joinMode });
+    }
     for (const k of ['icon', 'banner']) if (b[k] !== undefined) { const v = uploadRef(b[k]); if (v === undefined) throw bad(`Invalid ${k}`); s[k] = v; }
     if (b.accent !== undefined) { if (b.accent !== null && !HEX.test(b.accent)) throw bad('Invalid accent'); s.accent = b.accent; }
     if (b.systemChannelId !== undefined) s.systemChannelId = db.channels[b.systemChannelId]?.serverId === s.id ? b.systemChannelId : null;
@@ -612,7 +631,8 @@ export function createApi() {
     if (b.blockedWords !== undefined) (s.safety ||= {}).words = cleanBlockedWords(b.blockedWords);
     if (b.automod !== undefined) {   // AutoMod rules (server/automod.js)
       const a = b.automod || {};
-      s.automod = { links: !!a.links, invites: !!a.invites, mentions: clampInt(a.mentions, 0, 50, 0), spam: !!a.spam, timeout: clampInt(a.timeout, 0, 1440, 0) };
+      s.automod = { links: !!a.links, invites: a.invites === 'others' ? 'others' : !!a.invites, mentions: clampInt(a.mentions, 0, 50, 0), spam: !!a.spam,
+        walls: [500, 1000, 2000].includes(Number(a.walls)) ? Number(a.walls) : 0, timeout: clampInt(a.timeout, 0, 1440, 0) };   // invites: 'others' = only Orata invites allowed
     }
     if (b.onboarding !== undefined) {   // the rules newcomers accept and the roles they can pick (POST /servers/:id/onboarding)
       const o = b.onboarding || {}; const seen = new Set();
@@ -654,18 +674,24 @@ export function createApi() {
   }));
 
   /* ---- channels in a server ---- */
+  // text and forum channel names: lower case, dashes for spaces, letters, numbers, _ and -, emoji and the │ · ・ people decorate names with
+  const EMOJI = '\\p{Extended_Pictographic}\\p{Emoji_Modifier}\\p{Regional_Indicator}\\u200d\\ufe0f';
+  const NAME_JUNK = new RegExp(`[^\\p{L}\\p{N}_\\-│·・${EMOJI}]`, 'gu');
+  const channelName = (raw, type, fallback) => (type === 'text' || type === 'forum' ? raw.toLowerCase().replace(/\s+/g, '-').replace(NAME_JUNK, '').slice(0, 100) || fallback : raw);
+  /** The emoji a channel shows in place of # (one emoji and nothing else), or null. */
+  const channelEmoji = (v) => { const e = String(v || '').trim(); return e.length <= 16 && new RegExp(`^[${EMOJI}]+$`, 'u').test(e) && /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(e) ? e : null; };
   r.post('/servers/:id/channels', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_CHANNELS');
     const b = req.body || {};
     const type = ['text', 'voice', 'stage', 'category', 'forum'].includes(b.type) ? b.type : 'text';
     let name = str(b.name, 1, 100, 'Channel name');
-    if (type === 'text' || type === 'forum') name = name.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || 'new-channel';
+    name = channelName(name, type, 'new-channel'); const emoji = type === 'category' ? null : channelEmoji(b.emoji);
     const siblings = channelsOfServer(s.id);
     if (siblings.length >= 200) throw bad('Too many channels');
     const parentId = b.parentId && db.channels[b.parentId]?.serverId === s.id && db.channels[b.parentId].type === 'category' ? b.parentId : null;
     const position = Math.max(0, ...siblings.filter((c) => (c.parentId || null) === parentId).map((c) => c.position || 0)) + 1;
     const id = newId();
-    const ch = { id, serverId: s.id, type, name, ...(type === 'forum' ? { tags: sanitizeTags(b.tags), requireTag: !!b.requireTag } : {}), parentId: type === 'category' ? null : parentId, position: type === 'category' ? Math.max(0, ...siblings.filter((c) => c.type === 'category').map((c) => c.position)) + 1 : position, topic: String(b.topic || '').slice(0, 1024) };
+    const ch = { id, serverId: s.id, type, name, ...(emoji ? { emoji } : {}), ...(type === 'forum' ? { tags: sanitizeTags(b.tags), requireTag: !!b.requireTag } : {}), parentId: type === 'category' ? null : parentId, position: type === 'category' ? Math.max(0, ...siblings.filter((c) => c.type === 'category').map((c) => c.position)) + 1 : position, topic: String(b.topic || '').slice(0, 1024) };
     let ows = sanitizeOverwrites(s, b.overwrites);
     if (b.private && !ows.length) ows = sanitizeOverwrites(s, [{ type: 'role', id: s.id, deny: ['VIEW_CHANNEL'] }, ...(Array.isArray(b.allowedRoles) ? b.allowedRoles : []).map((rid) => ({ type: 'role', id: rid, allow: ['VIEW_CHANNEL'] }))]);   // the "Private Channel" shortcut
     if (ows.length) { ch.overwrites = ows; if (ch.parentId) ch.synced = false; }   // a channel with its own rules no longer follows its category
@@ -752,10 +778,12 @@ export function createApi() {
     if (ch.serverId) {
       const s = db.servers[ch.serverId]; const mine = permsIn(s, req.user.id, ch);
       const touchesPerms = b.overwrites !== undefined || b.synced !== undefined;
-      const touchesProps = ['name', 'topic', 'nsfw', 'slowmode', 'parentId', 'tags', 'requireTag'].some((k) => b[k] !== undefined);
+      const touchesProps = ['name', 'topic', 'nsfw', 'slowmode', 'parentId', 'tags', 'requireTag', 'emoji'].some((k) => b[k] !== undefined);
       if ((touchesProps || !touchesPerms) && !mine.has('MANAGE_CHANNELS')) throw forbidden();
       if (touchesPerms && !mine.has('MANAGE_ROLES')) throw forbidden();
-      if (b.name !== undefined) { let n = str(b.name, 1, 100, 'Channel name'); if (ch.type === 'text' || ch.type === 'forum') n = n.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 100) || ch.name; ch.name = n; }
+      if (b.name !== undefined && s.joinMode === 'apply' && s.applicationsChannelId === ch.id && channelName(str(b.name, 1, 100, 'Channel name'), ch.type, ch.name) !== ch.name) throw forbidden('The applications channel can’t be renamed while “Apply to join” is on.');
+      if (b.name !== undefined) ch.name = channelName(str(b.name, 1, 100, 'Channel name'), ch.type, ch.name);
+      if (b.emoji !== undefined && ch.type !== 'category') { const e = channelEmoji(b.emoji); if (e) ch.emoji = e; else delete ch.emoji; }
       if (b.topic !== undefined) ch.topic = String(b.topic).slice(0, 1024);
       if (b.nsfw !== undefined) ch.nsfw = !!b.nsfw;
       if (ch.type === 'forum') { if (b.tags !== undefined) ch.tags = sanitizeTags(b.tags); if (b.requireTag !== undefined) ch.requireTag = !!b.requireTag; }
@@ -783,6 +811,7 @@ export function createApi() {
     }
     if (ch.serverId) {
       const s = db.servers[ch.serverId]; needIn(req.user.id, ch, 'MANAGE_CHANNELS');
+      if (s.joinMode === 'apply' && s.applicationsChannelId === ch.id) throw forbidden('The applications channel can’t be deleted while “Apply to join” is on. Turn it off in Server Settings → Invites first.');
       if (channelsOfServer(s.id).filter((c) => c.type === 'text').length <= 1 && ch.type === 'text') throw bad('A server needs at least one text channel');
       if (ch.type === 'category') for (const c of channelsOfServer(s.id)) if (c.parentId === ch.id) c.parentId = null;
       if (ch.type === 'forum') for (const p of channelsOfServer(s.id)) if (p.type === 'post' && p.forumId === ch.id) { delete db.channels[p.id]; delete db.messages[p.id]; }
@@ -823,7 +852,7 @@ export function createApi() {
     needIn(req.user.id, forum, 'SEND_MESSAGES');
     const b = req.body || {}; const s = db.servers[forum.serverId];
     const title = guardText(forum, req.user.id, str(b.title, 1, 100, 'Title'));
-    automod(forum, req.user.id, `${b.title || ''}\n${b.content || ''}`);
+    automod(forum, req.user.id, `${b.title || ''}\n${b.content || ''}`, { host: req.get('host') });
     const content = guardText(forum, req.user.id, typeof b.content === 'string' ? b.content : '');
     if (content.length > 4000) throw bad('The post is too long (4000 characters max)');
     await Promise.all((Array.isArray(b.attachments) ? b.attachments.slice(0, 10) : []).map((a) => restoreUpload(path.basename(String(a?.url || '')))));
@@ -1082,6 +1111,7 @@ export function createApi() {
     emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: uid });
     for (const set of [...(conns.get(uid) || [])]) if (set.voice && db.channels[set.voice]?.serverId === s.id) set.leaveVoice?.('kicked');
   };
+  mountStaff(r, { h, limit, removeMember });   // reports, and the Staff page (server/staff.js)
   // kick, ban and timeout are shared by their routes and Orbit's /kick, /ban and /timeout (server/orbit.js): req.user is the moderator
   function kickMember(req, s, uid, reason = '') {
     need(s, req.user.id, 'KICK_MEMBERS');
@@ -1265,7 +1295,7 @@ export function createApi() {
     const forward = b.forward ? forwardCopy(req, b.forward, ch) : null;
     if (forward && server && forward.attachments.length && !canIn(req.user.id, ch, 'ATTACH_FILES')) forward.attachments = [];
     if (forward && server && (forward.gif || forward.sticker) && !canIn(req.user.id, ch, 'SEND_GIFS')) { forward.gif = null; forward.sticker = null; }
-    automod(ch, req.user.id, [b.content, forward?.content].filter(Boolean).join('\n'));
+    automod(ch, req.user.id, [b.content, forward?.content].filter(Boolean).join('\n'), { host: req.get('host') });
     const content = guardText(ch, req.user.id, typeof b.content === 'string' ? b.content : '');
     const poll = b.poll ? sanitizePoll(b.poll) : null;
     if (poll) { poll.question = guardText(ch, req.user.id, poll.question); for (const a of poll.answers) a.text = guardText(ch, req.user.id, a.text); }
@@ -1298,7 +1328,7 @@ export function createApi() {
     if (m.type !== 'default') throw forbidden();
     if (m.poll) throw forbidden('A poll can’t be edited');
     if (m.theme) throw forbidden('A shared theme can’t be edited');
-    automod(ch, req.user.id, String((req.body || {}).content ?? ''), { edit: true });
+    automod(ch, req.user.id, String((req.body || {}).content ?? ''), { edit: true, host: req.get('host') });
     const content = guardText(ch, req.user.id, String((req.body || {}).content ?? ''));
     if (!content.trim() && !(m.attachments?.length || m.gif || m.sticker || m.forward)) throw bad('Message cannot be empty — delete it instead');
     if (content.length > 4000) throw bad('Message is too long');

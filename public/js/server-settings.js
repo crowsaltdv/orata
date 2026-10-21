@@ -192,11 +192,29 @@ function Vanity({ server }) {
       <p class="field-hint">${left > 0 ? `${t('You can change it again in')} ${formatDuration(left)}.` : t('3–32 letters, numbers or dashes. Once you save, you have to wait 7 days to change it again, so pick carefully.')}</p>` : null}
   <//>`;
 }
+/** Who can join: anyone with an invite, or they apply first and someone with Access Applications decides (server/applications.js). */
+function JoinMode({ server }) {
+  const can = hasPerm(server.id, 'MANAGE_SERVER');
+  const orig = { joinMode: server.joinMode || 'invite', applyQuestion: server.applyQuestion || '' };
+  const [d, setD] = useState(orig); const [busy, setBusy] = useState(false);
+  const dirty = d.joinMode !== orig.joinMode || d.applyQuestion !== orig.applyQuestion;
+  const save = async () => {
+    if (orig.joinMode === 'apply' && d.joinMode === 'invite' && !await confirmDialog({ title: t('Stop taking applications?'), body: t('Everyone whose application is still waiting will be let in.'), confirmLabel: t('Let them in') })) return;
+    setBusy(true); await act(api.patch(`/servers/${server.id}`, d), { success: t('Saved') }); setBusy(false);
+  };
+  return html`<${Section} title=${t('Who can join')} desc=${t('Anyone with an invite (or your server tag) can come in, or they apply first and your team decides.')}>
+    <${Segmented} options=${[{ value: 'invite', label: t('Anyone with an invite') }, { value: 'apply', label: t('Apply to join') }]} value=${d.joinMode} onChange=${(v) => can && setD({ ...d, joinMode: v })} />
+    ${d.joinMode === 'apply' ? html`<${Field} label=${t('Question for applicants')}><${TextInput} value=${d.applyQuestion} onInput=${(v) => setD({ ...d, applyQuestion: v })} placeholder=${t('Why do you want to join?')} maxlength="300" disabled=${!can} /><//>
+      <p class="field-hint">${t('Applications land in the 📝 applications channel. Only people with the Access Applications permission (and admins) can see it, and nobody can rename or delete it while this is on.')}</p>`
+      : orig.joinMode === 'apply' ? html`<p class="field-hint">${t('Switching back lets everyone still waiting in.')}</p>` : null}
+    ${dirty && can ? html`<div class="row-end"><${Btn} variant="ghost" onClick=${() => setD(orig)}>${t('Reset')}<//><${Btn} variant="primary" loading=${busy} onClick=${save}>${t('Save')}<//></div>` : null}
+  <//>`;
+}
 function Invites({ server }) {
   const [list, setList] = useState(null); const users = useSel((s) => s.users);
   const load = () => api.get(`/servers/${server.id}/invites`).then(setList).catch(() => setList([]));
   useEffect(() => { load(); }, [server.id]);
-  return html`<div class="s-page"><${Vanity} server=${server} /><${Section} title=${t('Invites')} action=${html`<${Btn} size="sm" variant="primary" icon="plus" onClick=${() => openModal('invite', { serverId: server.id })}>${t('Create invite')}<//>`}>
+  return html`<div class="s-page"><${JoinMode} server=${server} /><${Vanity} server=${server} /><${Section} title=${t('Invites')} action=${html`<${Btn} size="sm" variant="primary" icon="plus" onClick=${() => openModal('invite', { serverId: server.id })}>${t('Create invite')}<//>`}>
     ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : list.length ? html`<div class="mem-table">${list.map((i) => html`<div class="mem-row" key=${i.code}><span class="ss-ic"><${Icon} name="link" size=${20} /></span><div class="mem-name"><b class="mono">${i.code}</b><small>${users[i.inviterId]?.displayName || '—'}</small></div><small class="mem-roles">${i.uses}${i.maxUses ? ' / ' + i.maxUses : ''} ${t('uses')} · ${i.expiresAt ? t('expires') + ' ' + new Date(i.expiresAt).toLocaleString() : t('never expires')}</small>
       <span class="chs-acts"><button type="button" data-tip="Copy link" onClick=${async () => { await copyText(inviteUrl(i.code)); toast('Link copied', 'success', 1400); }}><${Icon} name="copy" size=${16} /></button><button type="button" class="danger" data-tip="Revoke" onClick=${async () => { await act(api.del(`/invites/${i.code}`)); load(); }}><${Icon} name="trash" size=${16} /></button></span></div>`)}</div>` : html`<${Empty} icon="link" title=${t('No active invites')}>${t('Create one to bring friends in.')}<//>`}
   <//></div>`;
@@ -217,8 +235,10 @@ function Bans({ server }) {
 function Safety({ server }) {
   const can = hasPerm(server.id, 'MANAGE_SERVER');
   const am0 = server.automod || {};
-  const orig = { profanity: server.safety?.profanity || 'off', blockedWords: (server.safety?.words || []).join(', '), automod: { links: !!am0.links, invites: !!am0.invites, mentions: am0.mentions || 0, spam: !!am0.spam, timeout: am0.timeout || 0 } };
+  const orig = { profanity: server.safety?.profanity || 'off', blockedWords: (server.safety?.words || []).join(', '), automod: { links: !!am0.links, invites: am0.invites === 'others' ? 'others' : !!am0.invites, mentions: am0.mentions || 0, spam: !!am0.spam, walls: am0.walls || 0, timeout: am0.timeout || 0 } };
   const [d, setD] = useState(orig); const [busy, setBusy] = useState(false);
+  const [reveal, setReveal] = useState(false);   // the blocked words stay hidden until someone asks to see them
+  const wordCount = d.blockedWords.split(/[\n,]/).map((w) => w.trim()).filter(Boolean).length;
   const am = d.automod; const setAm = (patch) => setD((p) => ({ ...p, automod: { ...p.automod, ...patch } }));
   const dirty = JSON.stringify(d) !== JSON.stringify(orig);
   const save = async () => { setBusy(true); await act(api.patch(`/servers/${server.id}`, d), { success: 'Safety settings saved' }); setBusy(false); };
@@ -228,14 +248,20 @@ function Safety({ server }) {
   return html`<div class="s-page">
     <${Section} title=${t('Swearing protection')} desc=${t('Keeps the language in this server clean. It catches the usual tricks (extra letters, symbols between letters, look-alike characters) but never ordinary words. Off by default.')}>
       <${SettingRow} title=${t('What happens to a swear word')} desc=${desc}><${Segmented} options=${MODES} value=${d.profanity} onChange=${(v) => setD({ ...d, profanity: v })} /><//>
-      <${Field} label=${t('Blocked words')} hint=${t('Your own words, separated by commas or new lines. They are treated like the built-in ones.')}><textarea class="textarea" rows="4" maxlength="1500" value=${d.blockedWords} disabled=${!can} onInput=${(e) => setD({ ...d, blockedWords: e.target.value })} placeholder=${t('pineapple pizza, heck …')}></textarea><//>
+      <${Field} label=${t('Blocked words')} hint=${t('Your own words, separated by commas or new lines. They are treated like the built-in ones.')}>${reveal
+        ? html`<textarea class="textarea" rows="4" maxlength="1500" value=${d.blockedWords} disabled=${!can} onInput=${(e) => setD({ ...d, blockedWords: e.target.value })} placeholder=${t('pineapple pizza, heck …')}></textarea>
+          <${Btn} size="sm" variant="ghost" icon="eye-off" onClick=${() => setReveal(false)}>${t('Hide the words')}<//>`
+        : html`<div class="words-hidden"><${Icon} name="eye-off" size=${18} /><span>${wordCount ? `${wordCount} ${wordCount === 1 ? t('word is') : t('words are')} ${t('hidden so nobody sees them by accident.')}` : t('No words of your own yet.')}</span>
+          <${Btn} size="sm" icon=${can ? 'edit' : 'eye'} onClick=${() => setReveal(true)}>${can ? t('Reveal and edit') : t('Reveal')}<//></div>`}<//>
       <p class="text-muted" style="font-size:13px;margin:6px 0 0">${t('Applies to messages, edits, polls and forum posts in this server — not to DMs. The owner and administrators are never filtered.')}</p>
     <//>
     <${Section} title=${t('AutoMod')} desc=${t('Stops messages that break these rules before anyone sees them, tells the sender why, and writes each block in the Audit Log. The owner, admins and people who can manage messages are never checked.')}>
       <${SettingRow} title=${t('Block links')} desc=${t('Any web address.')}><${Toggle} checked=${am.links} disabled=${!can} onChange=${(v) => setAm({ links: v })} /><//>
-      <${SettingRow} title=${t('Block invite links')} desc=${t('Invites to other Orata or Discord servers.')}><${Toggle} checked=${am.invites} disabled=${!can} onChange=${(v) => setAm({ invites: v })} /><//>
+      <${SettingRow} title=${t('Invite links')} desc=${am.invites === 'others' ? t('Only Orata invites are allowed: invites to Discord, Guilded, Revolt, Telegram, WhatsApp and the like are blocked. Orata invites still work when links are blocked.') : am.invites ? t('Every invite is blocked, to other Orata servers too.') : t('Invites are allowed.')}>
+        <${Dropdown} width=${200} value=${am.invites === 'others' ? 'others' : am.invites ? 'all' : 'off'} options=${[['off', 'Allow'], ['others', 'Only Orata invites'], ['all', 'Block all invites']].map(([value, label]) => ({ value, label: t(label) }))} onChange=${(v) => setAm({ invites: v === 'others' ? 'others' : v === 'all' })} /><//>
       <${SettingRow} title=${t('Too many mentions')} desc=${am.mentions ? `${t('Block a message that mentions more than')} ${am.mentions} ${t('people or roles')}.` : t('Off')}><${Dropdown} width=${150} value=${am.mentions} options=${[0, 3, 5, 10, 20].map((n) => ({ value: n, label: n ? `> ${n}` : t('Off') }))} onChange=${(v) => setAm({ mentions: v })} /><//>
       <${SettingRow} title=${t('Block spam')} desc=${t('5 messages within 5 seconds, or the same message 3 times in 30 seconds.')}><${Toggle} checked=${am.spam} disabled=${!can} onChange=${(v) => setAm({ spam: v })} /><//>
+      <${SettingRow} title=${t('Block walls of text')} desc=${am.walls ? `${t('Pasted walls: more than')} ${am.walls} ${t('characters, the same character 30 times in a row, or the same word or line over and over.')}` : t('Off')}><${Dropdown} width=${200} value=${am.walls} options=${[0, 500, 1000, 2000].map((n) => ({ value: n, label: n ? `> ${n} ${t('characters')}` : t('Off') }))} onChange=${(v) => setAm({ walls: v })} /><//>
       <${SettingRow} title=${t('Time out rule breakers')} desc=${t('Also time out whoever AutoMod blocks.')}><${Dropdown} width=${150} value=${am.timeout} options=${[[0, 'No'], [1, '1 minute'], [5, '5 minutes'], [10, '10 minutes'], [60, '1 hour'], [1440, '1 day']].map(([value, label]) => ({ value, label: t(label) }))} onChange=${(v) => setAm({ timeout: v })} /><//>
     <//>
   </div>`;

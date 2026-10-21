@@ -10,6 +10,16 @@ import { ls, lsRemove } from '/js/lib.js';
 import { deleteChannel } from '/js/sidebar.js';
 import { t } from '/js/i18n.js';
 import { PermissionsEditor, cloneOverwrites, overwritesEqual } from '/js/channel-perms.js';
+import { openPicker } from '/js/pickers.js';
+import { joinInvite } from '/js/applications.js';
+
+/** The emoji a text or forum channel shows instead of # (Create / Edit channel). Only plain emoji: a server's own ones can't be a channel icon. */
+function ChannelEmoji({ value, onChange, disabled }) {
+  const pick = (e) => openPicker(e.currentTarget, (em) => { if (!String(em).startsWith('<')) onChange(em); }, { emojiOnly: true });
+  return html`<${SettingRow} title=${t('Channel icon')} desc=${value ? t('Shown instead of # in the channel list and at the top of the channel.') : t('Pick an emoji to show instead of #.')}>
+    <div class="ch-emoji-pick"><button type="button" class="ch-emoji-btn" disabled=${disabled} aria-label=${t('Pick an emoji')} onClick=${pick}>${value || html`<${Icon} name="hash" size=${18} />`}</button>
+      ${value && !disabled ? html`<${Btn} size="sm" variant="ghost" onClick=${() => onChange('')}>${t('Use #')}<//>` : null}</div><//>`;
+}
 
 const TEMPLATES = [
   { id: 'default', icon: '✨', name: 'Create My Own', sub: 'Start from scratch' },
@@ -35,7 +45,7 @@ MODALS['add-server'] = function AddServer({ id }) {
   };
   const join = async () => {
     const c = code.trim().split('/').pop(); if (!c) return; setBusy(true); setErr(null);
-    try { const s = await api.post(`/invites/${c}/join`); close(); goChannel(s.id, null); toast(`Joined ${s.name}!`, 'success'); } catch (e) { setErr(errMsg(e)); setBusy(false); }
+    try { const s = await joinInvite(c); close(); if (s) { goChannel(s.id, null); toast(`Joined ${s.name}!`, 'success'); } } catch (e) { setErr(errMsg(e)); setBusy(false); }
   };
   const pickIcon = async () => { setUploading(true); try { const u = await chooseAndUploadImage({ aspect: 1, out: 256, round: true, title: 'Server Icon', allowGif: true }); if (u) setIcon(u); } catch (e) { toast(errMsg(e), 'error'); } setUploading(false); };
   return html`<${Modal} title=${step === 'choose' ? t('Create a server') : step === 'template' ? t('Pick a template') : step === 'customize' ? t('Customize your server') : t('Join a server')}
@@ -84,7 +94,7 @@ MODALS.invite = function InviteModal({ id, serverId }) {
 MODALS['invite-accept'] = function InviteAccept({ id, code }) {
   const [info, setInfo] = useState(null); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false);
   useEffect(() => { api.get(`/invites/${code}`).then(setInfo).catch((e) => setErr(errMsg(e))); }, [code]);
-  const join = async () => { setBusy(true); try { const s = await api.post(`/invites/${code}/join`); closeModal(id); goChannel(s.id, null); } catch (e) { setErr(errMsg(e)); setBusy(false); } };
+  const join = async () => { setBusy(true); try { const s = await joinInvite(code); closeModal(id); if (s) goChannel(s.id, null); } catch (e) { setErr(errMsg(e)); setBusy(false); } };
   return html`<${Modal} width=${420} hideClose onClose=${() => closeModal(id)}>
     ${err ? html`<div class="invite-card"><div class="ic-bad"><${Icon} name="alert-circle" size=${42} sw=${1.6} /></div><h2>${t('Invite Invalid')}</h2><p>${err}</p><${Btn} variant="primary" onClick=${() => closeModal(id)}>${t('Continue to Orata')}<//></div>`
       : !info ? html`<div class="pk-center" style="padding:40px"><${Spinner} /></div>`
@@ -92,23 +102,24 @@ MODALS['invite-accept'] = function InviteAccept({ id, code }) {
           <${ServerIcon} server=${info.server} size=${84} class="ic-icon" /><h2>${info.server.name}</h2>
           <div class="ic-stats"><span><i class="on"></i>${info.server.onlineCount} ${t('Online')}</span><span><i></i>${info.server.memberCount} ${t('Members')}</span></div>
           ${info.server.description ? html`<p>${info.server.description}</p>` : null}
-          <${Btn} variant="primary" size="lg" class="btn-block" loading=${busy} onClick=${info.joined ? () => { closeModal(id); goChannel(info.server.id, null); } : join}>${info.joined ? t('Open Server') : t('Accept Invite')}<//></div>`}
+          <${Btn} variant="primary" size="lg" class="btn-block" loading=${busy} onClick=${info.joined ? () => { closeModal(id); goChannel(info.server.id, null); } : join}>${info.joined ? t('Open Server') : info.server.joinMode === 'apply' ? t('Apply to Join') : t('Accept Invite')}<//></div>`}
   <//>`;
 };
 
 /* ------------------------------------------------------------------ channels */
 MODALS['create-channel'] = function CreateChannel({ id, serverId, parentId, type: initial }) {
-  const server = state.servers[serverId]; const [type, setType] = useState(initial || 'text'); const [name, setName] = useState(''); const [priv, setPriv] = useState(false); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  const server = state.servers[serverId]; const [type, setType] = useState(initial || 'text'); const [name, setName] = useState(''); const [emoji, setEmoji] = useState(''); const [priv, setPriv] = useState(false); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
   const [roles, setRoles] = useState([]);
   const cats = server.channels.filter((c) => c.type === 'category'); const [parent, setParent] = useState(parentId || null);
   const create = async () => {
     if (!name.trim()) { setErr('Give it a name'); return; } setBusy(true);
-    try { const c = await api.post(`/servers/${serverId}/channels`, { name: name.trim(), type, parentId: type === 'category' ? null : parent, private: priv, allowedRoles: roles }); closeModal(id); if (c.type !== 'category') setTimeout(() => goChannel(serverId, c.id), 80); } catch (e) { setErr(errMsg(e)); setBusy(false); }
+    try { const c = await api.post(`/servers/${serverId}/channels`, { name: name.trim(), type, parentId: type === 'category' ? null : parent, private: priv, allowedRoles: roles, emoji: type === 'text' || type === 'forum' ? emoji : '' }); closeModal(id); if (c.type !== 'category') setTimeout(() => goChannel(serverId, c.id), 80); } catch (e) { setErr(errMsg(e)); setBusy(false); }
   };
   const types = [['text', 'hash', t('Text'), t('Send messages, images, GIFs, emoji and more')], ['voice', 'volume', t('Voice'), t('Hang out together with voice, video and screen share')], ['stage', 'stage', t('Stage'), t('Host a talk — speakers on stage, everyone else listens and can raise a hand')], ['forum', 'forum', t('Forum'), t('Organized discussions — every topic gets its own post')], ['category', 'folder', t('Category'), t('Organize channels into groups')]];
   return html`<${Modal} title=${t('Create Channel')} subtitle=${parentId ? `${t('in')} ${server.channels.find((c) => c.id === parentId)?.name}` : null} width=${470} onClose=${() => closeModal(id)} footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="primary" loading=${busy} disabled=${!name.trim()} onClick=${create}>${t('Create Channel')}<//>`}>
     <div class="type-list">${types.map(([k, ic, l, d]) => html`<button type="button" class=${cx('type-opt', type === k && 'sel')} onClick=${() => setType(k)}><${Icon} name=${ic} size=${24} /><span><b>${l}</b><small>${d}</small></span><span class="radio"></span></button>`)}</div>
     <${Field} label=${type === 'category' ? t('Category name') : t('Channel name')} error=${err}><${TextInput} value=${name} onInput=${(v) => { setName(type === 'text' || type === 'forum' ? v.toLowerCase().replace(/\s+/g, '-') : v); setErr(null); }} icon=${type === 'voice' ? 'volume' : type === 'stage' ? 'stage' : type === 'category' ? 'folder' : type === 'forum' ? 'forum' : 'hash'} placeholder=${type === 'text' ? 'new-channel' : type === 'forum' ? 'new-forum' : type === 'voice' ? 'General' : type === 'stage' ? 'Town Hall' : 'New Category'} autofocus onKeyDown=${(e) => e.key === 'Enter' && create()} /><//>
+    ${type === 'text' || type === 'forum' ? html`<${ChannelEmoji} value=${emoji} onChange=${setEmoji} />` : null}
     ${type !== 'category' && cats.length ? html`<${Field} label=${t('Category')}><${Dropdown} value=${parent} options=${[{ value: null, label: t('No category') }, ...cats.map((c) => ({ value: c.id, label: c.name }))]} onChange=${setParent} /><//>` : null}
     ${type !== 'category' ? html`<${SettingRow} title=${t('Private Channel')} desc=${t('Only selected roles and admins will be able to view this channel.')}><${Toggle} checked=${priv} onChange=${setPriv} /><//>` : null}
     ${priv && type !== 'category' ? html`<div class="role-pick slide-down">${server.roles.filter((r) => r.id !== server.id).map((r) => html`<label class="role-opt"><input type="checkbox" checked=${roles.includes(r.id)} onChange=${(e) => setRoles(e.target.checked ? [...roles, r.id] : roles.filter((x) => x !== r.id))} /><i style=${{ background: r.color || 'var(--text-3)' }}></i>${r.name}</label>`)}${server.roles.length <= 1 ? html`<div class="muted-note">${t('Create roles in Server Settings to grant access.')}</div>` : null}</div>` : null}
@@ -118,7 +129,7 @@ MODALS['create-channel'] = function CreateChannel({ id, serverId, parentId, type
 MODALS['edit-channel'] = function EditChannel({ id, channelId, tab: startTab }) {
   const ch = getChannel(channelId); const server = state.servers[ch?.serverId];
   const canProps = !!ch && hasChannelPerm(ch, 'MANAGE_CHANNELS'); const canPerms = !!ch && Array.isArray(ch.overwrites);   // the server only sends overwrites to people who may change them
-  const orig = { name: ch?.name || '', topic: ch?.topic || '', nsfw: !!ch?.nsfw, slowmode: ch?.slowmode || 0, ...(ch?.type === 'forum' ? { tags: ch.tags || [], requireTag: !!ch.requireTag } : {}) };
+  const orig = { name: ch?.name || '', emoji: ch?.emoji || '', topic: ch?.topic || '', nsfw: !!ch?.nsfw, slowmode: ch?.slowmode || 0, ...(ch?.type === 'forum' ? { tags: ch.tags || [], requireTag: !!ch.requireTag } : {}) };
   const [f, setF] = useState(orig); const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState(startTab === 'permissions' && canPerms ? 'permissions' : canProps ? 'overview' : 'permissions');
   const [ows, setOws] = useState(() => cloneOverwrites(ch?.overwrites)); const [synced, setSynced] = useState(!!ch?.synced);
@@ -151,6 +162,7 @@ MODALS['edit-channel'] = function EditChannel({ id, channelId, tab: startTab }) 
     ${canProps && canPerms ? html`<div class="chan-tabs">${tabBtn('overview', t('Overview'))}${tabBtn('permissions', t('Permissions'))}</div>` : null}
     ${tab === 'permissions' && canPerms ? html`<${PermissionsEditor} ch=${ch} server=${server} ows=${ows} onChange=${editOws} synced=${synced} onSync=${sync} parent=${parent} kids=${kids} />` : html`<div>
       <${Field} label=${isCat ? t('Category name') : t('Channel name')}><${TextInput} value=${f.name} onInput=${(v) => setF({ ...f, name: ch.type === 'text' || ch.type === 'forum' ? v.toLowerCase().replace(/\s+/g, '-') : v })} maxlength="100" disabled=${!canProps} /><//>
+      ${ch.type === 'text' || ch.type === 'forum' ? html`<${ChannelEmoji} value=${f.emoji} onChange=${(v) => setF({ ...f, emoji: v })} disabled=${!canProps} />` : null}
       ${ch.type === 'forum' ? html`<${Field} label=${t('Guidelines')}><textarea class="textarea" value=${f.topic} maxlength="1024" onInput=${(e) => setF({ ...f, topic: e.target.value })} placeholder=${t('Tell people what belongs here before they post.')}></textarea><//>
         <${Field} label=${`${t('Tags')} (${f.tags.length}/20)`}><div class="tag-edit">${f.tags.map((tg, i) => html`<div class="tag-row" key=${tg.id}><input class="input tg-emoji" value=${tg.emoji || ''} maxlength="4" placeholder="🙂" aria-label=${t('Emoji')} onInput=${(e) => setF({ ...f, tags: f.tags.map((x, j) => (j === i ? { ...x, emoji: e.target.value } : x)) })} /><input class="input" value=${tg.name} maxlength="20" placeholder=${t('Tag name')} onInput=${(e) => setF({ ...f, tags: f.tags.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} /><button type="button" class="icon-btn" aria-label=${t('Remove')} onClick=${() => setF({ ...f, tags: f.tags.filter((_, j) => j !== i) })}><${Icon} name="x" size=${16} /></button></div>`)}
           <${Btn} size="sm" icon="plus" disabled=${f.tags.length >= 20} onClick=${() => setF({ ...f, tags: [...f.tags, { id: 't' + Math.random().toString(36).slice(2, 9), name: '', emoji: '' }] })}>${t('Add tag')}<//></div><//>

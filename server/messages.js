@@ -42,7 +42,7 @@ export function sanitizeAttachments(list, fs, path, uploadDir) {
   return out;
 }
 
-export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce, poll = null, theme = null, forward = null, bridge = null } = {}) {
+export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce, poll = null, theme = null, forward = null, bridge = null, application = null } = {}) {
   content = String(content).replace(/\r\n/g, '\n').slice(0, 4000);
   const server = ch.serverId ? db.servers[ch.serverId] : null;
   const author = db.users[authorId];
@@ -74,7 +74,8 @@ export function postMessage(ch, authorId, { content = '', attachments = [], gif 
   if (poll) msg.poll = poll;
   if (theme) msg.theme = theme;
   if (forward) msg.forward = forward;   // a copy of a message forwarded from elsewhere
-  if (bridge) msg.bridge = bridge;   // posted from a linked Discord channel: { id, name, avatar } of the Discord sender
+  if (bridge) msg.bridge = bridge;
+  if (application) msg.application = application;   // an application to join the server (server/applications.js)   // posted from a linked Discord channel: { id, name, avatar } of the Discord sender
   if (attachments.some((a) => a.voice)) { msg.expiresAt = msg.createdAt + VOICE_TTL; expiring.set(msg.id, { channelId: ch.id, at: msg.expiresAt }); }
   (db.messages[ch.id] ||= []).push(msg);
   if (ch.type === 'post') { ch.lastActivity = msg.createdAt; emitTo(audienceOf(ch), 'post_update', { post: postView(ch) }); }   // keeps the forum list's "last activity" and reply counts live

@@ -1,0 +1,150 @@
+// Orata — the Staff page (/staff, the shield under the + in the server rail) for holders of the staff or dev badge, and the "Report to Orata
+// staff" window everyone has. The server (server/staff.js) decides who may do what; this only shows it.
+import { html, useState, useEffect, relTime, formatFull, cx } from '/js/lib.js';
+import { state, set, useSel, openModal, closeModal, addUsers } from '/js/store.js';
+import { Icon } from '/js/icons.js';
+import { Modal, Btn, Spinner, Avatar, Empty, Dropdown, Field, MODALS } from '/js/ui.js';
+import { api } from '/js/api.js';
+import { act, errMsg } from '/js/actions.js';
+import { openProfile } from '/js/sidebar.js';
+import { t } from '/js/i18n.js';
+
+/** Does the signed-in person have the staff or dev badge? (The server checks again.) */
+export const isStaffMe = () => !!state.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev');
+
+const REASONS = [['spam', 'Spam'], ['scam', 'Scam or phishing'], ['harassment', 'Harassment or threats'], ['hate', 'Hate speech'], ['impersonation', 'Pretending to be someone'], ['self-harm', 'Someone may hurt themselves'], ['other', 'Something else']];
+/** Report a message (messageId + channelId) or an account (userId) to Orata staff. */
+MODALS.report = function Report({ id, messageId, channelId, userId }) {
+  const [reason, setReason] = useState(''); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [done, setDone] = useState(false);
+  const send = async () => { setBusy(true); if (await act(api.post('/reports', { messageId, channelId, userId, reason, note }))) setDone(true); setBusy(false); };
+  return html`<${Modal} title=${messageId ? t('Report message') : t('Report account')} subtitle=${t('Goes to Orata staff, not to the server’s moderators. Use it for things against Orata’s rules; a server’s own rules are up to its moderators.')} width=${460} onClose=${() => closeModal(id)}
+    footer=${done ? html`<${Btn} variant="primary" onClick=${() => closeModal(id)}>${t('Done')}<//>` : html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="danger" icon="flag" loading=${busy} disabled=${!reason} onClick=${send}>${t('Send report')}<//>`}>
+    ${done ? html`<div class="rep-done"><${Icon} name="check-circle" size=${40} sw=${1.6} /><b>${t('Thanks, staff will take a look.')}</b><p>${t('If it was in a DM, staff can see the message you reported, nothing else.')}</p></div>`
+      : html`<div class="rep-reasons">${REASONS.map(([k, label]) => html`<button type="button" key=${k} class=${cx('rep-opt', reason === k && 'on')} onClick=${() => setReason(k)}><span class="radio"></span>${t(label)}</button>`)}</div>
+        <textarea class="textarea" rows="3" maxlength="500" value=${note} onInput=${(e) => setNote(e.target.value)} placeholder=${t('Anything staff should know (optional)')}></textarea>`}
+  <//>`;
+};
+
+const TABS = [['overview', 'bar-chart', 'Overview'], ['accounts', 'users', 'Accounts'], ['flags', 'flag', 'Flags & reports'], ['log', 'list', 'Staff log']];
+export function StaffPage() {
+  const [tab, setTab] = useState('overview');
+  if (!isStaffMe()) return html`<main class="main panel staff-page"><${Empty} icon="shield" title=${t('Staff only')}>${t('This page is for Orata staff.')}<//></main>`;
+  return html`<main class="main panel staff-page view-anim">
+    <header class="m-header">
+      <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
+      <div class="m-title"><${Icon} name="shield" size=${23} /><span class="name">${t('Staff')}</span></div>
+      <div class="staff-tabs">${TABS.map(([k, ic, label]) => html`<button type="button" key=${k} class=${cx('staff-tab', tab === k && 'on')} onClick=${() => setTab(k)}><${Icon} name=${ic} size=${16} />${t(label)}</button>`)}</div>
+    </header>
+    <div class="staff-scroll">${tab === 'overview' ? html`<${Overview} />` : tab === 'accounts' ? html`<${Accounts} />` : tab === 'flags' ? html`<${Flags} />` : html`<${Log} />`}</div>
+  </main>`;
+}
+
+function Overview() {
+  const [d, setD] = useState(null);
+  useEffect(() => { api.get('/staff/overview').then(setD, () => setD({ error: true })); }, []);
+  if (!d) return html`<div class="pk-center"><${Spinner} /></div>`;
+  if (d.error) return html`<p class="text-danger">${t('Couldn’t load the numbers.')}</p>`;
+  const s = d.stats;
+  const tiles = [['users', s.accounts, 'Active accounts', 'Created and not deleted or terminated'], ['globe', s.online, 'Online now', ''], ['user-plus', s.newToday, 'New today', `${s.newWeek} ${t('this week')}`],
+    ['server', s.servers, 'Servers', ''], ['message', s.messagesToday, 'Messages today', 'Last 24 hours'], ['flag', s.openFlags, 'Open flags', 'Found automatically'],
+    ['alert-triangle', s.openReports, 'Open reports', 'Sent by people'], ['lock', s.locked, 'Locked accounts', ''], ['ban', s.terminated, 'Terminated accounts', '']];
+  return html`<div class="staff-grid">${tiles.map(([ic, n, label, sub]) => html`<div class="stat-tile" key=${label}><${Icon} name=${ic} size=${20} /><b>${Number(n).toLocaleString()}</b><span>${t(label)}</span>${sub ? html`<small>${sub}</small>` : null}</div>`)}</div>
+    <h3 class="staff-h">${t('Staff team')}</h3>
+    <div class="mem-table">${d.team.map((u) => html`<div class="mem-row" key=${u.id}><${Avatar} user=${u} size=${36} /><div class="mem-name"><b>${u.displayName}</b><small>@${u.username}${u.founder ? ` · ${t('founder')}` : ''}</small></div>
+      <small class="mem-join">${u.actions} ${u.actions === 1 ? t('action') : t('actions')} ${t('in 30 days')}</small></div>`)}</div>`;
+}
+
+const STATE = { active: ['Active', ''], locked: ['Locked', 'warn'], terminated: ['Terminated', 'bad'] };
+function StateChip({ u }) { const [label, c] = STATE[u.state] || STATE.active; return html`<span class=${cx('state-chip', c)}>${t(label)}${u.state === 'locked' && u.lockedUntil ? ` ${t('until')} ${new Date(u.lockedUntil).toLocaleString()}` : ''}</span>`; }
+
+const HOURS = [[1, '1 hour'], [6, '6 hours'], [24, '1 day'], [72, '3 days'], [168, '1 week'], [720, '30 days']];
+/** Asks why (and, for a lock, how long). Resolves { reason, hours } or null. */
+MODALS['staff-action'] = function StaffAction({ id, title, body, confirmLabel, lock, resolve }) {
+  const [reason, setReason] = useState(''); const [hours, setHours] = useState(24);
+  const done = (v) => { closeModal(id); resolve(v); };
+  return html`<${Modal} title=${title} width=${440} onClose=${() => done(null)}
+    footer=${html`<${Btn} variant="ghost" onClick=${() => done(null)}>${t('Cancel')}<//><${Btn} variant="danger" disabled=${!reason.trim()} onClick=${() => done({ reason: reason.trim(), hours })}>${confirmLabel}<//>`}>
+    <p class="confirm-body">${body}</p>
+    ${lock ? html`<${Field} label=${t('How long')}><${Dropdown} value=${hours} options=${HOURS.map(([value, label]) => ({ value, label: t(label) }))} onChange=${setHours} /><//>` : null}
+    <${Field} label=${t('Reason (they see it)')}><textarea class="textarea" rows="3" maxlength="300" value=${reason} onInput=${(e) => setReason(e.target.value)} autofocus></textarea><//>
+  <//>`;
+};
+/** Lock / unlock / terminate / unterminate (asking why for the first two). Resolves with the updated row. */
+async function moderate(u, what) {
+  if (what === 'lock' || what === 'terminate') {
+    const a = await new Promise((resolve) => openModal('staff-action', what === 'lock'
+      ? { title: `${t('Lock')} ${u.displayName}`, body: t('They are signed out and can’t sign in until the lock ends.'), confirmLabel: t('Lock'), lock: true, resolve }
+      : { title: `${t('Terminate')} ${u.displayName}`, body: t('They are signed out, removed from every server they don’t own, and can never sign in again. Staff can undo it.'), confirmLabel: t('Terminate'), resolve }));
+    return a ? act(api.post(`/staff/users/${u.id}/${what}`, a)) : null;
+  }
+  return act(api.post(`/staff/users/${u.id}/${what}`, {}));
+}
+
+function Accounts() {
+  const [q, setQ] = useState(''); const [list, setList] = useState(null); const [open, setOpen] = useState(null);
+  const load = (query = q) => api.get(`/staff/users?q=${encodeURIComponent(query)}`).then(setList, () => setList([]));
+  useEffect(() => { const id = setTimeout(() => load(q), 250); return () => clearTimeout(id); }, [q]);
+  const run = async (u, what) => { const r = await moderate(u, what); if (r) { setList((l) => l.map((x) => (x.id === r.id ? r : x))); if (open?.id === r.id) setOpen({ ...open, ...r }); } };
+  return html`<div class="staff-bar"><div class="input-wrap staff-search"><${Icon} name="search" size=${18} class="in-icon" /><input class="input" placeholder=${t('Search by username, name or ID…')} value=${q} onInput=${(e) => setQ(e.target.value)} /></div></div>
+    ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : !list.length ? html`<${Empty} icon="users" title=${t('Nobody found')} />`
+      : html`<div class="mem-table">${list.map((u) => html`<div class=${cx('mem-row staff-row', open?.id === u.id && 'sel')} key=${u.id}>
+        <${Avatar} user=${u} size=${36} onClick=${(e) => openProfile(u.id, e.currentTarget)} />
+        <div class="mem-name"><b>${u.displayName} ${u.staff ? html`<span class="state-chip">${t('staff')}</span>` : null}</b><small>@${u.username} · ${t('joined')} ${relTime(u.createdAt)} · ${u.servers} ${t('servers')}${u.alts ? ` · ${u.alts} ${t('other accounts on their browser')}` : ''}${u.openFlags ? ` · ${u.openFlags} ${t('open flags')}` : ''}</small></div>
+        <${StateChip} u=${u} />
+        <span class="staff-acts">
+          <${Btn} size="sm" variant="ghost" onClick=${() => (open?.id === u.id ? setOpen(null) : api.get(`/staff/users/${u.id}`).then(setOpen))}>${open?.id === u.id ? t('Close') : t('Details')}<//>
+          ${u.state === 'terminated' ? html`<${Btn} size="sm" onClick=${() => run(u, 'unterminate')}>${t('Undo termination')}<//>`
+            : html`${u.state === 'locked' ? html`<${Btn} size="sm" onClick=${() => run(u, 'unlock')}>${t('Unlock')}<//>` : html`<${Btn} size="sm" icon="lock" onClick=${() => run(u, 'lock')}>${t('Lock')}<//>`}
+              <${Btn} size="sm" variant="danger" icon="ban" onClick=${() => run(u, 'terminate')}>${t('Terminate')}<//>`}</span></div>
+        ${open?.id === u.id ? html`<${AccountDetail} d=${open} />` : null}`)}</div>`}`;
+}
+function AccountDetail({ d }) {
+  return html`<div class="staff-detail">
+    ${d.terminated ? html`<p class="text-danger">${t('Terminated')} ${relTime(d.terminated.at)}: ${d.terminated.reason}</p>` : null}
+    ${d.state === 'locked' ? html`<p class="text-warn">${t('Locked until')} ${new Date(d.lockedUntil).toLocaleString()}: ${d.lockReason}</p>` : null}
+    <div><b>${t('Servers')}</b> ${d.serverList.length ? d.serverList.map((s) => html`<span class="state-chip" key=${s.id}>${s.name}${s.owner ? ` (${t('owner')})` : ''}</span>`) : html`<small class="text-muted">${t('none')}</small>`}</div>
+    <div><b>${t('Other accounts on their browser')}</b> ${d.altList.length ? d.altList.map((u) => html`<span class="state-chip" key=${u.id}>@${u.username}</span>`) : html`<small class="text-muted">${t('none')}</small>`}</div>
+    ${d.flags.length ? html`<div><b>${t('Flags')}</b>${d.flags.map((f) => html`<div class="staff-mini" key=${f.id}>${f.reportedBy ? t('Report') : t('Auto')}: ${f.reason} · ${f.detail || ''} · ${relTime(f.at)} · ${f.status}</div>`)}</div>` : null}
+    ${d.log.length ? html`<div><b>${t('Staff actions')}</b>${d.log.map((e) => html`<div class="staff-mini" key=${e.id}>${e.action}${e.reason ? ` · ${e.reason}` : ''} · ${relTime(e.at)}</div>`)}</div>` : null}
+  </div>`;
+}
+
+function Flags() {
+  const [all, setAll] = useState(false); const [d, setD] = useState(null);
+  const load = () => api.get(`/staff/flags${all ? '?status=all' : ''}`).then((r) => { addUsers(r.users); setD(r); }, (e) => setD({ error: errMsg(e) }));
+  useEffect(() => { setD(null); load(); }, [all]);
+  const users = useSel((s) => s.users);
+  const handle = async (f, action) => { const r = await act(api.post(`/staff/flags/${f.id}`, { action })); if (r) setD((x) => ({ ...x, flags: all ? x.flags.map((y) => (y.id === f.id ? r : y)) : x.flags.filter((y) => y.id !== f.id) })); };
+  const userAct = async (uid, what) => { const u = users[uid]; if (u && await moderate(u, what)) load(); };
+  if (!d) return html`<div class="pk-center"><${Spinner} /></div>`;
+  if (d.error) return html`<p class="text-danger">${d.error}</p>`;
+  return html`<div class="staff-bar"><p class="text-muted">${t('Accounts and messages Orata found suspicious, and what people reported. Server rules are each server’s business.')}</p>
+      <label class="staff-lock-len"><input type="checkbox" checked=${all} onChange=${(e) => setAll(e.target.checked)} /> ${t('Show handled ones too')}</label></div>
+    ${!d.flags.length ? html`<${Empty} icon="check-circle" title=${t('Nothing to look at')}>${t('No open flags or reports.')}<//>`
+      : html`<div class="flag-list">${d.flags.map((f) => { const u = users[f.userId]; const by = f.reportedBy && users[f.reportedBy]; return html`<div class=${cx('flag-row', f.status !== 'open' && 'done')} key=${f.id}>
+        <div class="flag-top"><span class=${cx('flag-kind', f.reportedBy && 'report')}><${Icon} name=${f.reportedBy ? 'alert-triangle' : 'flag'} size=${14} />${f.label}</span>
+          <span class="flag-who" onClick=${(e) => u && openProfile(u.id, e.currentTarget)}><${Avatar} user=${u} size=${22} /><b>${u?.displayName || '?'}</b><small>@${u?.username || '?'}</small></span>
+          <small class="flag-when" title=${formatFull(f.at)}>${relTime(f.at)}${f.where ? ` · ${f.where}` : ''}</small></div>
+        ${f.detail && f.detail !== 'reported' ? html`<div class="flag-detail">${f.detail}</div>` : null}
+        ${f.excerpt ? html`<blockquote class="flag-excerpt">${f.excerpt}${f.gone ? html` <small>(${t('already deleted')})</small>` : null}</blockquote>` : null}
+        ${by ? html`<div class="flag-detail">${t('Reported by')} ${by.displayName}${f.note ? `: “${f.note}”` : ''}</div>` : null}
+        <div class="flag-acts">${f.status === 'open' ? html`
+          ${f.messageId && !f.gone ? html`<${Btn} size="sm" variant="danger" icon="trash" onClick=${() => handle(f, 'delete')}>${t('Delete message')}<//>` : null}
+          <${Btn} size="sm" icon="lock" onClick=${() => userAct(f.userId, 'lock')}>${t('Lock account')}<//>
+          <${Btn} size="sm" variant="danger" icon="ban" onClick=${() => userAct(f.userId, 'terminate')}>${t('Terminate')}<//>
+          <${Btn} size="sm" variant="ghost" onClick=${() => handle(f, 'dismiss')}>${t('Dismiss')}<//>`
+          : html`<small class="text-muted">${f.status === 'done' ? t('Message deleted') : t('Dismissed')}${f.handledBy && users[f.handledBy] ? ` ${t('by')} ${users[f.handledBy].displayName}` : ''}</small><${Btn} size="sm" variant="ghost" onClick=${() => handle(f, 'reopen')}>${t('Reopen')}<//>`}</div>
+      </div>`; })}</div>`}`;
+}
+
+const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about' };
+function Log() {
+  const [d, setD] = useState(null);
+  useEffect(() => { api.get('/staff/log').then((r) => { addUsers(r.users); setD(r); }, () => setD({ log: [] })); }, []);
+  const users = useSel((s) => s.users);
+  if (!d) return html`<div class="pk-center"><${Spinner} /></div>`;
+  if (!d.log.length) return html`<${Empty} icon="list" title=${t('No staff actions yet')} />`;
+  return html`<div class="al-list">${d.log.map((e) => html`<div class="al-row" key=${e.id}><span class=${cx('al-ic', ['terminate', 'lock', 'delete_message'].includes(e.action) && 'bad')}><${Icon} name=${e.action.includes('lock') ? 'lock' : e.action.includes('terminate') ? 'ban' : 'flag'} size=${16} /></span>
+    <div class="al-text"><div><b>${users[e.by]?.displayName || '?'}</b> ${t(ACTION[e.action] || e.action)} <b>${users[e.target]?.displayName || '?'}</b>${e.hours ? ` ${t('for')} ${HOURS.find(([h]) => h === e.hours)?.[1] || `${e.hours}h`}` : ''}</div>${e.reason ? html`<small>${t('Reason')}: ${e.reason}</small>` : null}</div>
+    <time title=${formatFull(e.at)}>${relTime(e.at)}</time></div>`)}</div>`;
+}

@@ -3,6 +3,7 @@ import { WebSocketServer } from 'ws';
 import { db, sha, conns, gatedConns, send, emitTo, canView, audienceOf, publicUser, broadcastPresence, newId, canIn, voice, effectiveStatus, save, serverView, serverAudience } from './core.js';
 import { buildReady } from './api.js';
 import { findSession } from './sessions.js';
+import { accountBlock } from './staff.js';
 import { expireListening } from './music.js';
 import { isGated } from './verify.js';
 import { isStage, isVoiceLike, isStageMod, stageJoinState, peersFor, mayLink, setSpeaker, setHand } from './stage.js';
@@ -73,7 +74,7 @@ export function attachGateway(server) {
         conn.identifying = true;
         const found = await findSession(String(d.token || '')).catch(() => null);
         const user = found && db.users[found.rec.userId];
-        if (!user || user.deleted) { send(conn, 'invalid_session', {}); return ws.close(4004, 'invalid token'); }   // the message too: some proxies swallow custom close codes
+        if (!user || user.deleted || accountBlock(user)) { send(conn, 'invalid_session', {}); return ws.close(4004, 'invalid token'); }   // the message too: some proxies swallow custom close codes
         if (ws.readyState !== 1) return;   // the tab went away while we looked the session up
         clearTimeout(authTimer);
         conn.userId = user.id;

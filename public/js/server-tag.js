@@ -1,7 +1,7 @@
 // Orata — server tags: a server's short tag (1–5 letters or numbers) with an icon and a color, which members can wear next to their name.
 // Admins set it in Server Settings → Overview (once a week); people pick the one they wear in User Settings → Profile or from the server menu.
 import { html, useState, cx } from '/js/lib.js';
-import { state } from '/js/store.js';
+import { state, openPopover } from '/js/store.js';
 import { Btn, TextInput, ColorSwatch, Section } from '/js/ui.js';
 import { Icon } from '/js/icons.js';
 import { api } from '/js/api.js';
@@ -12,10 +12,11 @@ import { t } from '/js/i18n.js';
 export const TAG_ICONS = ['star', 'heart', 'bolt', 'crown', 'sparkles', 'shield', 'flag', 'music', 'moon', 'sun', 'globe', 'target', 'award', 'gift', 'code', 'smile', 'camera', 'palette'];
 const WEEK = 7 * 86400_000;
 
-/** A tag pill: the icon in the tag's color, then its text. Hovering names the server it belongs to. */
+/** A tag pill: the icon in the tag's color, then its text. Hovering names the server; clicking shows it, to join or apply to (applications.js). */
 export function ServerTag({ tag }) {
   if (!tag?.text) return null;
-  return html`<span class="srv-tag" style=${{ '--tc': tag.color }} data-tip=${tag.server || null}><${Icon} name=${tag.icon} size=${11} sw=${2.8} />${tag.text}</span>`;
+  const open = tag.serverId ? (e) => { e.stopPropagation(); openPopover(e.currentTarget, 'server-preview', { serverId: tag.serverId }, { placement: 'bottom' }); } : null;
+  return html`<span class=${cx('srv-tag', open && 'clickable')} style=${{ '--tc': tag.color }} data-tip=${tag.server || null} role=${open ? 'button' : null} tabindex=${open ? 0 : null} onClick=${open}><${Icon} name=${tag.icon} size=${11} sw=${2.8} />${tag.text}</span>`;
 }
 
 /** Server Settings → Overview: the server's tag. Admins edit it (once a week); everyone else just sees it. */

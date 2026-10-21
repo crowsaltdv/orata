@@ -20,6 +20,7 @@ import '/js/voice.js';
 import { markAllRead, ackChannel } from '/js/actions.js';
 import { VerifyScreen, VerifyGate, VerifyBanner } from '/js/verify.js';
 import { MusicPage } from '/js/music.js';
+import { StaffPage } from '/js/staff.js';
 import { ForumView } from '/js/forum.js';
 import '/js/polls.js';
 
@@ -31,6 +32,7 @@ function MainView() {
   switch (view) {
     case 'friends': return html`<${FriendsView} />`;
     case 'music': return html`<${MusicPage} />`;
+    case 'staff': return html`<${StaffPage} />`;
     case 'dm': return html`<${ChatView} key=${chId} />`;
     case 'channel': return chId ? (isVoice ? html`<${VoiceChannelView} key=${chId} />` : chType === 'stage' ? html`<${StageChannelView} key=${chId} />` : chType === 'forum' ? html`<${ForumView} key=${chId} />` : html`<${ChatView} key=${chId} />`) : html`<main class="main panel"></main>`;
     default: return html`<${FriendsView} />`;
@@ -76,7 +78,7 @@ function Shell() {
       <${UserBar} />
     </div>
     <${MainView} />
-    ${view === 'friends' ? html`<${ActiveNow} />` : view === 'music' ? null : html`<${RightPanel} />`}
+    ${view === 'friends' ? html`<${ActiveNow} />` : view === 'music' || view === 'staff' ? null : html`<${RightPanel} />`}
   </div>`;
 }
 function cycle(dir, unreadOnly) {

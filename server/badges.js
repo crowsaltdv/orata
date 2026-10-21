@@ -1,7 +1,9 @@
 // Orata — profile badges. A badge is { id, name, icon (one of the browser's icon names) or emoji, color }; a person's are `user.badges` (ids).
 // The catalog lives in db.badges: the built-in ones below (rewritten on every start, so they follow this file) and custom ones the developers make.
-// Whoever holds the "dev" badge is a developer: they can give and take anyone's badges and create or delete custom ones.
+// Whoever holds the "dev" badge is a developer: they can give and take anyone's badges and create or delete custom ones — except the staff and
+// dev badges themselves, which only the two founders (oratedev and Orate_dev) can hand out or take away.
 import { db, save, newId, bad, forbidden, notFound, byUsername, emitTo, relatedUserIds, publicUser, ORATE_DEV_ID } from './core.js';
+import { isFounder } from './names.js';
 
 const BUILTIN = [
   { id: 'dev', name: 'Orata Developer', icon: 'code', color: '#5865f2' },
@@ -53,6 +55,7 @@ export function mountBadges(r, { h }) {
     const want = Array.isArray(req.body?.badges) ? [...new Set(req.body.badges.map(String))].filter((id) => db.badges[id]) : null;
     if (!want) throw bad('Send the list of badges');
     if (u.id === req.user.id && !want.includes('dev')) throw bad('You can’t take the developer badge from yourself');
+    for (const id of ['staff', 'dev']) if (want.includes(id) !== !!u.badges?.includes(id) && !isFounder(req.user)) throw forbidden(`Only oratedev and Orate_dev can give or take the ${db.badges[id].name} badge`);
     u.badges = want; save(); tell(u, req.user.id);
     res.json(publicUser(u));
   }));

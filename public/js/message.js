@@ -17,6 +17,7 @@ import { useFavGifs, toggleFavGif, gifFromMessage } from '/js/gif-favs.js';
 import { dismissEphemeral } from '/js/orbit.js';
 import '/js/forward.js';   // the Forward dialog
 import { ServerTag } from '/js/server-tag.js';
+import { ApplicationCard } from '/js/applications.js';
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -177,6 +178,8 @@ export function messageMenu(m, ch) {
     state.settings.advanced.devMode && { label: t('Copy Message ID'), icon: 'copy', onClick: () => copyText(m.id) },
     (mine || canManage) && { type: 'sep' },
     (mine || canManage) && { label: t('Delete Message'), icon: 'trash', danger: true, onClick: () => deleteMessage(ch, m.id) },
+    !mine && !m.bridge && m.type === 'default' && { type: 'sep' },
+    !mine && !m.bridge && m.type === 'default' && { label: t('Report to Orata staff'), icon: 'flag', danger: true, onClick: () => openModal('report', { messageId: m.id, channelId: ch.id }) },
   ];
 }
 function markUnreadFrom(ch, m) {
@@ -218,6 +221,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
   const replyColor = useSel((s) => (m.reply?.authorId && sid ? roleColor(sid, m.reply.authorId) : null));
   const replyNick = useSel((s) => (m.reply?.authorId && sid ? s.servers[sid]?.members.find((x) => x.id === m.reply.authorId)?.nick : null));
   if (!ch) return null;
+  if (m.type === 'application') return html`<${ApplicationCard} m=${m} ch=${ch} />`;
   if (m.type && m.type !== 'default') return html`<${SystemMessage} m=${m} ch=${ch} />`;
   const me = state.me.id;
   const mentioned = m.mentions?.includes(me) || m.mentionEveryone || (m.reply?.authorId === me && m.authorId !== me && m.mentions?.includes(me));
