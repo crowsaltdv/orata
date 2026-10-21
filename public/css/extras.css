@@ -535,3 +535,9 @@ button.stat-tile { text-align: left; font: inherit; } button.stat-tile:disabled 
 /* staff ghost mode (staff.js) and "used /command" above Orbit's answers (message.js) */
 .ghost-banner { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 7px 14px; font-size: 13px; font-weight: 600; background: rgb(139 92 246 / .2); color: #c9b5ff; animation: slide-down var(--t-med) var(--ease); }
 .msg-reply.cmd-used { cursor: default; color: var(--text-2); } .cmd-used .reply-name { cursor: pointer; } .cmd-used .cmd-name { color: var(--accent); font-weight: 600; }
+.staff-dm { display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow-y: auto; margin: 0 -8px; }
+.sdm-msg { display: flex; gap: 10px; padding: 8px; border-radius: 10px; } .sdm-msg.flagged { background: rgb(255 123 147 / .12); box-shadow: inset 3px 0 #ff7b93; }
+.sdm-body { min-width: 0; } .sdm-head { display: flex; align-items: baseline; gap: 8px; } .sdm-head small { color: var(--text-3); font-size: 12px; }
+.sdm-text { word-break: break-word; } .sdm-file { display: block; margin-top: 4px; } .sdm-file img { max-width: 260px; max-height: 200px; border-radius: 8px; }
+.sn-legal { padding: 0 14px 12px; font-size: 12px; color: var(--text-3); } .sn-legal a { color: var(--text-3); } .sn-legal a:hover { color: var(--text); }
+.check-row a { color: var(--accent); }

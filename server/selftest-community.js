@@ -51,7 +51,7 @@ function connect(token) {
 }
 let n = 0;
 const register = async (username, { email, ip, dev } = {}) => {
-  const r = await api('POST', '/auth/register', null, { ...(email !== undefined ? { email } : {}), username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, { ...(ip ? { 'x-forwarded-for': ip } : {}), ...(dev ? { 'x-orate-device': dev } : {}) });
+  const r = await api('POST', '/auth/register', null, { agree: true, ...(email !== undefined ? { email } : {}), username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, { ...(ip ? { 'x-forwarded-for': ip } : {}), ...(dev ? { 'x-orate-device': dev } : {}) });
   return { token: r.body?.token, user: r.body?.user, res: r };
 };
 
@@ -64,9 +64,9 @@ async function main() {
   let A = await register('alice');
   ok(A.res.status === 200 && A.token && A.user.email === null, 'an account needs no email');
   let r = await api('POST', '/auth/login', null, { login: 'alice', password: 'password123' }); ok(r.status === 200, 'it signs in with just the username');
-  r = await api('POST', '/auth/register', null, { email: 'nope', username: 'bad1', displayName: 'Bad', password: 'password123', dob: { year: 1995, month: 1, day: 1 } }); ok(r.status === 400 && r.body.code === 'email', 'an email that is given must still be valid');
+  r = await api('POST', '/auth/register', null, { agree: true, email: 'nope', username: 'bad1', displayName: 'Bad', password: 'password123', dob: { year: 1995, month: 1, day: 1 } }); ok(r.status === 400 && r.body.code === 'email', 'an email that is given must still be valid');
   const E = await register('erin', { email: 'erin@comm.dev' }); ok(E.res.status === 200 && E.user.email === 'erin@comm.dev', 'an email can still be given');
-  r = await api('POST', '/auth/register', null, { email: 'ERIN@comm.dev', username: 'erin2', displayName: 'E', password: 'password123', dob: { year: 1995, month: 1, day: 1 } }); ok(r.status === 400 && r.body.code === 'email', '… and stays unique');
+  r = await api('POST', '/auth/register', null, { agree: true, email: 'ERIN@comm.dev', username: 'erin2', displayName: 'E', password: 'password123', dob: { year: 1995, month: 1, day: 1 } }); ok(r.status === 400 && r.body.code === 'email', '… and stays unique');
   r = await api('PATCH', '/me', A.token, { email: 'alice@comm.dev', password: 'password123' }); ok(r.status === 200 && r.body.email === 'alice@comm.dev', 'an email can be added later (with the password)');
   r = await api('PATCH', '/me', A.token, { email: '', password: 'password123' }); ok(r.status === 200 && r.body.email === null, '… and removed again');
   r = await api('POST', '/auth/login', null, { login: 'alice@comm.dev', password: 'password123' }); ok(r.status === 401, 'a removed email no longer signs in');
@@ -146,7 +146,7 @@ async function main() {
   console.log('\nAlt accounts');
   const mk = async (name, ip, dev) => {
     const h = { ...(ip ? { 'x-forwarded-for': ip } : {}), ...(dev ? { 'x-orate-device': dev } : {}) };
-    const reg0 = await api('POST', '/auth/register', null, { username: name, displayName: name, password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, h);
+    const reg0 = await api('POST', '/auth/register', null, { agree: true, username: name, displayName: name, password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, h);
     const joined = await api('POST', `/invites/${code}/join`, reg0.body.token, null, h);
     return { token: reg0.body.token, user: reg0.body.user, h, joined: joined.status };
   };
@@ -183,7 +183,7 @@ async function main() {
   const comm = (await api('GET', '/ready', A.token)).body.servers.find((s) => s.name === 'Orata Community');
   const mkc = async (name, ip, dev, cookie) => {
     const h = { ...(ip ? { 'x-forwarded-for': ip } : {}), ...(dev ? { 'x-orate-device': dev } : {}), ...(cookie ? { cookie: `theme=dark; orate_dev=${cookie}; other=1` } : {}) };
-    const reg0 = await api('POST', '/auth/register', null, { username: name, displayName: name, password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, h);
+    const reg0 = await api('POST', '/auth/register', null, { agree: true, username: name, displayName: name, password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, h);
     const inC = (await api('GET', '/ready', reg0.body.token, null, h)).body.servers.some((s) => s.id === comm.id);
     return { token: reg0.body.token, user: reg0.body.user, h, inC };
   };
@@ -707,10 +707,10 @@ async function main() {
   /* ---------------------------------------------------------------- email verification still works for those who give an email */
   console.log('\nEmail verification and optional emails together');
   await stopServer(); startServer({ REQUIRE_EMAIL_VERIFICATION: 'true' }); await ready();   // (the header setting above no longer applies)
-  r = await api('POST', '/auth/register', null, { username: 'noemail', displayName: 'No', password: 'password123', dob: { year: 1995, month: 1, day: 1 } });
+  r = await api('POST', '/auth/register', null, { agree: true, username: 'noemail', displayName: 'No', password: 'password123', dob: { year: 1995, month: 1, day: 1 } });
   ok(r.status === 200 && r.body.token && !r.body.verify, 'with verification on, an account without an email is created at once');
   r = await api('GET', '/me', r.body.token); ok(r.status === 200 && r.body.emailVerified === true, '… and is not locked out');
-  r = await api('POST', '/auth/register', null, { email: 'someone@comm.dev', username: 'withemail', displayName: 'W', password: 'password123', dob: { year: 1995, month: 1, day: 1 } });
+  r = await api('POST', '/auth/register', null, { agree: true, email: 'someone@comm.dev', username: 'withemail', displayName: 'W', password: 'password123', dob: { year: 1995, month: 1, day: 1 } });
   ok(r.status === 200 && r.body.verify === true && !r.body.token, 'one who gives an email still has to type the code');
 
   console.log(`\n${pass} passed, ${fail} failed`);

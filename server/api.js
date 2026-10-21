@@ -217,11 +217,12 @@ export function createApi() {
     let age = now.getFullYear() - born.getFullYear();
     if (now < new Date(now.getFullYear(), born.getMonth(), born.getDate())) age--;
     if (age < 13) throw bad('You must be at least 13 years old to use Orata', 'dob');
+    if (b.agree !== true) throw bad('Agree to the Terms of Service, Privacy Policy and Community Guidelines to sign up', 'agree');
     checkAccountLimits(req);
 
     ensureBot();
     const { salt, hash } = await hashPassword(password);
-    const fields = { email, username, displayName, salt, hash, dob };
+    const fields = { email, username, displayName, salt, hash, dob, agreedAt: Date.now() };
     if (email && verificationMode().enabled) {
       // nobody who gives an email gets an account until they type the code we email them (the half-finished sign-up is only kept in memory)
       const out = await beginSignup(fields);
@@ -260,7 +261,7 @@ export function createApi() {
   }
 
   /** Creates the user, joins the community server, sets up the welcome DM and returns { token, user }. */
-  async function createAccount({ email, username, displayName, salt, hash, dob }, req) {
+  async function createAccount({ email, username, displayName, salt, hash, dob, agreedAt }, req) {
     checkAccountLimits(req);   // again: a verified sign-up only creates the account when the emailed code is typed
     ensureBot();
     const id = newId();
@@ -269,6 +270,7 @@ export function createApi() {
       id, username, displayName, email, salt, hash, dob, avatar: null, avatarBg: randomAvatarBg(), banner: null, bannerColor: hues[Number(id) % hues.length],
       accentColor: null, bio: '', pronouns: '', status: 'online', customStatus: null, createdAt: Date.now(), rel: {}, reads: {}, settings: {}, closedDms: {},
       emailVerified: true,   // new accounts are verified: either verification is off, or they typed the emailed code
+      agreedAt,   // when they ticked "I agree" to the Terms, Privacy Policy and Community Guidelines (/terms, /privacy, /guidelines)
     };
     db.users[id] = user; byUsername.set(username, id); if (email) byEmail.set(email, id);
     noteDevice(user, req);   // the browser this account starts on: the ban check below needs it

@@ -82,7 +82,7 @@ function RegisterForm({ go, onPending }) {
   const now = new Date().getFullYear();
   const [f, setF] = useState({ email: '', displayName: '', username: '', password: '', month: '', day: '', year: '' });
   const [errs, setErrs] = useState({}); const [busy, setBusy] = useState(false); const [avail, setAvail] = useState(null);
-  const [agree, setAgree] = useState(true);
+  const [agree, setAgree] = useState(false);
   const up = (k) => (v) => { setF((p) => ({ ...p, [k]: v })); setErrs((p) => ({ ...p, [k]: undefined, general: undefined })); };
   const check = useRef(debounce(async (username) => {
     if (!/^[a-z0-9_.]{2,32}$/.test(username)) { setAvail(username ? false : null); return; }
@@ -99,7 +99,7 @@ function RegisterForm({ go, onPending }) {
     if (Object.keys(e).length) { setErrs(e); return; }
     setBusy(true);
     try {
-      const r = await register({ email: f.email.trim() || undefined, username: f.username, displayName: f.displayName.trim() || f.username, password: f.password, dob: { year: +f.year, month: +f.month, day: +f.day } });
+      const r = await register({ email: f.email.trim() || undefined, username: f.username, displayName: f.displayName.trim() || f.username, password: f.password, dob: { year: +f.year, month: +f.month, day: +f.day }, agree: true });
       if (r?.verify) { setBusy(false); onPending(r); }   // the server emailed a code: ask for it
     } catch (er) {
       setBusy(false);
@@ -128,7 +128,7 @@ function RegisterForm({ go, onPending }) {
       </div>
     <//>
     ${errs.general ? html`<div class="auth-error slide-down"><${Icon} name="alert-circle" size=${16} />${errs.general}</div>` : null}
-    <label class="check-row"><input type="checkbox" checked=${agree} onChange=${(e) => setAgree(e.target.checked)} /><span class="box"><${Icon} name="check" size=${13} sw=${3.5} /></span><span>${t('I agree to be kind to others and follow the community guidelines.')}</span></label>
+    <label class="check-row"><input type="checkbox" checked=${agree} onChange=${(e) => setAgree(e.target.checked)} /><span class="box"><${Icon} name="check" size=${13} sw=${3.5} /></span><span>${t('I agree to Orata’s')} <a href="/terms" target="_blank" rel="noopener">${t('Terms of Service')}</a> ${t('and')} <a href="/privacy" target="_blank" rel="noopener">${t('Privacy Policy')}</a>, ${t('and I’ll follow the')} <a href="/guidelines" target="_blank" rel="noopener">${t('Community Guidelines')}</a>.</span></label>
     <${Btn} variant="primary" size="lg" class="btn-block" loading=${busy} disabled=${!agree} onClick=${submit}>${t('Create Account')}<//>
     <div class="auth-switch">${t('Already have an account?')} <button type="button" class="link-btn" onClick=${() => go('login')}>${t('Log In')}</button></div>
   </div>`;

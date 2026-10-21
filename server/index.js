@@ -59,7 +59,7 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
 }));
 
 app.use(express.static(path.join(ROOT, 'public'), {
-  index: false,
+  index: false, extensions: ['html'],   // /terms, /privacy and /guidelines are plain pages (public/*.html)
   setHeaders(res, file) {
     if (/\.(html|js|css)$/.test(file)) res.set('Cache-Control', 'no-cache');
     else if (/\.(png|jpg|webp|svg|json|woff2?)$/.test(file)) res.set('Cache-Control', 'public, max-age=86400');

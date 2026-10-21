@@ -4,6 +4,7 @@ import { html, useState, useEffect, relTime, formatFull, cx } from '/js/lib.js';
 import { state, set, useSel, openModal, closeModal, addUsers, rebuildIndex, go, goChannel } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Modal, Btn, Spinner, Avatar, Empty, Dropdown, Field, ServerIcon, MODALS } from '/js/ui.js';
+import { renderMarkdown } from '/js/markdown.js';
 import { ServerTag } from '/js/server-tag.js';
 import { api } from '/js/api.js';
 import { act, errMsg } from '/js/actions.js';
@@ -20,7 +21,7 @@ MODALS.report = function Report({ id, messageId, channelId, userId, serverId }) 
   const send = async () => { setBusy(true); if (await act(api.post('/reports', { messageId, channelId, userId, serverId, reason, note }))) setDone(true); setBusy(false); };
   return html`<${Modal} title=${messageId ? t('Report message') : serverId ? t('Report server') : t('Report account')} subtitle=${t('Goes to Orata staff, not to the server’s moderators. Use it for things against Orata’s rules; a server’s own rules are up to its moderators.')} width=${460} onClose=${() => closeModal(id)}
     footer=${done ? html`<${Btn} variant="primary" onClick=${() => closeModal(id)}>${t('Done')}<//>` : html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="danger" icon="flag" loading=${busy} disabled=${!reason} onClick=${send}>${t('Send report')}<//>`}>
-    ${done ? html`<div class="rep-done"><${Icon} name="check-circle" size=${40} sw=${1.6} /><b>${t('Thanks, staff will take a look.')}</b><p>${t('If it was in a DM, staff can see the message you reported, nothing else.')}</p></div>`
+    ${done ? html`<div class="rep-done"><${Icon} name="check-circle" size=${40} sw=${1.6} /><b>${t('Thanks, staff will take a look.')}</b><p>${t('If it was in a DM, staff can read that conversation around the message you reported, and nothing else.')}</p></div>`
       : html`<div class="rep-reasons">${REASONS.map(([k, label]) => html`<button type="button" key=${k} class=${cx('rep-opt', reason === k && 'on')} onClick=${() => setReason(k)}><span class="radio"></span>${t(label)}</button>`)}</div>
         <textarea class="textarea" rows="3" maxlength="500" value=${note} onInput=${(e) => setNote(e.target.value)} placeholder=${t('Anything staff should know (optional)')}></textarea>`}
   <//>`;
@@ -148,6 +149,20 @@ function Servers() {
       ${rest.length ? html`<h3 class="staff-h">${fishy.length ? t('Everything else') : t('All servers')}</h3><div class="mem-table">${rest.map(row)}</div>` : null}`}`;
 }
 
+/** The DM a flagged or reported message is in (50 messages either side), read only. Staff can only get here from a flag; the server logs each look. */
+MODALS['staff-dm'] = function StaffDm({ id, flagId }) {
+  const [d, setD] = useState(null); const users = useSel((s) => s.users);
+  useEffect(() => { api.get(`/staff/flags/${flagId}/conversation`).then((r) => { addUsers(r.users); setD(r); }, (e) => setD({ error: errMsg(e) })); }, []);
+  useEffect(() => { if (d?.messages) document.querySelector('.sdm-msg.flagged')?.scrollIntoView({ block: 'center' }); }, [d]);
+  return html`<${Modal} title=${d?.group ? t('Flagged group DM') : t('Flagged DM')} subtitle=${t('Read only. Opening this is written in the staff log.')} width=${620} onClose=${() => closeModal(id)}>
+    ${!d ? html`<div class="pk-center"><${Spinner} /></div>` : d.error ? html`<p class="text-danger">${d.error}</p>` : html`<div class="staff-dm">${d.messages.map((m) => { const u = users[m.authorId]; return html`<div class=${cx('sdm-msg', m.id === d.flagged && 'flagged')} key=${m.id}>
+      <${Avatar} user=${u} size=${32} /><div class="sdm-body"><div class="sdm-head"><b>${u?.displayName || '?'}</b><small>${formatFull(m.createdAt)}</small></div>
+        ${m.content ? html`<div class="sdm-text" dangerouslySetInnerHTML=${{ __html: renderMarkdown(m.content, { emojis: m.emojis }) }}></div>` : null}
+        ${(m.attachments || []).map((a) => html`<a class="sdm-file" key=${a.url} href=${a.url} target="_blank" rel="noopener">${/^image\//.test(a.type) ? html`<img src=${a.url} alt=${a.name} />` : a.name}</a>`)}
+        ${m.gif ? html`<small class="text-muted">[GIF]</small>` : null}${m.sticker ? html`<small class="text-muted">[${t('sticker')}]</small>` : null}</div></div>`; })}</div>`}
+  <//>`;
+};
+
 function Flags() {
   const [all, setAll] = useState(false); const [d, setD] = useState(null);
   const load = () => api.get(`/staff/flags${all ? '?status=all' : ''}`).then((r) => { addUsers(r.users); setD(r); }, (e) => setD({ error: errMsg(e) }));
@@ -170,6 +185,7 @@ function Flags() {
         <div class="flag-acts">${f.status === 'open' ? html`
           ${f.messageId && !f.gone ? html`<${Btn} size="sm" variant="danger" icon="trash" onClick=${() => handle(f, 'delete')}>${t('Delete message')}<//>` : null}
           ${f.kind === 'server' ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(f.serverId)}>${t('Ghost in')}<//>` : null}
+          ${f.channelId && !f.serverId ? html`<${Btn} size="sm" icon="message" onClick=${() => openModal('staff-dm', { flagId: f.id })}>${t('Read the DM')}<//>` : null}
           <${Btn} size="sm" icon="lock" onClick=${() => userAct(f.userId, 'lock')}>${t('Lock account')}<//>
           <${Btn} size="sm" variant="danger" icon="ban" onClick=${() => userAct(f.userId, 'terminate')}>${t('Terminate')}<//>
           <${Btn} size="sm" variant="ghost" onClick=${() => handle(f, 'dismiss')}>${t('Dismiss')}<//>`
@@ -177,14 +193,14 @@ function Flags() {
       </div>`; })}</div>`}`;
 }
 
-const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into' };
+const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into', view_dm: 'read a flagged DM of' };
 function Log() {
   const [d, setD] = useState(null);
   useEffect(() => { api.get('/staff/log').then((r) => { addUsers(r.users); setD(r); }, () => setD({ log: [] })); }, []);
   const users = useSel((s) => s.users);
   if (!d) return html`<div class="pk-center"><${Spinner} /></div>`;
   if (!d.log.length) return html`<${Empty} icon="list" title=${t('No staff actions yet')} />`;
-  return html`<div class="al-list">${d.log.map((e) => html`<div class="al-row" key=${e.id}><span class=${cx('al-ic', ['terminate', 'lock', 'delete_message'].includes(e.action) && 'bad')}><${Icon} name=${e.action.includes('lock') ? 'lock' : e.action.includes('terminate') ? 'ban' : e.action === 'ghost' ? 'eye' : 'flag'} size=${16} /></span>
+  return html`<div class="al-list">${d.log.map((e) => html`<div class="al-row" key=${e.id}><span class=${cx('al-ic', ['terminate', 'lock', 'delete_message'].includes(e.action) && 'bad')}><${Icon} name=${e.action.includes('lock') ? 'lock' : e.action.includes('terminate') ? 'ban' : e.action === 'ghost' ? 'eye' : e.action === 'view_dm' ? 'message' : 'flag'} size=${16} /></span>
     <div class="al-text"><div><b>${users[e.by]?.displayName || '?'}</b> ${t(ACTION[e.action] || e.action)} <b>${e.action === 'ghost' ? e.serverName : users[e.target]?.displayName || '?'}</b>${e.hours ? ` ${t('for')} ${HOURS.find(([h]) => h === e.hours)?.[1] || `${e.hours}h`}` : ''}</div>${e.reason ? html`<small>${t('Reason')}: ${e.reason}</small>` : null}</div>
     <time title=${formatFull(e.at)}>${relTime(e.at)}</time></div>`)}</div>`;
 }

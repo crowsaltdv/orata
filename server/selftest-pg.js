@@ -53,7 +53,7 @@ function startServer(extraEnv = {}, { withDb = true, dataDir } = {}) {
   srv.stop = () => { child.kill(); };
   return srv;
 }
-const reg = (srv, name) => srv.api('POST', '/auth/register', null, { email: `${name}@example.com`, username: name, displayName: name, password: 'hunter2hunter2', dob: { year: 1995, month: 5, day: 5 } });
+const reg = (srv, name) => srv.api('POST', '/auth/register', null, { agree: true, email: `${name}@example.com`, username: name, displayName: name, password: 'hunter2hunter2', dob: { year: 1995, month: 5, day: 5 } });
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const textChannel = async (srv, token) => { const r = await srv.api('GET', '/ready', token); return r.body.servers[0].channels.find((c) => c.type === 'text'); };
 const servers = [];

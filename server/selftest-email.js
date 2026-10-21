@@ -78,7 +78,7 @@ function startServer(port, extraEnv) {
   return srv;
 }
 const PW = 'hunter2hunter2';
-const regBody = (name, email) => ({ email: email || `${name}@example.com`, username: name, displayName: name, password: PW, dob: { year: 1995, month: 5, day: 5 } });
+const regBody = (name, email) => ({ agree: true, email: email || `${name}@example.com`, username: name, displayName: name, password: PW, dob: { year: 1995, month: 5, day: 5 } });
 
 async function main() {
   const smtp = await fakeSmtp();

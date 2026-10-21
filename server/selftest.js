@@ -39,14 +39,14 @@ async function main() {
   console.log('Orata self-test on port', PORT);
 
   console.log('\nAuth');
-  let r = await api('POST', '/auth/register', null, { email: 'a@test.dev', username: 'alice', displayName: 'Alice', password: 'hunter2hunter2', dob: { year: 1999, month: 5, day: 4 } });
+  let r = await api('POST', '/auth/register', null, { agree: true, email: 'a@test.dev', username: 'alice', displayName: 'Alice', password: 'hunter2hunter2', dob: { year: 1999, month: 5, day: 4 } });
   ok(r.status === 200 && r.body.token, 'register alice');
   const A = r.body.token; const alice = r.body.user;
-  r = await api('POST', '/auth/register', null, { email: 'a@test.dev', username: 'alice2', displayName: 'A', password: 'hunter2hunter2', dob: { year: 1999, month: 5, day: 4 } });
+  r = await api('POST', '/auth/register', null, { agree: true, email: 'a@test.dev', username: 'alice2', displayName: 'A', password: 'hunter2hunter2', dob: { year: 1999, month: 5, day: 4 } });
   ok(r.status === 400 && r.body.code === 'email', 'duplicate email rejected');
-  r = await api('POST', '/auth/register', null, { email: 'kid@test.dev', username: 'kid', displayName: 'Kid', password: 'hunter2hunter2', dob: { year: new Date().getFullYear() - 8, month: 1, day: 1 } });
+  r = await api('POST', '/auth/register', null, { agree: true, email: 'kid@test.dev', username: 'kid', displayName: 'Kid', password: 'hunter2hunter2', dob: { year: new Date().getFullYear() - 8, month: 1, day: 1 } });
   ok(r.status === 400 && r.body.code === 'dob', 'underage rejected');
-  r = await api('POST', '/auth/register', null, { email: 'b@test.dev', username: 'bob', displayName: 'Bob', password: 'password123', dob: { year: 1995, month: 1, day: 1 } });
+  r = await api('POST', '/auth/register', null, { agree: true, email: 'b@test.dev', username: 'bob', displayName: 'Bob', password: 'password123', dob: { year: 1995, month: 1, day: 1 } });
   const B = r.body.token; const bob = r.body.user;
   ok(!!B, 'register bob');
   r = await api('POST', '/auth/login', null, { login: 'ALICE', password: 'wrong' });

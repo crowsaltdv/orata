@@ -79,7 +79,7 @@ function connect(token) {
   });
 }
 const register = async (username, email) => {
-  const r = await api('POST', '/auth/register', null, { email, username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } });
+  const r = await api('POST', '/auth/register', null, { agree: true, email, username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } });
   return { token: r.body.token, user: r.body.user };
 };
 

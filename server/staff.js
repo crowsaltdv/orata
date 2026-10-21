@@ -2,11 +2,12 @@
 // founders hand those out, badges.js). Numbers about the whole of Orata; finding accounts; locking one for a while or terminating it for good
 // (both undoable); and flags: messages and accounts Orata itself finds suspicious (spam bursts, mass pings, invite spam, scam links, many
 // accounts on one browser, a day-old account messaging lots of people) plus what people report to staff. Server rules (NSFW channels and the
-// like) are each server's business, not this. DMs are only seen here when someone in them reports a message; for the "messaging lots of
-// people" check only who and how many are counted, never what. Every staff action goes in the staff log.
+// like) are each server's business, not this. A DM can only be read from a flag or report about a message in it (and each look goes in the
+// staff log); Orata checks DMs for scam links, and for the "messaging lots of people" check only who and how many are counted, never what.
+// Every staff action goes in the staff log.
 // Servers: every server, fishy ones first (reported, flagged messages, terminated members, a scam-looking name), and "ghosting" into one to read
 // it without joining (core.js ghosts: read only and invisible; each time goes in the staff log).
-import { db, save, newId, emitTo, audienceOf, effectiveStatus, publicUser, deviceHashesOf, canView, closeConns, serverView, ghosts, bad, forbidden, notFound } from './core.js';
+import { db, save, newId, emitTo, audienceOf, effectiveStatus, publicUser, messageView, deviceHashesOf, canView, closeConns, serverView, ghosts, bad, forbidden, notFound } from './core.js';
 import { hooks, messagesDeleted } from './messages.js';
 import { endUserSessions } from './sessions.js';
 import { isFounder, isStaff } from './names.js';
@@ -51,6 +52,7 @@ hooks.onMessage.push((ch, m) => {
   const u = db.users[m.authorId]; if (!u || u.bot || m.bridge || m.type !== 'default') return;
   const now = Date.now();
   if (!ch.serverId) {
+    if (SCAM.test(m.content || '')) flagMessage(m, ch, 'scam', 'looks like a scam or IP-grabber link');
     if (now - (u.createdAt || 0) > 86400_000) return;
     const list = (dms.get(u.id) || []).filter((x) => now - x.at < 600_000); for (const to of ch.recipients || []) if (to !== u.id) list.push({ at: now, to });
     dms.set(u.id, list.slice(-100)); const people = new Set(list.map((x) => x.to)).size;
@@ -213,6 +215,17 @@ export function mountStaff(r, { h, limit, removeMember }) {
     else throw bad('Unknown action');
     f.handledBy = req.user.id; f.handledAt = Date.now(); save();
     res.json(flagView(f));
+  }));
+  // the DM a flagged or reported message is in, read only: the 50 messages before it and the 50 after. Only reachable from a flag; each look is logged
+  r.get('/staff/flags/:id/conversation', h(async (req, res) => {
+    staff(req); const f = (db.flags || []).find((x) => x.id === req.params.id); if (!f) throw notFound('Unknown flag');
+    const ch = f.channelId && db.channels[f.channelId]; if (!ch || ch.serverId) throw bad('That flag isn’t about a DM');
+    const list = db.messages[ch.id] || [];
+    let i = list.findIndex((m) => m.id === f.messageId); if (i < 0) i = list.findIndex((m) => m.createdAt > f.at); if (i < 0) i = list.length - 1;
+    const slice = list.slice(Math.max(0, i - 50), i + 51);
+    log(req.user.id, 'view_dm', f.userId, '', { flag: f.id }); save();
+    const ids = new Set([...(ch.recipients || []), ...slice.map((m) => m.authorId)]);
+    res.json({ messages: slice.map(messageView), users: [...ids].map((id) => publicUser(db.users[id])).filter(Boolean), flagged: f.messageId || null, group: ch.type === 'group' });
   }));
   r.get('/staff/log', h(async (req, res) => {
     staff(req); const list = (db.staffLog || []).slice(-200).reverse();

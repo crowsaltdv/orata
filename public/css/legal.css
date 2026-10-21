@@ -1,0 +1,23 @@
+/* Orata — the Terms of Service, Privacy Policy and Community Guidelines pages (public/terms.html, privacy.html, guidelines.html) */
+:root { color-scheme: dark; --bg: #14121f; --card: #1d1a2c; --border: #2e2a44; --text: #ece9f6; --text-2: #b7b1cc; --accent: #a78bfa; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.legal-top { position: sticky; top: 0; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 14px 24px; background: rgb(20 18 31 / .92); border-bottom: 1px solid var(--border); backdrop-filter: blur(8px); }
+.legal-top .brand { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 800; font-size: 18px; text-decoration: none; margin-right: auto; }
+.legal-top .brand img { width: 28px; height: 28px; border-radius: 8px; }
+.legal-top nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.legal-top nav a { padding: 6px 12px; border-radius: 10px; color: var(--text-2); text-decoration: none; font-weight: 600; font-size: 14px; }
+.legal-top nav a:hover { background: var(--card); color: var(--text); }
+.legal-top nav a[aria-current="page"] { background: var(--card); color: var(--text); }
+main { max-width: 760px; margin: 0 auto; padding: 36px 20px 80px; }
+h1 { font-size: 34px; line-height: 1.2; margin: 0 0 6px; }
+.updated { color: var(--text-2); margin: 0 0 28px; font-size: 14px; }
+h2 { font-size: 21px; margin: 36px 0 8px; }
+h3 { font-size: 17px; margin: 22px 0 6px; }
+p, li { color: var(--text-2); }
+strong { color: var(--text); }
+ul { padding-left: 22px; }
+li { margin: 4px 0; }
+.summary { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 6px 22px; margin: 0 0 8px; }
+footer { max-width: 760px; margin: 0 auto; padding: 0 20px 40px; color: var(--text-2); font-size: 14px; }

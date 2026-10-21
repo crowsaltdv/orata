@@ -234,7 +234,8 @@ export function SettingsHost() {
     <nav class="settings-nav panel">
       <div class="sn-scroll">${NAV.map((g) => html`<div class="sn-group" key=${g.group}><h5>${t(g.group)}</h5>${g.items.map(([k, ic, l]) => html`<button type="button" class=${cx('sn-item', shown === k && 'on')} onClick=${() => openSettings(k)}><${Icon} name=${ic} size=${18} /><span>${t(l)}</span></button>`)}</div>`)}
         <div class="sn-group"><button type="button" class="sn-item danger" onClick=${async () => { if (await confirmDialog({ title: 'Log out', body: 'Are you sure you want to log out?', confirmLabel: 'Log Out', danger: true })) { closeSettings(); logout(); } }}><${Icon} name="log-out" size=${18} /><span>${t('Log Out')}</span></button></div>
-        <div class="sn-foot"><${Logo} size=${22} /> Orata 1.0</div></div>
+        <div class="sn-foot"><${Logo} size=${22} /> Orata 1.0</div>
+        <div class="sn-legal"><a href="/terms" target="_blank" rel="noopener">${t('Terms')}</a> · <a href="/privacy" target="_blank" rel="noopener">${t('Privacy')}</a> · <a href="/guidelines" target="_blank" rel="noopener">${t('Guidelines')}</a></div></div>
     </nav>
     <section class="settings-body panel">
       <header class="sb-title"><h2 key=${shown}>${t(label)}</h2><button type="button" class="settings-close" onClick=${closeSettings} aria-label="Close settings"><span><${Icon} name="x" size=${20} /></span><small>ESC</small></button></header>

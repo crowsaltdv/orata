@@ -80,7 +80,7 @@ async function api(method, url, token, body, headers = {}) {
   let j = null; try { j = await res.json(); } catch { /* no body */ }
   return { status: res.status, body: j };
 }
-const register = async (username) => (await api('POST', '/auth/register', null, { username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } })).body;
+const register = async (username) => (await api('POST', '/auth/register', null, { agree: true, username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } })).body;
 const hookPosts = () => calls.filter((c) => c.method === 'POST' && c.path === `/api/webhooks/wh1/${HOOK_TOKEN}`);
 const said = (c) => (typeof c.body === 'string' ? JSON.parse(/name="payload_json"\r\n(?:Content-Type: [^\r]*\r\n)?\r\n([^\r]*)/.exec(c.body)?.[1] || '{}') : c.body);
 const interaction = (extra) => ({ id: snow(), token: 'itok', application_id: '900', type: 2, guild_id: '4001', channel_id: '2001', channel: { id: '2001', type: 0, name: 'general' }, member: { permissions: '32', user: { id: '1007', username: 'admin7', global_name: 'Ada' } }, ...extra });

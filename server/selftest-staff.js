@@ -31,7 +31,7 @@ async function api(method, url, token, body, headers = {}) {
 }
 let ip = 10;   // each sign-up from its own address: sign-ups are limited per address
 const register = async (username, extra = {}) => {
-  const r = await api('POST', '/auth/register', null, { username, displayName: extra.displayName || username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, { 'x-forwarded-for': `198.51.100.${ip++}` });
+  const r = await api('POST', '/auth/register', null, { agree: true, username, displayName: extra.displayName || username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, { 'x-forwarded-for': `198.51.100.${ip++}` });
   return { token: r.body?.token, user: r.body?.user, res: r };
 };
 const msgs = async (tok, chId) => (await api('GET', `/channels/${chId}/messages?limit=50`, tok)).body?.messages || [];
@@ -171,6 +171,21 @@ async function main() {
   r = await api('GET', `/servers/${S.id}/audit-log`, A.token); ok(r.body.entries.some((e) => e.action === 'orbit_command' && e.actorId === A.user.id && e.details?.command === 'say'), 'it’s in the audit log too');
   await api('DELETE', `/staff/servers/${S.id}/ghost`, Y.token);
   r = await api('GET', `/channels/${text.id}/messages`, Y.token); ok(r.status === 404, 'leaving ghost mode closes the server again');
+
+  console.log('\nDMs, and agreeing to the rules');
+  const flaggedDm = (await api('POST', '/dms', B.token, { recipientId: E.user.id })).body;
+  await api('POST', `/channels/${flaggedDm.id}/messages`, B.token, { content: 'hey erin' });
+  const bait = (await api('POST', `/channels/${flaggedDm.id}/messages`, B.token, { content: 'free nitro here: discord-gift.xyz/claim' })).body;
+  r = await api('GET', `/channels/${flaggedDm.id}/messages`, Y.token); ok(r.status === 404, 'staff can’t open a DM by itself');
+  r = await api('GET', '/staff/flags', Y.token); const dmFlag = r.body.flags.find((f) => f.messageId === bait.id);
+  ok(dmFlag?.reason === 'scam' && dmFlag.where === 'a DM', 'Orata flags a scam link in a DM too');
+  r = await api('GET', `/staff/flags/${dmFlag?.id}/conversation`, B.token); ok(r.status === 403, 'only staff can read a flagged DM');
+  r = await api('GET', `/staff/flags/${dmFlag?.id}/conversation`, Y.token);
+  ok(r.status === 200 && r.body.flagged === bait.id && r.body.messages.some((m) => m.content === 'hey erin'), 'staff can read the DM around a flagged message');
+  r = await api('GET', '/staff/log', Y.token); ok(r.body.log.some((e) => e.action === 'view_dm' && e.target === B.user.id), '… and that goes in the staff log');
+  r = await api('POST', '/auth/register', null, { username: 'nodeal', displayName: 'No', password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, { 'x-forwarded-for': '198.51.100.250' });
+  ok(r.status === 400 && r.body.code === 'agree', 'signing up needs agreeing to the Terms, Privacy Policy and Community Guidelines');
+  for (const p of ['terms', 'privacy', 'guidelines']) { const res = await fetch(`${base}/${p}`); const body = await res.text(); ok(res.ok && /<h1>/.test(body) && !/id="app"/.test(body), `/${p} is its own page`); }
 
   await stopServer();
   console.log(`\n${pass} passed, ${fail} failed`);
