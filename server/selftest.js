@@ -12,7 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-test-'));
 const PORT = 3900 + Math.floor(Math.random() * 90);
 const base = `http://127.0.0.1:${PORT}`;
-const child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], { env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', TURN_URLS: 'turn:turn.test:3478,turns:turn.test:5349', TURN_SECRET: 'test-secret', TURN_TTL: '600' }, stdio: ['ignore', 'pipe', 'inherit'] });
+const child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], { env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', TURN_URLS: 'turn:turn.test:3478,turns:turn.test:5349', TURN_SECRET: 'test-secret', TURN_TTL: '600' }, stdio: ['ignore', 'pipe', 'inherit'] });
 let pass = 0; let fail = 0;
 const ok = (c, name, extra = '') => { if (c) { pass++; console.log('  ✓', name); } else { fail++; console.log('  ✗', name, extra); } };
 

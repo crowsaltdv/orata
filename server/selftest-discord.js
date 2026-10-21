@@ -38,6 +38,7 @@ const fake = http.createServer((req, res) => {
     if (p === `/webhooks/wh1/${HOOK_TOKEN}` && req.method === 'POST') { const id = snow(); calls[calls.length - 1].id = id; return json({ id }); }
     if (p.startsWith(`/webhooks/wh1/${HOOK_TOKEN}`)) { res.writeHead(204); return res.end(); }
     if (/^\/interactions\//.test(p)) { res.writeHead(204); return res.end(); }
+    if (p === '/channels/2003/messages') return json({ message: 'Missing Access' }, 403);   // a channel the bot can't read
     if (p === '/channels/2001/messages') { const after = BigInt(u.searchParams.get('after') || 0); return json(backlog.filter((m) => BigInt(m.id) > after).reverse()); }   // newest first, like Discord
     json({ message: 'Unknown' }, 404);
   });
@@ -107,8 +108,11 @@ async function main() {
   ok(cb?.body.data.content.includes('Manage Server') && cb.body.data.flags === 64, 'on Discord, only someone who can manage the server can link (told privately)');
   dispatch('INTERACTION_CREATE', interaction({ data: { name: 'orata-link', options: [{ name: 'code', value: 'ZZZZ-ZZZZ' }] } }));
   cb = await until(() => callbacks()[1]); ok(cb?.body.data.content.includes('isn’t valid'), 'a wrong code is refused');
-  dispatch('INTERACTION_CREATE', interaction({ data: { name: 'orata-link', options: [{ name: 'code', value: code.toLowerCase() } ] } }));
+  dispatch('INTERACTION_CREATE', interaction({ channel_id: '2003', channel: { id: '2003', type: 0, name: 'secret' }, data: { name: 'orata-link', options: [{ name: 'code', value: code } ] } }));
   cb = await until(() => callbacks()[2]);
+  ok(cb?.body.data.content.includes('Read Message History') && !calls.some((c) => c.path === '/api/channels/2003/webhooks'), 'a channel the bot can’t read isn’t linked (it says which permissions it needs)');
+  dispatch('INTERACTION_CREATE', interaction({ data: { name: 'orata-link', options: [{ name: 'code', value: code.toLowerCase() } ] } }));
+  cb = await until(() => callbacks()[3]);
   ok(cb?.body.data.content.includes('Linked with **#') && calls.some((c) => c.path === '/api/channels/2001/webhooks'), 'the right code links the channels (and makes a webhook to post with)');
   const notice = await until(async () => (await msgs()).find((m) => m.authorId === S.orbitId && /now linked/.test(m.content)));
   ok(notice?.content.includes('#general') && notice.content.includes('Fake Guild'), 'Orbit says so in the Orata channel');

@@ -39,7 +39,7 @@ let nextPort = 3700 + Math.floor(Math.random() * 90);
 function startServer(extraEnv = {}, { withDb = true, dataDir } = {}) {
   const port = nextPort++;
   const data = dataDir || tmp('orate-pg-test-');
-  const env = { ...process.env, PORT: String(port), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', PUBLIC_URL: '', DATABASE_URL: withDb ? DATABASE_URL : '', DATABASE_SAVE_DELAY_MS: '150', DATABASE_POOL_MAX: '3', ...extraEnv };
+  const env = { ...process.env, PORT: String(port), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', PUBLIC_URL: '', DATABASE_URL: withDb ? DATABASE_URL : '', DATABASE_SAVE_DELAY_MS: '150', DATABASE_POOL_MAX: '3', ...extraEnv };
   const child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   const srv = { child, data, port, out: '', base: `http://127.0.0.1:${port}`, exited: null };
   child.stdout.on('data', (d) => { srv.out += d; }); child.stderr.on('data', (d) => { srv.out += d; });

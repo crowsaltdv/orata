@@ -165,6 +165,8 @@ async function onCommand(i) {
   const ch = db.channels[c.channelId]; const s = ch && db.servers[ch.serverId];
   if (!ch || !orbitOf(s)) { codes.delete(code); return reply('That Orata channel is gone, or Orbit was removed from its server.'); }
   if (links()[ch.id]) { codes.delete(code); return reply('That Orata channel is already linked with another Discord channel.'); }
+  try { await rest('GET', `/channels/${i.channel_id}/messages?limit=1`); }   // Discord only sends a bot the messages of channels it can read
+  catch (e) { return reply(e.status === 403 ? 'I can’t read this channel. Give me (my role) **View Channel** and **Read Message History** here, then run the command again.' : 'Discord didn’t let me set up the link. Try again in a moment.'); }
   let hook;
   try { hook = await rest('POST', `/channels/${i.channel_id}/webhooks`, { name: 'Orata' }); }
   catch (e) { return reply(e.status === 403 ? 'I need the **Manage Webhooks** permission in this channel. Give it to me, then run the command again.' : 'Discord didn’t let me set up the link. Try again in a moment.'); }

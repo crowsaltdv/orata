@@ -25,7 +25,7 @@ let child = null;
 function startServer(extra = {}) {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     // the ban tests make many accounts on one browser, so the per-browser account limits are raised except where they are tested
-    env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '', TRUST_PROXY: '1', ACCOUNTS_PER_BROWSER: '1000', ACCOUNTS_PER_HOUR: '1000', ...extra },
+    env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '', TRUST_PROXY: '1', ACCOUNTS_PER_BROWSER: '1000', ACCOUNTS_PER_HOUR: '1000', ...extra },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
 }

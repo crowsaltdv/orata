@@ -212,7 +212,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
   const htmlContent = m.content ? renderMarkdown(m.content, { serverId: ch.serverId, emojis: m.emojis }) : '';
   const links = m.content && !m.pending ? [...new Set((m.content.replace(/```[\s\S]*?```|`[^`]*`/g, '').match(URL_RE) || []).map((u) => u.replace(/[.,;:!?)]+$/, '')))] : [];
   const invites = [...new Set(links.map(inviteCodeOf).filter(Boolean))].slice(0, 2);   // invite links become join cards, whatever the link-preview setting says
-  const urls = showEmbeds ? links.filter((u) => !inviteCodeOf(u)).slice(0, 2) : [];
+  const urls = showEmbeds && !m.ephemeral ? links.filter((u) => !inviteCodeOf(u)).slice(0, 2) : [];   // Orbit's private replies stay compact
   const onImage = (a) => { const imgs = (m.attachments || []).filter((x) => isImageType(x.type)).map((x) => ({ url: x.url, name: x.name })); const i = imgs.findIndex((x) => x.url === a.url); set({ lightbox: { items: i >= 0 ? imgs : [a], index: Math.max(0, i) } }); };
   const b = m.bridge;   // from a linked Discord channel: shown as the Discord sender, not as Orbit who posted it
   const who = b ? discordUser(b) : author;

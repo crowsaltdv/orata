@@ -58,7 +58,7 @@ const mailsTo = (smtp, addr) => smtp.mails.filter((m) => m.to[0] === addr);
 /* ---------------------------------------------------------------- scratch servers */
 function startServer(port, extraEnv) {
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-mail-test-'));
-  const env = { ...process.env, PORT: String(port), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', PUBLIC_URL: '', DATABASE_URL: '', ...extraEnv };
+  const env = { ...process.env, PORT: String(port), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', PUBLIC_URL: '', DATABASE_URL: '', ...extraEnv };
   const child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], { env, stdio: ['ignore', 'pipe', 'inherit'] });
   const srv = { child, out: '', base: `http://127.0.0.1:${port}`, port };
   child.stdout.on('data', (d) => { srv.out += d.toString(); });

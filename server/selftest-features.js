@@ -54,7 +54,7 @@ const fakeItunes = http.createServer((req, res) => {
 let child = null;
 function startServer(extra = {}) {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
-    env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '',
+    env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '',
       MUSIC: '', MUSIC_API_BASE: `http://127.0.0.1:${AP_PORT}`, MUSIC_MEDIA_HOSTS: '127.0.0.1', ...extra },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
