@@ -600,6 +600,21 @@ async function main() {
   r = await api('PUT', `/servers/${VYS.id}/vanity`, VY.token, { code: 'y-guild' }); ok(r.status === 403 && r.body.code === 'vanity_limit' && r.body.error.includes('X Guild'), '… but another account on the same browser counts as the same person');
   r = await api('GET', `/servers/${BG.id}/audit-log?action=vanity_`, A.token); ok(r.body.entries.length === 2 && r.body.entries[0].details.old === 'bot-guild', 'changes are in the audit log');
 
+  /* ---------------------------------------------------------------- server tags */
+  console.log('\nServer tags');
+  r = await api('PUT', `/servers/${BG.id}/tag`, PL.token, { text: 'BOT', icon: 'bolt', color: '#ff0000' }); ok(r.status === 403, 'only admins can set the server tag (Manage Server isn’t enough)');
+  r = await api('PUT', `/servers/${BG.id}/tag`, A.token, { text: 'TOOLONG', icon: 'bolt', color: '#ff0000' }); ok(r.status === 400, 'a tag is at most 5 characters');
+  r = await api('PUT', `/servers/${BG.id}/tag`, A.token, { text: 'B-T', icon: 'bolt', color: '#ff0000' }); ok(r.status === 400, '… of letters and numbers only');
+  r = await api('PUT', `/servers/${BG.id}/tag`, A.token, { text: 'BOT1', icon: 'bolt', color: '#FF0000' }); ok(r.status === 200 && r.body.text === 'BOT1' && r.body.icon === 'bolt' && r.body.color === '#ff0000', 'an admin sets the tag with an icon and a color');
+  r = await api('PUT', `/servers/${BG.id}/tag`, A.token, { text: 'BOT2', icon: 'bolt', color: '#ff0000' }); ok(r.status === 429 && r.body.code === 'tag_wait' && /6 days/.test(r.body.error), 'it can only be changed once a week');
+  r = await api('PATCH', '/me', PL.token, { tagServer: BG.id }); ok(r.status === 200 && r.body.tagServer === BG.id, 'a member wears the server’s tag');
+  r = await api('GET', `/users/${PL.user.id}`, MB.token); ok(r.body.user.tag?.text === 'BOT1' && r.body.user.tag.icon === 'bolt' && r.body.user.tag.server === 'Bot Guild', '… and everyone sees it next to their name');
+  r = await api('PATCH', '/me', CO.token, { tagServer: BG.id }); ok(r.status === 400, 'only members can wear a server’s tag');
+  r = await api('PATCH', '/me', A.token, { tagServer: CG.id }); ok(r.status === 400, '… and only a server that has one');
+  await api('PATCH', '/me', MB.token, { tagServer: BG.id }); await api('POST', `/servers/${BG.id}/leave`, MB.token);
+  r = await api('GET', `/users/${MB.user.id}`, PL.token); ok(!r.body.user.tag, 'leaving the server takes the tag off');
+  r = await api('PATCH', '/me', PL.token, { tagServer: null }); ok(r.status === 200 && !r.body.tag, 'it can be taken off');
+
   /* ---------------------------------------------------------------- accounts per browser */
   console.log('\nAccounts per browser');
   await stopServer(); startServer({ ACCOUNTS_PER_BROWSER: '', ACCOUNTS_PER_HOUR: '' }); await ready();   // the real limits: 3 and 3

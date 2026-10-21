@@ -141,7 +141,7 @@ async function main() {
 
   console.log('\nSettings & profile');
   r = await api('PATCH', '/me', A, { displayName: 'Alice ✨', bio: 'hi', status: 'dnd', customStatus: { emoji: '🎧', text: 'coding' }, tag: { text: 'orat' } });
-  ok(r.body.displayName === 'Alice ✨' && r.body.customStatus.text === 'coding' && !('tag' in r.body), 'update profile (tags are gone)');
+  ok(r.body.displayName === 'Alice ✨' && r.body.customStatus.text === 'coding' && !r.body.tag, 'update profile (you can’t set your own tag)');
   r = await api('PATCH', '/me/settings', A, { theme: { accent: '#ff00aa' } });
   ok(r.body.theme.accent === '#ff00aa', 'sync settings');
   r = await api('POST', '/me/password', A, { current: 'hunter2hunter2', password: 'new-password-123' });

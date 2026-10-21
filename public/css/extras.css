@@ -439,3 +439,13 @@ html[data-mode="light"] .pc-badges { background: rgb(0 0 0 / .06); }
 .vanity-row { display: flex; align-items: center; gap: 0; } .vanity-row .btn { margin-left: 10px; }
 .vanity-prefix { height: 40px; display: inline-flex; align-items: center; padding: 0 4px 0 12px; border-radius: var(--radius-sm) 0 0 var(--radius-sm); background: var(--input-bg); color: var(--text-3); font-size: 14px; white-space: nowrap; }
 .vanity-input { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding-left: 2px; flex: 1; min-width: 120px; }
+
+/* ------------------------------------------------ server tags (server-tag.js) */
+.srv-tag { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 1px 6px 1px 5px; border-radius: 6px; font-size: 11px; font-weight: 800; letter-spacing: .03em; line-height: 16px; vertical-align: middle; color: var(--text); background: color-mix(in srgb, var(--tc) 22%, transparent); border: 1px solid color-mix(in srgb, var(--tc) 45%, transparent); white-space: nowrap; flex: none; }
+.srv-tag .icon { color: var(--tc); }
+.stag-edit { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .stag-edit .stag-text { width: 120px; flex: none; } .stag-edit .stag-text input, .stag-edit input.stag-text { text-transform: none; letter-spacing: .04em; font-weight: 700; }
+.stag-preview { min-width: 70px; } .stag-preview .srv-tag { margin-left: 0; font-size: 13px; padding: 3px 9px 3px 7px; }
+.stag-icons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.stag-ic { width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--input-bg); color: var(--text-3); border: 1.5px solid transparent; transition: all var(--t-fast); }
+.stag-ic:hover:not(:disabled) { color: var(--text); } .stag-ic.on { color: var(--tc); border-color: var(--tc); background: color-mix(in srgb, var(--tc) 16%, transparent); } .stag-ic:disabled { opacity: .5; }
+.stag-pick { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

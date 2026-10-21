@@ -16,6 +16,7 @@ import { ThemeCard } from '/js/theme-card.js';
 import { useFavGifs, toggleFavGif, gifFromMessage } from '/js/gif-favs.js';
 import { dismissEphemeral } from '/js/orbit.js';
 import '/js/forward.js';   // the Forward dialog
+import { ServerTag } from '/js/server-tag.js';
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -233,7 +234,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
     <div class="msg-main">
       <div class="msg-gutter">${head ? (state.settings.chat.showAvatars ? html`<${Avatar} user=${author} size=${40} onClick=${open} onContextMenu=${(e) => openContext(e, [{ label: 'Profile', icon: 'user', onClick: () => openProfile(m.authorId) }, { label: 'Message', icon: 'message', onClick: () => import('/js/actions.js').then((a) => a.openDm(m.authorId)), disabled: m.authorId === me }])} />` : null) : html`<time class="msg-time hover-time">${formatClock(m.createdAt, hour12)}</time>`}</div>
       <div class="msg-body">
-        ${head ? html`<div class="msg-head"><span class="msg-author" style=${color ? { color } : null} role="button" tabindex="0" onClick=${open}><${UserName} user=${author} text=${name} /></span>${author?.bot ? html`<span class="bot-tag">APP</span>` : null}${timeEl}</div>` : null}
+        ${head ? html`<div class="msg-head"><span class="msg-author" style=${color ? { color } : null} role="button" tabindex="0" onClick=${open}><${UserName} user=${author} text=${name} /></span>${author?.tag ? html`<${ServerTag} tag=${author.tag} />` : null}${author?.bot ? html`<span class="bot-tag">APP</span>` : null}${timeEl}</div>` : null}
         ${editing ? html`<${InlineEditor} m=${m} ch=${ch} onDone=${() => set({ editing: null })} />`
           : htmlContent ? html`<div class=${cx('msg-content', jumbo && 'jumbo')} onClick=${(e) => onBodyClick(e, ch)} dangerouslySetInnerHTML=${{ __html: htmlContent }}></div>` : null}
         ${m.editedAt && !editing ? html`<span class="edited" data-tip=${formatFull(m.editedAt)}>(${t('edited')})</span>` : null}

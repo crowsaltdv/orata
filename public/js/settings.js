@@ -10,6 +10,7 @@ import { chooseAndUploadImage, uploadGifFrom } from '/js/imageutil.js';
 import { openPicker } from '/js/pickers.js';
 import { ProfileCard, Banner } from '/js/profile.js';
 import { ProfileStyleEditor } from '/js/profile-style.js';
+import { ServerTag } from '/js/server-tag.js';
 import { CloakPage } from '/js/cloak.js';
 import { ThemePage, WallpaperPage, EffectsPage, FontsPage, ChatPage, SToggle, SSlider } from '/js/settings-appearance.js';
 import { VoicePage } from '/js/settings-voice.js';
@@ -71,7 +72,7 @@ function AccountPage() {
 /* ------------------------------------------------------------------ profile */
 function ProfilePage() {
   const me = useSel((s) => s.me);
-  const orig = { displayName: me.displayName, pronouns: me.pronouns || '', bio: me.bio || '', avatar: me.avatar, banner: me.banner, bannerColor: me.bannerColor || '#6d28d9', accentColor: me.accentColor || null, profile: me.profile || null };
+  const orig = { displayName: me.displayName, pronouns: me.pronouns || '', bio: me.bio || '', avatar: me.avatar, banner: me.banner, bannerColor: me.bannerColor || '#6d28d9', accentColor: me.accentColor || null, profile: me.profile || null, tagServer: me.tagServer || '' };
   const [d, setD] = useState(orig); const [busy, setBusy] = useState(false); const [up, setUp] = useState(null);
   const dirty = JSON.stringify(d) !== JSON.stringify(orig);
   const up1 = (k, v) => setD((p) => ({ ...p, [k]: v }));
@@ -92,8 +93,10 @@ function ProfilePage() {
     },
   }, { gifOnly: true, tab: 'gif', placement: 'bottom-start' });
   const changeProfile = (fn) => setD((p) => ({ ...p, profile: fn(p.profile || null) }));
-  const save = async () => { setBusy(true); const r = await act(api.patch('/me', { displayName: d.displayName.trim() || me.displayName, pronouns: d.pronouns, bio: d.bio, avatar: d.avatar, banner: d.banner, bannerColor: d.bannerColor, accentColor: d.accentColor, profile: d.profile }), { success: 'Profile saved' }); setBusy(false); if (r) set({}); };
-  const preview = { ...me, ...d };
+  const save = async () => { setBusy(true); const r = await act(api.patch('/me', { displayName: d.displayName.trim() || me.displayName, pronouns: d.pronouns, bio: d.bio, avatar: d.avatar, banner: d.banner, bannerColor: d.bannerColor, accentColor: d.accentColor, profile: d.profile, tagServer: d.tagServer || null }), { success: 'Profile saved' }); setBusy(false); if (r) set({}); };
+  const tagged = Object.values(state.servers).filter((s) => s.tag);   // servers whose tag I could wear
+  const wear = d.tagServer && state.servers[d.tagServer]?.tag ? { ...state.servers[d.tagServer].tag, server: state.servers[d.tagServer].name } : null;
+  const preview = { ...me, ...d, tag: wear };
   useSaveBar(dirty, { save, reset: () => setD(orig), busy });
   return html`<div class="s-page profile-edit">
     <div class="pe-form">
@@ -101,6 +104,10 @@ function ProfilePage() {
         <${Field} label=${t('Display name')}><${TextInput} value=${d.displayName} onInput=${(v) => up1('displayName', v)} maxlength="32" /><//>
         <${Field} label=${t('Pronouns')}><${TextInput} value=${d.pronouns} onInput=${(v) => up1('pronouns', v)} maxlength="40" placeholder="they/them" /><//>
         <${Field} label=${t('About me')} hint=${`${d.bio.length}/400 — ${t('supports markdown')}`}><textarea class="textarea" rows="4" maxlength="400" value=${d.bio} onInput=${(e) => up1('bio', e.target.value)} placeholder=${t('Tell everyone a little about yourself')}></textarea><//>
+      <//>
+      <${Section} title=${t('Server tag')} desc=${t('Wear one of your servers’ tags next to your name everywhere.')}>
+        ${tagged.length ? html`<div class="stag-pick"><${Dropdown} width=${280} value=${d.tagServer} options=${[{ value: '', label: t('None') }, ...tagged.map((s) => ({ value: s.id, label: `${s.tag.text} · ${s.name}` }))]} onChange=${(v) => up1('tagServer', v)} />${wear ? html`<${ServerTag} tag=${wear} />` : null}</div>`
+          : html`<p class="text-muted" style="font-size:13px;margin:0">${t('None of your servers has a tag yet. Admins can set one in Server Settings → Overview.')}</p>`}
       <//>
       <${Section} title=${t('Avatar')}>
         <div class="pe-media"><${Avatar} user=${preview} size=${72} /><div class="pe-btns"><${Btn} variant="primary" loading=${up === 'avatar'} icon="upload" onClick=${() => img('avatar', { aspect: 1, out: 256, round: true, title: 'Avatar', allowGif: true })}>${t('Change Avatar')}<//>${state.gifOk !== false ? html`<${Btn} icon="sticker" disabled=${up === 'avatar'} onClick=${(e) => gifAvatar(e.currentTarget)}>${t('Choose a GIF')}<//>` : null}${d.avatar ? html`<${Btn} variant="ghost" onClick=${() => up1('avatar', null)}>${t('Remove')}<//>` : html`<${Btn} icon="refresh" onClick=${() => act(api.patch('/me', { avatarBg: 'random' }))}>${t('Shuffle color')}<//>`}</div></div>

@@ -382,7 +382,11 @@ export function createApi() {
     if (b.displayName !== undefined) u.displayName = str(b.displayName, 1, 32, 'Display name');
     if (b.bio !== undefined) u.bio = String(b.bio).slice(0, 400);
     if (b.pronouns !== undefined) u.pronouns = String(b.pronouns).slice(0, 40);
-    if (b.avatarBg === 'random') u.avatarBg = randomAvatarBg();   // "shuffle" in Profile settings
+    if (b.avatarBg === 'random') u.avatarBg = randomAvatarBg();
+    if (b.tagServer !== undefined) {   // the server tag worn next to your name: one server you're in that has a tag (null = none)
+      if (b.tagServer === null || b.tagServer === '') delete u.tagServer;
+      else { const t = db.servers[String(b.tagServer)]; if (!t?.members[u.id] || !t.tag) throw bad('That server has no tag you can wear'); u.tagServer = t.id; }
+    }   // "shuffle" in Profile settings
     if (b.profile !== undefined) {   // colours, outline, fonts, effect and frames of the profile card (see public/js/profile-data.js)
       if (b.profile !== null && (typeof b.profile !== 'object' || JSON.stringify(b.profile).length > 4000)) throw bad('That profile style is invalid');
       u.profile = sanitizeProfileStyle(b.profile) || undefined;
@@ -931,6 +935,25 @@ export function createApi() {
     audit(s, req.user.id, 'vanity_update', { code, old: s.vanity?.code || null });
     s.vanity = { code, changedAt: Date.now(), by: req.user.id };
     save(); pushServerUpdate(s); res.json(s.vanity);
+  }));
+
+  /* ---- a server's tag: 1–5 letters or numbers with an icon and a color, worn by members next to their name; set by admins, changeable once a week ---- */
+  const TAG = /^[A-Za-z0-9]{1,5}$/; const TAG_ICON = /^[a-z0-9-]{1,24}$/; const TAG_WAIT = 7 * 86400_000;
+  r.put('/servers/:id/tag', h(async (req, res) => {
+    const s = getServer(req, req.params.id); need(s, req.user.id, 'ADMINISTRATOR');
+    const b = req.body || {}; const text = String(b.text || '').trim();
+    if (!TAG.test(text)) throw bad('A server tag is 1–5 letters or numbers', 'text');
+    if (!TAG_ICON.test(String(b.icon || ''))) throw bad('Pick an icon for the tag');
+    if (!HEX.test(String(b.color || ''))) throw bad('Pick a color for the tag');
+    const next = { text, icon: b.icon, color: b.color.toLowerCase() };
+    if (s.tag && next.text === s.tag.text && next.icon === s.tag.icon && next.color === s.tag.color) return res.json(s.tag);
+    const left = (s.tag?.changedAt || 0) + TAG_WAIT - Date.now();
+    if (left > 0) throw new ApiError(429, `The server tag can be changed once a week. Try again in ${formatDuration(left)}.`, 'tag_wait');
+    audit(s, req.user.id, 'tag_update', { text, old: s.tag?.text || null });
+    s.tag = { ...next, changedAt: Date.now(), by: req.user.id };
+    save(); pushServerUpdate(s);
+    for (const u of Object.values(db.users)) if (u.tagServer === s.id && s.members[u.id]) emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) });   // everyone wearing it shows the new one
+    res.json(s.tag);
   }));
 
   /* ---- custom emoji & stickers (a server's "expressions") ---- */

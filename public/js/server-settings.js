@@ -16,6 +16,7 @@ import '/js/orbit.js';   // Orbit's settings dialog
 import { OnboardingPage } from '/js/onboarding.js';
 import { AuditLog } from '/js/audit-log.js';
 import { formatDuration } from '/js/orbit-commands.js';
+import { ServerTagSection } from '/js/server-tag.js';
 
 export function openServerSettings(id, page = 'overview') { set({ serverSettings: { id, page }, ctx: null, popover: null }); }
 const close = () => set({ serverSettings: null });
@@ -53,6 +54,7 @@ function Overview({ server }) {
     <${Section} title=${t('System messages')}>
       <${SettingRow} title=${t('Join messages channel')} desc=${t('Where “member joined” notices appear.')}><${Dropdown} width=${200} value=${d.systemChannelId} options=${texts.map((c) => ({ value: c.id, label: '# ' + c.name }))} onChange=${(v) => setD({ ...d, systemChannelId: v })} /><//>
     <//>
+    <${ServerTagSection} server=${server} />
     ${can ? html`<${Section} title=${t('Orbit')} desc=${t('This server’s helper bot. It answers slash commands like /help, /remind and /kick here.')}>
       <div class="btn-row">${server.orbitId ? html`<${Btn} icon="settings" onClick=${() => openModal('orbit-settings', { serverId: server.id })}>${t('Orbit settings')}<//><${Btn} variant="ghost" onClick=${() => act(api.del(`/servers/${server.id}/orbit`), { success: t('Orbit left the server') })}>${t('Remove Orbit')}<//>`
         : html`<${Btn} variant="primary" icon="plus" onClick=${() => act(api.put(`/servers/${server.id}/orbit`), { success: t('Orbit joined the server') })}>${t('Add Orbit')}<//>`}</div>

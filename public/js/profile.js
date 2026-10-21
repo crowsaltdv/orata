@@ -10,6 +10,7 @@ import { t } from '/js/i18n.js';
 import { ListeningCard, myListening } from '/js/music.js';
 import { cardLook, CardDecor, NameText, useProfileFonts } from '/js/profile-style.js';
 import { Badges, isDev } from '/js/badges.js';
+import { ServerTag } from '/js/server-tag.js';
 
 const cache = new Map();
 function useProfile(userId) {
@@ -98,7 +99,7 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
       <${Avatar} user=${user} size=${mode === 'panel' ? 96 : 80} status=${user.status} class="pc-avatar" />
     </div>
     <div class="pc-body">
-      <div class="pc-name"><${NameText} text=${nick || user.displayName} profile=${user.profile} />${user.bot ? html`<span class="bot-tag">APP</span>` : null}<${Badges} user=${user} /></div>
+      <div class="pc-name"><${NameText} text=${nick || user.displayName} profile=${user.profile} />${user.bot ? html`<span class="bot-tag">APP</span>` : null}${user.tag ? html`<${ServerTag} tag=${user.tag} />` : null}<${Badges} user=${user} /></div>
       <div class="pc-user">${user.username}${user.pronouns ? html`<i> • ${user.pronouns}</i>` : null}</div>
       ${cs ? html`<div class="pc-status"><span>${cs.emoji}</span>${cs.text}</div>` : null}
       ${listening ? html`<${ListeningCard} listening=${listening} />` : null}

@@ -170,7 +170,7 @@ export const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 /* indexes (rebuilt on load) */
 export const byUsername = new Map();
 export const byEmail = new Map();
-for (const u of Object.values(db.users)) { if (!u.serverBot) byUsername.set(u.username, u.id); if (u.email) byEmail.set(u.email, u.id); delete u.tag; delete u.decoration; }   // tags and avatar decorations no longer exist
+for (const u of Object.values(db.users)) { if (!u.serverBot) byUsername.set(u.username, u.id); if (u.email) byEmail.set(u.email, u.id); delete u.tag; delete u.decoration; }   // personal tags (server tags replaced them) and avatar decorations no longer exist
 export const inviteCodes = db.invites;
 
 /* ------------------------------------------------------------- errors */
@@ -382,6 +382,8 @@ export function visibleListening(u) {
   if (!l || l.endsAt < Date.now() || u.status === 'invisible' || u.settings?.privacy?.showActivity === false) return null;
   return l;
 }
+/** The server tag a person wears next to their name (one server they are in that has a tag; see PUT /servers/:id/tag), or null. */
+const wornTag = (u) => { const s = u?.tagServer && db.servers[u.tagServer]; return s?.tag && s.members[u.id] ? { text: s.tag.text, icon: s.tag.icon, color: s.tag.color, serverId: s.id, server: s.name } : null; };
 export function publicUser(u) {
   if (!u) return null;
   return {
@@ -389,11 +391,11 @@ export function publicUser(u) {
     banner: u.banner || null, bannerColor: u.bannerColor || null, accentColor: u.accentColor || null,
     bio: u.bio || '', pronouns: u.pronouns || '', profile: u.profile ? sanitizeProfileStyle(u.profile) : null, avatarBg: u.avatarBg || null, createdAt: u.createdAt,   // (re-checked on the way out so styles saved by older versions, e.g. frames, simply disappear)
     bot: !!u.bot, status: effectiveStatus(u), customStatus: u.customStatus || null, listening: visibleListening(u),
-    badges: (u.badges || []).map((id) => db.badges?.[id]).filter(Boolean),   // whole badges (see badges.js), so a profile can show them without the catalog
+    badges: (u.badges || []).map((id) => db.badges?.[id]).filter(Boolean), tag: wornTag(u),   // whole badges (see badges.js), so a profile can show them without the catalog
   };
 }
 export function selfUser(u) {
-  return { ...publicUser(u), email: u.email, status: u.status || 'online', settings: u.settings || {}, dob: u.dob || null, emailVerified: u.emailVerified !== false };
+  return { ...publicUser(u), tagServer: u.tagServer || null, email: u.email, status: u.status || 'online', settings: u.settings || {}, dob: u.dob || null, emailVerified: u.emailVerified !== false };
 }
 
 export function serverView(server, userId) {
@@ -403,7 +405,7 @@ export function serverView(server, userId) {
     description: server.description || '', ownerId: server.ownerId, coOwners: server.coOwners || [], createdAt: server.createdAt,
     accent: server.accent || null, roles: server.roles, channels: chans,
     orbitId: server.orbitId && server.members[server.orbitId] ? server.orbitId : null, orbitRoles: server.orbit?.roles || {},   // this server's Orbit (server/orbit.js)
-    automod: server.automod || null, onboarding: server.onboarding || null, vanity: server.vanity || null,
+    automod: server.automod || null, onboarding: server.onboarding || null, vanity: server.vanity || null, tag: server.tag || null,
     members: Object.entries(server.members).map(([id, m]) => memberView(id, m)),
     perms: [...permsOf(server, userId)], systemChannelId: server.systemChannelId || null,
     emojis: server.emojis || [], stickers: server.stickers || [],
