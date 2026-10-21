@@ -21,3 +21,6 @@ ul { padding-left: 22px; }
 li { margin: 4px 0; }
 .summary { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 6px 22px; margin: 0 0 8px; }
 footer { max-width: 760px; margin: 0 auto; padding: 0 20px 40px; color: var(--text-2); font-size: 14px; }
+/* shown inside User Settings → Policies (settings.js): settings has its own title and menu */
+.embedded .legal-top, .embedded footer, .embedded h1 { display: none; }
+.embedded main { padding: 22px 26px 40px; }

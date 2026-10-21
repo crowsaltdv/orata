@@ -539,5 +539,6 @@ button.stat-tile { text-align: left; font: inherit; } button.stat-tile:disabled 
 .sdm-msg { display: flex; gap: 10px; padding: 8px; border-radius: 10px; } .sdm-msg.flagged { background: rgb(255 123 147 / .12); box-shadow: inset 3px 0 #ff7b93; }
 .sdm-body { min-width: 0; } .sdm-head { display: flex; align-items: baseline; gap: 8px; } .sdm-head small { color: var(--text-3); font-size: 12px; }
 .sdm-text { word-break: break-word; } .sdm-file { display: block; margin-top: 4px; } .sdm-file img { max-width: 260px; max-height: 200px; border-radius: 8px; }
-.sn-legal { padding: 0 14px 12px; font-size: 12px; color: var(--text-3); } .sn-legal a { color: var(--text-3); } .sn-legal a:hover { color: var(--text); }
+.legal-page { gap: 10px; } .legal-frame { width: 100%; height: calc(100vh - 190px); min-height: 420px; border: 0; border-radius: 16px; background: #14121f; }
+.legal-open { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: 13px; color: var(--text-3); } .legal-open:hover { color: var(--text); }
 .check-row a { color: var(--accent); }

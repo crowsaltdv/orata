@@ -214,12 +214,20 @@ function AdvancedPage() {
 }
 
 /* ------------------------------------------------------------------ shell */
+/** The Terms of Service, Privacy Policy or Community Guidelines (public/*.html), shown right here; inside settings the page's own header is hidden. */
+const legalPage = (path) => function LegalPage() {
+  return html`<div class="s-page legal-page">
+    <iframe class="legal-frame" src=${path} title=${t('Orata policies')} onLoad=${(e) => e.target.contentDocument?.documentElement.classList.add('embedded')}></iframe>
+    <a class="legal-open" href=${path} target="_blank" rel="noopener"><${Icon} name="link" size=${14} />${t('Open in a new tab')}</a>
+  </div>`;
+};
 const NAV = [
   { group: 'User Settings', items: [['account', 'user', 'My Account'], ['profile', 'smile', 'Profile']] },
   { group: 'Appearance', items: [['appearance', 'palette', 'Theme'], ['wallpaper', 'image', 'Wallpaper'], ['effects', 'cloud-rain', 'Rain & Glass'], ['fonts', 'type', 'Fonts'], ['chat', 'message', 'Chat']] },
   { group: 'App Settings', items: [['access', 'eye', 'Accessibility'], ['voice', 'mic', 'Voice & Video'], ['notifications', 'bell', 'Notifications'], ['language', 'globe', 'Language & Time'], ['keybinds', 'keyboard', 'Keybinds'], ['privacy', 'shield', 'Privacy & Safety'], ['cloak', 'monitor', 'Cloak'], ['advanced', 'sliders', 'Advanced']] },
+  { group: 'Policies', items: [['terms', 'file-text', 'Terms of Service'], ['privacy-policy', 'lock', 'Privacy Policy'], ['guidelines', 'heart', 'Community Guidelines']] },
 ];
-const PAGES = { account: AccountPage, profile: ProfilePage, appearance: ThemePage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, cloak: CloakPage, advanced: AdvancedPage };
+const PAGES = { account: AccountPage, profile: ProfilePage, appearance: ThemePage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, cloak: CloakPage, advanced: AdvancedPage, terms: legalPage('/terms'), 'privacy-policy': legalPage('/privacy'), guidelines: legalPage('/guidelines') };
 
 export function SettingsHost() {
   const page = useSel((s) => s.settingsPage);
@@ -234,8 +242,7 @@ export function SettingsHost() {
     <nav class="settings-nav panel">
       <div class="sn-scroll">${NAV.map((g) => html`<div class="sn-group" key=${g.group}><h5>${t(g.group)}</h5>${g.items.map(([k, ic, l]) => html`<button type="button" class=${cx('sn-item', shown === k && 'on')} onClick=${() => openSettings(k)}><${Icon} name=${ic} size=${18} /><span>${t(l)}</span></button>`)}</div>`)}
         <div class="sn-group"><button type="button" class="sn-item danger" onClick=${async () => { if (await confirmDialog({ title: 'Log out', body: 'Are you sure you want to log out?', confirmLabel: 'Log Out', danger: true })) { closeSettings(); logout(); } }}><${Icon} name="log-out" size=${18} /><span>${t('Log Out')}</span></button></div>
-        <div class="sn-foot"><${Logo} size=${22} /> Orata 1.0</div>
-        <div class="sn-legal"><a href="/terms" target="_blank" rel="noopener">${t('Terms')}</a> · <a href="/privacy" target="_blank" rel="noopener">${t('Privacy')}</a> · <a href="/guidelines" target="_blank" rel="noopener">${t('Guidelines')}</a></div></div>
+        <div class="sn-foot"><${Logo} size=${22} /> Orata 1.0</div></div>
     </nav>
     <section class="settings-body panel">
       <header class="sb-title"><h2 key=${shown}>${t(label)}</h2><button type="button" class="settings-close" onClick=${closeSettings} aria-label="Close settings"><span><${Icon} name="x" size=${20} /></span><small>ESC</small></button></header>
