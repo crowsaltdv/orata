@@ -51,7 +51,11 @@ async function rest(method, route, body, files) {
     let res;
     try { res = await fetch(API + route, { method, headers, body: payload, signal: AbortSignal.timeout(20_000) }); }   // one stuck request can't hold up a link
     catch (e) { problem(`${method} ${route.split('/').slice(0, 2).join('/')}: ${e.message}`); throw e; }
-    if (res.status === 429 && tries < 3) { const j = await res.json().catch(() => ({})); await sleep(Math.min(10, Number(j.retry_after) || 1) * 1000); continue; }
+    if (res.status === 429) {   // Discord's own "slow down" says how long to wait; a block of this server's internet address (Cloudflare, common on shared hosts) has no JSON
+      const j = await res.json().catch(() => null);
+      if (!j) { const e = new Error(`Discord is blocking this server’s internet address for a while (Cloudflare 429 on ${method} ${route.split('/').slice(0, 2).join('/')})`); e.status = 429; problem(e.message); throw e; }
+      if (tries < 4) { await sleep(Math.min(60, Number(j.retry_after) || 1) * 1000); continue; }
+    }
     if (!res.ok) { const e = new Error(`Discord said ${res.status} to ${method} ${route.split('?')[0].replace(/\/[\w-]{40,}/g, '/…')}`); e.status = res.status; problem(e.message); throw e; }
     return res.status === 204 ? null : res.json();
   }
@@ -423,14 +427,20 @@ function fromDiscordDelete(discordChannelId, ids) {
   });
 }
 /** After a restart or a nap (Render's free plan sleeps), posts what was said on Discord in the meantime: up to 500 messages per channel. */
-function catchUp() {
+function catchUp(only = null) {
   for (const [chId, l] of Object.entries(links())) {
+    if (only && only !== chId) continue;
     queue(chId, async () => {
-      for (let page = 0; page < 5 && links()[chId] === l; page++) {
-        const list = (await rest('GET', `/channels/${l.channelId}/messages?after=${l.lastSeen}&limit=100`)).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
-        for (const d of list) { if (mirrored(d)) await mirrorIn(chId, l, { ...d, channel_id: l.channelId }); else l.lastSeen = later(d.id, l.lastSeen); }
-        save();
-        if (list.length < 100) break;
+      try {
+        for (let page = 0; page < 5 && links()[chId] === l; page++) {
+          const list = (await rest('GET', `/channels/${l.channelId}/messages?after=${l.lastSeen}&limit=100`)).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+          for (const d of list) { if (mirrored(d)) await mirrorIn(chId, l, { ...d, channel_id: l.channelId }); else l.lastSeen = later(d.id, l.lastSeen); }
+          save();
+          if (list.length < 100) break;
+        }
+      } catch (e) {
+        if (e.status === 429) setTimeout(() => catchUp(chId), 60_000);   // rate limited (right after a restart, often): try this channel again in a minute
+        throw e;
       }
     });
   }

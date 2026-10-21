@@ -23,7 +23,7 @@ async function until(fn, ms = 4000) { const end = Date.now() + ms; for (;;) { co
 
 /* ---------------------------------------------------------------- the fake Discord */
 const calls = [];   // every API call Orata made: { method, path, body (parsed JSON or raw text), type }
-let gw = null; let gseq = 0; let identify = null; let backlog = [];
+let gw = null; let gseq = 0; let identify = null; let backlog = []; let slowDown = false;   // slowDown: answer the next catch-up with Discord's "429, try again shortly\"
 let sf = 1300000000000000000n; const snow = () => String(++sf);   // Discord ids grow with time
 const HOOK_TOKEN = 'h'.repeat(68);
 const fake = http.createServer((req, res) => {
@@ -43,6 +43,7 @@ const fake = http.createServer((req, res) => {
     if (/^\/interactions\//.test(p)) { res.writeHead(204); return res.end(); }
     if (p.startsWith('/webhooks/900/itok/')) return json({});   // filling in a "thinking…" answer
     if (p === '/channels/2003/messages') return json({ message: 'Missing Access' }, 403);   // a channel the bot can't read
+    if (p === '/channels/2001/messages' && slowDown && u.searchParams.has('after')) { slowDown = false; return json({ message: 'You are being rate limited.', retry_after: 0.3, global: false }, 429); }
     if (p === '/channels/2001/messages') { const after = BigInt(u.searchParams.get('after') || 0); return json(backlog.filter((m) => BigInt(m.id) > after).reverse()); }   // newest first, like Discord
     json({ message: 'Unknown' }, 404);
   });
@@ -208,9 +209,9 @@ async function main() {
     { id: snow(), channel_id: '2001', type: 0, content: 'while you slept 1', author: { id: '1001', username: 'dana', global_name: 'Dana' }, mentions: [], attachments: [] },
     { id: snow(), channel_id: '2001', type: 0, content: 'while you slept 2', author: { id: '1001', username: 'dana', global_name: 'Dana' }, mentions: [], attachments: [] },
   ];
-  identify = null; startServer(); await ready(); await until(() => identify);
+  slowDown = true; identify = null; startServer(); await ready(); await until(() => identify);
   const caught = await until(async () => { const l = (await msgs()).filter((m) => /while you slept/.test(m.content)); return l.length === 2 && l; });
-  ok(caught && caught[0].content.endsWith('1') && caught[1].content.endsWith('2'), 'messages sent on Discord while Orata was asleep show up, in order');
+  ok(caught && caught[0].content.endsWith('1') && caught[1].content.endsWith('2'), 'messages sent on Discord while Orata was asleep show up, in order (even when Discord first says “slow down”)');
   calls.length = 0; identify = null; await stopServer(); startServer(); await ready(); await until(() => identify); await sleep(800);
   ok((await msgs()).filter((m) => /while you slept/.test(m.content)).length === 2, '… once');
 
