@@ -141,6 +141,9 @@ async function main() {
   const auto = r.body.flags.find((f) => f.messageId === scam.id && !f.reportedBy); const rep = r.body.flags.find((f) => f.messageId === scam.id && f.reportedBy === E.user.id);
   ok(auto?.reason === 'scam' && /free nitro/.test(auto.excerpt), 'Orata flags a scam-looking message by itself');
   ok(rep?.note === 'phishing' && rep.where === `#${text.name} in Club`, 'reports reach staff with the message and where it was');
+  r = await api('GET', '/staff/overview', Y.token); const needs = r.body.attention?.find((u) => u.id === D.user.id);
+  ok(needs?.openFlags === 2 && needs.why.includes('Scam-looking link') && needs.why.includes('Reported: scam') && r.body.newest?.length > 0 && !('messagesToday' in r.body.stats),
+    'the overview lists accounts that need a look, and why, plus the newest accounts', JSON.stringify(r.body?.attention));
   r = await api('POST', `/staff/flags/${rep.id}`, Y.token, { action: 'delete' }); ok(r.status === 200 && !(await msgs(B.token, text.id)).some((m) => m.id === scam.id), 'staff can delete a flagged message');
   r = await api('POST', '/reports', E.token, { userId: E.user.id, reason: 'spam' }); ok(r.status === 400, 'you can’t report yourself');
   r = await api('GET', '/staff/log', Y.token); ok(['lock', 'unlock', 'terminate', 'unterminate', 'delete_message'].every((a) => r.body.log.some((e) => e.action === a && e.by === Y.user.id)), 'every staff action is in the staff log');

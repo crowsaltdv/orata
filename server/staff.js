@@ -94,7 +94,7 @@ export function mountStaff(r, { h, limit, removeMember }) {
   const stateOf = (u) => (u.terminated ? 'terminated' : u.lockedUntil > Date.now() ? 'locked' : 'active');
   const row = (u) => ({
     ...publicUser(u), createdAt: u.createdAt, state: stateOf(u), lockedUntil: u.lockedUntil > Date.now() ? u.lockedUntil : null, lockReason: u.lockReason || '',
-    terminated: u.terminated || null, staff: isStaff(u), servers: Object.values(db.servers).filter((s) => s.members[u.id]).length,
+    terminated: u.terminated || null, staff: isStaff(u), founder: isFounder(u), servers: Object.values(db.servers).filter((s) => s.members[u.id]).length,
     alts: sameBrowser(u).length, openFlags: (db.flags || []).filter((f) => f.status === 'open' && f.userId === u.id).length,
   });
   const shut = (u) => { endUserSessions(u.id).catch(() => {}); closeConns(u.id, 4004, 'account blocked'); emitTo([u.id], 'invalid_session', {}); };
@@ -103,15 +103,21 @@ export function mountStaff(r, { h, limit, removeMember }) {
     staff(req); const now = Date.now(); const day = now - 86400_000;
     const people = Object.values(db.users).filter((u) => !u.bot && !u.deleted);
     const live = people.filter((u) => !u.terminated);
-    let messagesToday = 0;
-    for (const list of Object.values(db.messages)) for (let i = (list?.length || 0) - 1; i >= 0 && list[i].createdAt > day; i--) messagesToday++;
     const month = now - 30 * 86400_000; const acts = {};
     for (const e of db.staffLog || []) if (e.at > month) acts[e.by] = (acts[e.by] || 0) + 1;
     const flags = (db.flags || []).filter((f) => f.status === 'open');
+    const why = new Map();   // user id -> what their open flags and reports are about
+    for (const f of flags) why.set(f.userId, [...(why.get(f.userId) || []), flagView(f).label]);
+    const locked = live.filter((u) => u.lockedUntil > now);
     res.json({
       stats: { accounts: live.length, online: live.filter((u) => effectiveStatus(u) !== 'offline').length, newToday: live.filter((u) => u.createdAt > day).length,
-        newWeek: live.filter((u) => u.createdAt > now - 7 * 86400_000).length, locked: live.filter((u) => u.lockedUntil > now).length, terminated: people.length - live.length,
-        servers: Object.keys(db.servers).length, messagesToday, openFlags: flags.filter((f) => !f.reportedBy).length, openReports: flags.filter((f) => f.reportedBy).length },
+        locked: locked.length, terminated: people.length - live.length, servers: Object.keys(db.servers).length,
+        openFlags: flags.filter((f) => !f.reportedBy).length, openReports: flags.filter((f) => f.reportedBy).length },
+      // accounts with open flags or reports, most first; the newest sign-ups (raids, alt waves); who is locked right now
+      attention: [...why].filter(([id]) => db.users[id] && !db.users[id].deleted && !db.users[id].terminated).map(([id, list]) => ({ ...row(db.users[id]), why: [...new Set(list)] }))
+        .sort((a, b) => b.openFlags - a.openFlags).slice(0, 8),
+      newest: [...live].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 8).map(row),
+      locked: locked.sort((a, b) => a.lockedUntil - b.lockedUntil).map(row),
       team: people.filter((u) => isStaff(u)).map((u) => ({ ...publicUser(u), founder: isFounder(u), actions: acts[u.id] || 0 })),
     });
   }));

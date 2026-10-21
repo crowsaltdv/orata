@@ -501,9 +501,12 @@ html[data-mode="light"] .pc-badges { background: rgb(0 0 0 / .06); }
 .staff-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 10px; color: var(--text-2); font-weight: 600; font-size: 14px; white-space: nowrap; }
 .staff-tab:hover { background: var(--hover); } .staff-tab.on { background: var(--active); color: var(--text); }
 .staff-scroll { flex: 1; overflow-y: auto; padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 14px; }
-.staff-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.staff-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 720px) { .staff-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .stat-tile { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; border-radius: 16px; background: var(--input-bg); border: 1px solid var(--border); color: var(--text-2); }
-.stat-tile b { font-size: 26px; color: var(--text); font-variant-numeric: tabular-nums; margin-top: 6px; } .stat-tile span { font-weight: 600; } .stat-tile small { color: var(--text-3); font-size: 12px; }
+.stat-tile b { font-size: 26px; color: var(--text); font-variant-numeric: tabular-nums; margin-top: 6px; } .stat-tile span { font-weight: 600; }
+button.stat-tile { text-align: left; font: inherit; } button.stat-tile:disabled { cursor: default; opacity: 1; } .stat-tile.link:hover { border-color: var(--accent); color: var(--text); }
+.staff-why { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .staff-h { margin: 10px 0 0; font-size: 16px; }
 .staff-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; } .staff-bar p { margin: 0; flex: 1; }
 .staff-search { flex: 1; min-width: 220px; } .staff-lock-len { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 14px; }
