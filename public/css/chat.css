@@ -1,4 +1,4 @@
-/* Orate — chat: messages, markdown, attachments, composer, pickers */
+/* Orata — chat: messages, markdown, attachments, composer, pickers */
 .chat { min-width: 0; }
 .chat-col { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 .msg-area { flex: 1; min-height: 0; position: relative; }

@@ -1,4 +1,4 @@
-// Orate — global reactive store (single mutable root + selector subscriptions).
+// Orata — global reactive store (single mutable root + selector subscriptions).
 import { useReducer, useRef, useEffect, ls, uid, debounce, cmpId } from '/js/lib.js';
 import { DEFAULT_SETTINGS, DEFAULT_LOCAL, deepMerge, migrateSettings } from '/js/defaults.js';
 

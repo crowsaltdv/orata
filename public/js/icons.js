@@ -1,4 +1,4 @@
-// Orate — inline SVG icon set (24px grid, stroke-based; paths in the Feather/Lucide tradition).
+// Orata — inline SVG icon set (24px grid, stroke-based; paths in the Feather/Lucide tradition).
 import { html, cx, memo } from '/js/lib.js';
 
 const L = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
@@ -135,8 +135,8 @@ export const Icon = memo(function Icon({ name, size = 20, sw = 2, class: c, fill
   return html`<svg class=${cx('icon', c)} width=${size} height=${size} viewBox="0 0 24 24" fill=${fill ? 'currentColor' : 'none'} stroke="currentColor" stroke-width=${sw} stroke-linecap="round" stroke-linejoin="round" style=${style} aria-hidden=${title ? undefined : 'true'} role=${title ? 'img' : undefined} aria-label=${title} dangerouslySetInnerHTML=${{ __html: inner }}></svg>`;
 });
 
-/** The Orate bear mark, tinted with any CSS colour / gradient via mask-image. */
+/** The Orata bear mark, tinted with any CSS colour / gradient via mask-image. */
 export function Logo({ size = 32, bg, class: c, style }) {
-  return html`<span class=${cx('logo', c)} style=${{ width: size + 'px', height: size + 'px', background: bg || 'var(--accent-grad)', ...style }} role="img" aria-label="Orate"></span>`;
+  return html`<span class=${cx('logo', c)} style=${{ width: size + 'px', height: size + 'px', background: bg || 'var(--accent-grad)', ...style }} role="img" aria-label="Orata"></span>`;
 }
 void L;

@@ -1,11 +1,11 @@
-// Orate — profile badges. A badge is { id, name, icon (one of the browser's icon names) or emoji, color }; a person's are `user.badges` (ids).
+// Orata — profile badges. A badge is { id, name, icon (one of the browser's icon names) or emoji, color }; a person's are `user.badges` (ids).
 // The catalog lives in db.badges: the built-in ones below (rewritten on every start, so they follow this file) and custom ones the developers make.
 // Whoever holds the "dev" badge is a developer: they can give and take anyone's badges and create or delete custom ones.
 import { db, save, newId, bad, forbidden, notFound, byUsername, emitTo, relatedUserIds, publicUser, ORATE_DEV_ID } from './core.js';
 
 const BUILTIN = [
-  { id: 'dev', name: 'Orate Developer', icon: 'code', color: '#5865f2' },
-  { id: 'staff', name: 'Orate Staff', icon: 'shield', color: '#3ba55d' },
+  { id: 'dev', name: 'Orata Developer', icon: 'code', color: '#5865f2' },
+  { id: 'staff', name: 'Orata Staff', icon: 'shield', color: '#3ba55d' },
   { id: 'mod', name: 'Moderator', icon: 'bolt', color: '#f59e0b' },
   { id: 'early', name: 'Early Supporter', icon: 'heart', color: '#f472b6' },
   { id: 'bug', name: 'Bug Hunter', icon: 'target', color: '#22c55e' },
@@ -29,7 +29,7 @@ const ICON = /^[a-z0-9-]{1,24}$/;
 const tell = (u, ...also) => emitTo([...relatedUserIds(u.id), ...also], 'user_update', { user: publicUser(u) });
 
 export function mountBadges(r, { h }) {
-  const dev = (req) => { if (!isDev(req.user)) throw forbidden('Only Orate developers can do that'); };
+  const dev = (req) => { if (!isDev(req.user)) throw forbidden('Only Orata developers can do that'); };
   r.get('/badges', (req, res) => res.json(Object.values(db.badges)));
   r.post('/badges', h(async (req, res) => {
     dev(req); const b = req.body || {};

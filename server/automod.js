@@ -1,4 +1,4 @@
-// Orate — AutoMod: a server's automatic message rules (Server Settings → Safety), kept in server.automod = { links, invites, mentions, spam, timeout }.
+// Orata — AutoMod: a server's automatic message rules (Server Settings → Safety), kept in server.automod = { links, invites, mentions, spam, timeout }.
 // What happens when a rule is broken (the message is refused, logged in the audit log, maybe a timeout) is up to api.js; this only finds the rule.
 // The owner, co-owners, admins and anyone who can manage messages are never checked.
 import { can, isOwner } from './core.js';

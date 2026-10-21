@@ -1,4 +1,4 @@
-// Orate — server rail (left-most column): music, home, servers and server folders.
+// Orata — server rail (left-most column): music, home, servers and server folders.
 import { html, useState, useMemo, cx, memo } from '/js/lib.js';
 import { state, useSel, go, goChannel, openModal, closeModal, openContext, updateSettings, serverUnread, unreadInfo, hasPerm, toast, shallowArrEq } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';

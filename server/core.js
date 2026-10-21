@@ -1,4 +1,4 @@
-// Orate — shared server core: persistence, ids, permissions, serializers, event fan-out.
+// Orata — shared server core: persistence, ids, permissions, serializers, event fan-out.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -23,7 +23,7 @@ export function randomAvatarBg() {
 }
 
 /* ---------------------------------------------------------------- browser ids, for bans
- * Orate keeps no IP addresses and ignores the network entirely: two people on one connection (a school, a café, a family) are strangers. To make bans
+ * Orata keeps no IP addresses and ignores the network entirely: two people on one connection (a school, a café, a family) are strangers. To make bans
  * stick, each account remembers a few keyed hashes (HMAC) of the random ids of the browsers it was used from; they are never sent to clients. */
 /** A keyed hash of the random id each browser sends (x-orate-device): a much stronger sign of "same person" than a shared network. */
 export function deviceHash(id) {
@@ -74,15 +74,15 @@ if (pg) {
     // A brand-new database. Adopt local files (data/db.json + uploads/) if there are any, so moving to Postgres loses nothing.
     let seed = empty(); let adopted = false;
     if (fs.existsSync(DB_FILE)) {
-      try { seed = { ...empty(), ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) }; adopted = true; } catch (e) { console.error('[orate] data/db.json is unreadable, not importing it:', e.message); }
+      try { seed = { ...empty(), ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) }; adopted = true; } catch (e) { console.error('[orata] data/db.json is unreadable, not importing it:', e.message); }
     }
     pgVersion = await pg.createState(JSON.stringify(seed));
     if (pgVersion) {
       db = seed;
       if (adopted) {
-        console.log('[orate] This database is empty, so your local data/db.json was imported into it.');
+        console.log('[orata] This database is empty, so your local data/db.json was imported into it.');
         const r = await pg.importDir(UPLOAD_DIR, console.log);
-        console.log(`[orate] ${r.added} uploaded file(s) copied to the database.`);
+        console.log(`[orata] ${r.added} uploaded file(s) copied to the database.`);
       }
     } else { const again = await pg.loadState(); db = { ...empty(), ...JSON.parse(again.json) }; pgVersion = again.version; }   // another instance created it a moment ago
   }
@@ -90,7 +90,7 @@ if (pg) {
   try {
     if (fs.existsSync(DB_FILE)) db = { ...empty(), ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
   } catch (e) {
-    console.error('[orate] db.json unreadable, keeping a backup and starting fresh:', e.message);
+    console.error('[orata] db.json unreadable, keeping a backup and starting fresh:', e.message);
     try { fs.copyFileSync(DB_FILE, DB_FILE + '.corrupt-' + Date.now()); } catch { /* ignore */ }
   }
 }
@@ -114,15 +114,15 @@ export function flush() {
     dirty = false; writing = true;
     try { pgVersion = await pg.saveState(JSON.stringify(db), pgVersion); retryMs = 2000; } catch (e) {
       if (e instanceof ConflictError || e.code === 'CONFLICT') anotherInstance();
-      dirty = true; console.error('[orate] could not save to the database, will retry:', e.message);
+      dirty = true; console.error('[orata] could not save to the database, will retry:', e.message);
       if (!timer) { timer = setTimeout(flush, retryMs); retryMs = Math.min(60_000, retryMs * 2); }
     } finally { writing = false; }
   });
   return chain;
 }
-/** Two Orate processes share this database (e.g. an old and a new deploy). Never overwrite; restart so we load the latest data. */
+/** Two Orata processes share this database (e.g. an old and a new deploy). Never overwrite; restart so we load the latest data. */
 function anotherInstance() {
-  console.error('[orate] The database was changed by another Orate instance. Exiting so this one restarts with the latest data.\n        (Run only one Orate instance per database.)');
+  console.error('[orata] The database was changed by another Orata instance. Exiting so this one restarts with the latest data.\n        (Run only one Orata instance per database.)');
   process.exit(1);
 }
 if (pg) {
@@ -158,7 +158,7 @@ export async function restoreUpload(name) {
 export function removeUpload(name) {
   if (!isSafeFileName(name)) return;
   try { fs.unlinkSync(path.join(UPLOAD_DIR, name)); } catch { /* already gone */ }
-  if (pg) pg.deleteFile(name).catch((e) => console.error('[orate] could not delete an expired upload:', e.message));
+  if (pg) pg.deleteFile(name).catch((e) => console.error('[orata] could not delete an expired upload:', e.message));
 }
 export const storageSummary = () => (pg ? `PostgreSQL (${pg.host})` : `local files (${path.relative(ROOT, DATA_DIR) || '.'}/)`);
 
@@ -342,6 +342,13 @@ function migrateDb() {
     if (community && !community.coOwners?.includes(ORATE_DEV_ID)) (community.coOwners ||= []).push(ORATE_DEV_ID);
     db.coOwnerSeedV1 = true; changed = true;
   }
+  if (!db.orataRenameV1) {   // once: Orate is now Orata, so rename what was saved under the old name (unless someone changed it since)
+    const community = db.servers[db.defaultServerId];
+    if (community?.name === 'Orate Community') community.name = 'Orata Community';
+    if (community?.description === 'The default hangout for everyone on this Orate instance.') community.description = 'The default hangout for everyone on this Orata instance.';
+    for (const u of Object.values(db.users)) if (u.bot && u.bio === 'Your friendly Orate helper. Say "help" in a DM.') u.bio = 'Your friendly Orata helper. Say "help" in a DM.';
+    db.orataRenameV1 = true; changed = true;
+  }
   if (changed) save();
 }
 export function audienceOf(ch) {
@@ -515,12 +522,12 @@ export function systemMessage(channelId, type, authorId, content = '') {
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export function randomCode(n = 8) { const b = crypto.randomBytes(n); let s = ''; for (let i = 0; i < n; i++) s += ALPHABET[b[i] % ALPHABET.length]; return s; }
 
-export const RESERVED = new Set(['everyone', 'here', 'admin', 'administrator', 'system', 'orate', 'moderator', 'staff']);
+export const RESERVED = new Set(['everyone', 'here', 'admin', 'administrator', 'system', 'orate', 'orata', 'moderator', 'staff']);
 
 export function ensureBot() {
   if (db.botId && db.users[db.botId]) return db.users[db.botId];
   const id = newId();
-  db.users[id] = { id, username: 'orbit', displayName: 'Orbit', email: null, bot: true, avatarBg: randomAvatarBg(), status: 'online', createdAt: Date.now(), bio: 'Your friendly Orate helper. Say "help" in a DM.', bannerColor: '#6d28d9', rel: {}, reads: {}, settings: {} };
+  db.users[id] = { id, username: 'orbit', displayName: 'Orbit', email: null, bot: true, avatarBg: randomAvatarBg(), status: 'online', createdAt: Date.now(), bio: 'Your friendly Orata helper. Say "help" in a DM.', bannerColor: '#6d28d9', rel: {}, reads: {}, settings: {} };
   byUsername.set('orbit', id);
   db.botId = id;
   save();

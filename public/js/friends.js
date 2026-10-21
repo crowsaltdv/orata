@@ -1,4 +1,4 @@
-// Orate — Friends page (Online / All / Pending / Blocked / Add Friend) and the "Active Now" column.
+// Orata — Friends page (Online / All / Pending / Blocked / Add Friend) and the "Active Now" column.
 import { html, useState, useMemo, cx } from '/js/lib.js';
 import { state, set, useSel, openContext, toast, openModal } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -38,8 +38,8 @@ function AddFriend() {
     try { await api.post('/relationships', { username: n }); setMsg({ ok: true, text: `Success! Your friend request to ${n} was sent.` }); setName(''); } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   return html`<div class="add-friend slide-up">
-    <h2>${t('Add Friend')}</h2><p>${t('You can add friends with their Orate username.')}</p>
-    <div class=${cx('af-input', msg && (msg.ok ? 'ok' : 'err'))}><input placeholder=${t('You can add friends with their Orate username.')} value=${name} onInput=${(e) => { setName(e.target.value); setMsg(null); }} onKeyDown=${(e) => e.key === 'Enter' && send()} autofocus />
+    <h2>${t('Add Friend')}</h2><p>${t('You can add friends with their Orata username.')}</p>
+    <div class=${cx('af-input', msg && (msg.ok ? 'ok' : 'err'))}><input placeholder=${t('You can add friends with their Orata username.')} value=${name} onInput=${(e) => { setName(e.target.value); setMsg(null); }} onKeyDown=${(e) => e.key === 'Enter' && send()} autofocus />
       <${Btn} variant="primary" loading=${busy} disabled=${!name.trim()} onClick=${() => send()}>${t('Send Friend Request')}<//></div>
     ${msg ? html`<div class=${cx('af-msg', msg.ok ? 'ok' : 'err')}>${msg.text}</div>` : null}
     <div class="af-me"><span>${t('Your username')}: <b>${me.username}</b></span><button type="button" class="link-btn" onClick=${async () => { await copyText(me.username); toast('Username copied', 'success', 1400); }}>${t('Copy')}</button></div>

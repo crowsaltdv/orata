@@ -1,4 +1,4 @@
-// Orate — music: the Music page (/music, opened from the note icon above Home) with Apple Music search, top-song categories and a preview player, a mini player, and the "Listening to" card shown on profiles.
+// Orata — music: the Music page (/music, opened from the note icon above Home) with Apple Music search, top-song categories and a preview player, a mini player, and the "Listening to" card shown on profiles.
 // The server talks to Apple Music (see server/music.js); the browser only plays the 30-second previews from our own /api/music/play links.
 import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
 import { state, set, useSel, toast, setSetting, go } from '/js/store.js';

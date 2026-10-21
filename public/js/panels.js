@@ -1,4 +1,4 @@
-// Orate — right-hand panels: members, pinned messages, search, DM profile.
+// Orata — right-hand panels: members, pinned messages, search, DM profile.
 import { html, useState, useEffect, useMemo, useRef, cx, formatStamp, debounce, memo } from '/js/lib.js';
 import { state, set, useSel, getChannel, dmName, dmUserId, openContext, openModal, hasPerm, hasChannelPerm, nameOf, roleColor, isOwnerOf } from '/js/store.js';
 import { Icon } from '/js/icons.js';

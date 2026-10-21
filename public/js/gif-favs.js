@@ -1,4 +1,4 @@
-// Orate — favorite GIFs: a star in the GIF picker and on GIFs in chat; the list is saved with your account settings (so it follows you between devices).
+// Orata — favorite GIFs: a star in the GIF picker and on GIFs in chat; the list is saved with your account settings (so it follows you between devices).
 import { state, useSel, updateSettings, toast } from '/js/store.js';
 
 const MAX = 60;

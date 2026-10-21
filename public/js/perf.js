@@ -1,4 +1,4 @@
-// Orate — performance watchdog: if the device can't keep up with liquid glass / rain, quietly step the effects down once.
+// Orata — performance watchdog: if the device can't keep up with liquid glass / rain, quietly step the effects down once.
 import { state, updateSettings, toast, subscribe } from '/js/store.js';
 
 let started = false;
@@ -26,7 +26,7 @@ export function startPerfWatchdog() {
     if (!s.n || s.n < 20) return;
     try { sessionStorage.setItem('orate:perf', '1'); } catch { /* ignore */ }
     if (s.median > 42) {
-      if (g.style === 'liquid') { updateSettings({ glass: { style: 'off' } }); toast('Turned liquid glass off so Orate stays smooth on this device. You can switch it back on in Settings → Rain & Glass.', 'info', 8000); }
+      if (g.style === 'liquid') { updateSettings({ glass: { style: 'off' } }); toast('Turned liquid glass off so Orata stays smooth on this device. You can switch it back on in Settings → Rain & Glass.', 'info', 8000); }
       else if (r.enabled && r.fps !== 30) { updateSettings({ rain: { fps: 30 } }); toast('Lowered the rain frame rate to keep things smooth.', 'info', 6000); }
     }
   });

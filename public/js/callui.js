@@ -1,4 +1,4 @@
-// Orate — incoming call overlay.
+// Orata — incoming call overlay.
 import { html } from '/js/lib.js';
 import { state, useSel, goDm, getChannel, dmName } from '/js/store.js';
 import { Icon } from '/js/icons.js';

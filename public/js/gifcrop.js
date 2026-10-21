@@ -1,4 +1,4 @@
-// Orate — crops an animated GIF in the browser: every frame is decoded (WebCodecs), the chosen part of it is drawn at the new size and a new GIF is written.
+// Orata — crops an animated GIF in the browser: every frame is decoded (WebCodecs), the chosen part of it is drawn at the new size and a new GIF is written.
 // That is what lets a GIF avatar, banner or icon be moved and zoomed in the crop dialog like any other picture.
 
 export const canCropGif = () => typeof ImageDecoder === 'function';

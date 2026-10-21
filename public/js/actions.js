@@ -1,4 +1,4 @@
-// Orate — user-facing actions (messages, read state, navigation helpers).
+// Orata — user-facing actions (messages, read state, navigation helpers).
 import { state, set, getChannel, toast, updateSettings, goDm, addUsers, unreadInfo } from '/js/store.js';
 import { api } from '/js/api.js';
 import { cmpId, debounce, uid } from '/js/lib.js';

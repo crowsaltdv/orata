@@ -1,4 +1,4 @@
-// Orate — application root: shell layout, routing, hotkeys, document title.
+// Orata — application root: shell layout, routing, hotkeys, document title.
 import { html, useEffect, cx, ls, lsRemove } from '/js/lib.js';
 import { state, set, useSel, go, openModal, closeModal, unreadInfo, getChannel, dmName } from '/js/store.js';
 import { AuthScreen, Splash } from '/js/auth.js';
@@ -46,7 +46,7 @@ function Shell() {
   });
   const anyUnread = useSel((s) => Object.keys(s.lastMsg).some((id) => { const c = s.channelIndex[id]; return c && (c.type === 'text' || c.type === 'dm' || c.type === 'group') && unreadInfo(id).unread && !s.settings.mutedChannels[id] && !(s.settings.mutedServers[c.serverId]); }));
   const chName = useSel((s) => { const c = getChannel(s.route.channelId); return c ? (c.serverId ? (c.type === 'post' ? c.name : `#${c.name}`) : dmName(c)) : view === 'friends' ? 'Friends' : view === 'music' ? 'Music' : ''; });
-  useEffect(() => { document.title = `${totalUnread ? `(${totalUnread}) ` : anyUnread ? '• ' : ''}${chName ? chName + ' | ' : ''}Orate`; }, [totalUnread, anyUnread, chName]);
+  useEffect(() => { document.title = `${totalUnread ? `(${totalUnread}) ` : anyUnread ? '• ' : ''}${chName ? chName + ' | ' : ''}Orata`; }, [totalUnread, anyUnread, chName]);
 
   // pending invite after login
   useEffect(() => {
@@ -93,7 +93,7 @@ export function App() {
   const lang = useSel((s) => s.settings.lang);
   const gated = useSel((s) => s.gated);
   const verifying = useSel((s) => s.route.view === 'verify');
-  useEffect(() => { if (phase !== 'ready') document.title = 'Orate'; }, [phase]);
+  useEffect(() => { if (phase !== 'ready') document.title = 'Orata'; }, [phase]);
   return html`<div class="app-root" key=${lang}>
     ${verifying ? html`<${VerifyScreen} />` : phase === 'auth' ? html`<${AuthScreen} />` : phase === 'ready' ? (gated ? html`<${VerifyGate} />` : html`<${Shell} />`) : html`<${Splash} />`}
     ${phase === 'ready' && !gated && !verifying ? html`<${CallOverlay} /><${QuickSwitcher} /><${SettingsHost} /><${ServerSettingsHost} /><${SaveBarHost} /><${VerifyBanner} />` : null}

@@ -1,4 +1,4 @@
-// Orate — translations. English text is the key; any string missing here simply stays in English.
+// Orata — translations. English text is the key; any string missing here simply stays in English.
 // Row format: [en, es, fr, de, pt, it, nl, ja, ko, zh, ru, tr]
 const LANGS = ['es', 'fr', 'de', 'pt', 'it', 'nl', 'ja', 'ko', 'zh', 'ru', 'tr'];
 const ROWS = [
@@ -178,7 +178,7 @@ const ROWS = [
   ['Accept', 'Aceptar', 'Accepter', 'Annehmen', 'Aceitar', 'Accetta', 'Accepteren', '承諾', '수락', '接受', 'Принять', 'Kabul Et'],
   ['Decline', 'Rechazar', 'Refuser', 'Ablehnen', 'Recusar', 'Rifiuta', 'Weigeren', '拒否', '거절', '拒绝', 'Отклонить', 'Reddet'],
   ['Mutual Friends', 'Amigos en común', 'Amis en commun', 'Gemeinsame Freunde', 'Amigos em comum', 'Amici in comune', 'Gedeelde vrienden', '共通のフレンド', '공통 친구', '共同好友', 'Общие друзья', 'Ortak Arkadaşlar'],
-  ['Orate Member Since', 'Miembro de Orate desde', 'Membre d’Orate depuis', 'Orate-Mitglied seit', 'Membro do Orate desde', 'Su Orate dal', 'Lid van Orate sinds', 'Orate 登録日', 'Orate 가입일', '加入 Orate 时间', 'В Orate с', 'Orate Üyeliği'],
+  ['Orata Member Since', 'Miembro de Orata desde', 'Membre d’Orata depuis', 'Orata-Mitglied seit', 'Membro do Orata desde', 'Su Orata dal', 'Lid van Orata sinds', 'Orata 登録日', 'Orata 가입일', '加入 Orata 时间', 'В Orata с', 'Orata Üyeliği'],
   ['Search members', 'Buscar miembros', 'Rechercher des membres', 'Mitglieder suchen', 'Pesquisar membros', 'Cerca membri', 'Leden zoeken', 'メンバーを検索', '멤버 검색', '搜索成员', 'Поиск участников', 'Üye ara'],
   ['Search messages', 'Buscar mensajes', 'Rechercher des messages', 'Nachrichten suchen', 'Pesquisar mensagens', 'Cerca messaggi', 'Berichten zoeken', 'メッセージを検索', '메시지 검색', '搜索消息', 'Поиск сообщений', 'Mesaj ara'],
 ];

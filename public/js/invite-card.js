@@ -1,4 +1,4 @@
-// Orate — server invite cards: an invite link in a message turns into a card with the server, who is online and a Join button.
+// Orata — server invite cards: an invite link in a message turns into a card with the server, who is online and a Join button.
 import { html, useState, useEffect, cx } from '/js/lib.js';
 import { state, useSel, goChannel, toast } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -6,7 +6,7 @@ import { ServerIcon, Btn, Spinner } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
 
-/** The invite code in `https://<this site>/invite/<code>`, or null. Only links to this Orate count — a code means nothing elsewhere. */
+/** The invite code in `https://<this site>/invite/<code>`, or null. Only links to this Orata count — a code means nothing elsewhere. */
 export function inviteCodeOf(url) {
   try {
     const u = new URL(url);

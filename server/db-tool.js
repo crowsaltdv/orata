@@ -2,7 +2,7 @@
 //   npm run db:info                      what is stored in the database and how full it is
 //   npm run db:import [-- --force]       copy data/db.json + data/uploads INTO the database (refuses to overwrite unless --force)
 //   npm run db:export [-- --force]       copy the database back OUT to data/ (existing data/db.json is backed up first)
-// (Starting Orate with DATABASE_URL against an empty database also imports local files automatically — this is for the other cases.)
+// (Starting Orata with DATABASE_URL against an empty database also imports local files automatically — this is for the other cases.)
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, ENV } from './env.js';

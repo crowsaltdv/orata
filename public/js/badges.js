@@ -1,4 +1,4 @@
-// Orate — profile badges: the row on a profile card, and the editor developers (people with the "dev" badge) use to give badges and make new ones.
+// Orata — profile badges: the row on a profile card, and the editor developers (people with the "dev" badge) use to give badges and make new ones.
 // A user's `badges` arrive whole from the server ({ id, name, icon | emoji, color }); the catalog is only fetched by the editor. See server/badges.js.
 import { html, useState, useEffect, cx } from '/js/lib.js';
 import { useSel, closeModal, addUsers, notify } from '/js/store.js';

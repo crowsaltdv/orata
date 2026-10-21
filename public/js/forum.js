@@ -1,4 +1,4 @@
-// Orate — forum channels: a list of posts (with tags, search and sorting), the "new post" dialog and the post menu.
+// Orata — forum channels: a list of posts (with tags, search and sorting), the "new post" dialog and the post menu.
 // A post is a small channel of its own, so once you open one it is an ordinary chat (ChatView) with a different header.
 import { html, useState, useEffect, useRef, cx, relTime } from '/js/lib.js';
 import { state, set, notify, useSel, getChannel, hasChannelPerm, openModal, closeModal, goChannel, addUsers, toast, rebuildIndex, nameOf } from '/js/store.js';

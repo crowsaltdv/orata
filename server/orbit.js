@@ -1,4 +1,4 @@
-// Orate — Orbit in a server: a server can add its own copy of Orbit (ticked when the server is made, or later in Server Settings) that answers
+// Orata — Orbit in a server: a server can add its own copy of Orbit (ticked when the server is made, or later in Server Settings) that answers
 // slash commands. Each server's Orbit is its own bot account, so renaming it or changing its picture in /settings only changes it there.
 // Who may use a command: its permission by default (see public/js/orbit-commands.js), narrowed to chosen roles in /settings; owners and admins always may.
 import { db, save, newId, emitTo, publicUser, memberView, messageView, serverAudience, audienceOf, can, needIn, need, isOwner, topRolePos, audit, randomAvatarBg, bad, forbidden, ApiError } from './core.js';

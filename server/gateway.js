@@ -1,4 +1,4 @@
-// Orate — realtime gateway: presence, voice rooms (voice channels, calls and stages) and WebRTC signalling over WebSocket.
+// Orata — realtime gateway: presence, voice rooms (voice channels, calls and stages) and WebRTC signalling over WebSocket.
 import { WebSocketServer } from 'ws';
 import { db, sha, conns, gatedConns, send, emitTo, canView, audienceOf, publicUser, broadcastPresence, newId, canIn, voice, effectiveStatus, save, serverView, serverAudience } from './core.js';
 import { buildReady } from './api.js';

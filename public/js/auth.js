@@ -1,4 +1,4 @@
-// Orate — sign in / sign up screen.
+// Orata — sign in / sign up screen.
 import { html, useState, useEffect, useRef, cx, debounce, ls } from '/js/lib.js';
 import { state, set, useSel, toast } from '/js/store.js';
 import { api, gateway } from '/js/api.js';
@@ -147,7 +147,7 @@ export function AuthScreen() {
     <div class=${cx('auth-col', view)}>
     <div class="auth-hero panel">
       <div class="auth-mark"><${Logo} size=${52} /></div>
-      <h1>Orate</h1>
+      <h1>Orata</h1>
     </div>
     <div class="auth-card panel">
       <div class="auth-card-in" key=${view} data-dir=${dir}>

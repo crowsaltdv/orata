@@ -1,4 +1,4 @@
-// Orate — emoji dataset (generated from Emojibase) + search + "frequently used".
+// Orata — emoji dataset (generated from Emojibase) + search + "frequently used".
 import { state, updateLocal, updateSettings } from '/js/store.js';
 
 let data = null; let loading = null; let flat = null; let byShortcode = null;

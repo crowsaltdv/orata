@@ -1,4 +1,4 @@
-// Orate — appearance settings: theme colours, wallpaper, rain & glass effects, fonts, chat display.
+// Orata — appearance settings: theme colours, wallpaper, rain & glass effects, fonts, chat display.
 import { html, useState, useEffect, cx } from '/js/lib.js';
 import { state, set, useSel, setSetting, updateSettings, resetSettings, toast } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -193,7 +193,7 @@ export function FontsPage() {
       <${SettingRow} title=${t('Letter spacing')} stack><${SSlider} path="fonts.letterSpacing" scale=${100} min=${-5} max=${20} format=${(v) => (v / 100).toFixed(2) + 'em'} /><//>
     <//>
     <${Section} title=${t('Preview')}>
-      <div class="font-preview"><p class="fpv-ui">${t('Interface')}: Orate — The quick brown fox jumps over the lazy dog.</p>
+      <div class="font-preview"><p class="fpv-ui">${t('Interface')}: Orata — The quick brown fox jumps over the lazy dog.</p>
         <p class="msg-content" style="font-size:var(--font-size)">${t('Chat')}: The quick brown fox jumps over the lazy dog. <strong>Bold</strong>, <em>italic</em> and <span class="mention">@mention</span>.</p>
         <pre class="codeblock fpv-code"><code>const greeting = "hello, world"; // ${t('Code')}</code></pre></div>
     <//>

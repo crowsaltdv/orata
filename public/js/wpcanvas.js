@@ -1,4 +1,4 @@
-// Orate — renders the current wallpaper (image / gradient / solid) into a canvas of any size, cover-fitted with the
+// Orata — renders the current wallpaper (image / gradient / solid) into a canvas of any size, cover-fitted with the
 // user's zoom + position, brightness and saturation. Shared by the rain effect and the liquid-glass lenses.
 
 export function makeCanvas(w, h) { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; }

@@ -1,4 +1,4 @@
-// Orate — forwarding a message to another channel or DM (message menu → Forward). The server makes the copy; see forwardCopy in server/api.js.
+// Orata — forwarding a message to another channel or DM (message menu → Forward). The server makes the copy; see forwardCopy in server/api.js.
 import { html, useState, useMemo, cx, cmpId } from '/js/lib.js';
 import { state, closeModal, toast, hasChannelPerm, dmName, dmUserId } from '/js/store.js';
 import { Modal, Btn, TextInput, Avatar, MODALS } from '/js/ui.js';

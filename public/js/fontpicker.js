@@ -1,4 +1,4 @@
-// Orate — Google Fonts picker: searchable, windowed list where every row is rendered in its own typeface.
+// Orata — Google Fonts picker: searchable, windowed list where every row is rendered in its own typeface.
 import { html, useState, useEffect, useRef, useMemo, cx, debounce } from '/js/lib.js';
 import { state, set, useSel } from '/js/store.js';
 import { Icon } from '/js/icons.js';

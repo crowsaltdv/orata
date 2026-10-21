@@ -1,4 +1,4 @@
-// Orate — shared themes: `/theme` posts your look as a card in chat; anyone can try it with one click and put things back with the same button.
+// Orata — shared themes: `/theme` posts your look as a card in chat; anyone can try it with one click and put things back with the same button.
 import { html, useState, cx, hexToRgb } from '/js/lib.js';
 import { state, useSel, updateSettings, toast } from '/js/store.js';
 import { DEFAULT_SETTINGS, MESH_WALLPAPERS, PHOTO_WALLPAPERS, deepMerge } from '/js/defaults.js';
@@ -109,7 +109,7 @@ export function ThemeCard({ m }) {
   const hasUndo = !!readUndo()[undoKey(m)];
   const applied = isApplied(look); void settings;
   const name = m.theme.name || `${author?.displayName || t('Someone')}${t('’s theme')}`;
-  if (!Object.keys(look).length) return html`<div class="theme-embed bad"><div class="ie-head">${t('A theme that can’t be used')}</div><div class="ie-sub">${t('This shared theme has nothing Orate can apply.')}</div></div>`;
+  if (!Object.keys(look).length) return html`<div class="theme-embed bad"><div class="ie-head">${t('A theme that can’t be used')}</div><div class="ie-sub">${t('This shared theme has nothing Orata can apply.')}</div></div>`;
   const apply = () => {
     const undo = readUndo(); undo[undoKey(m)] = snapshotFor(look); writeUndo(undo);
     updateSettings(look); bump((n) => n + 1); toast(t('Theme applied — press Undo to go back'), 'success', 2600);

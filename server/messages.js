@@ -1,4 +1,4 @@
-// Orate — message creation shared by the REST API and the built-in bot.
+// Orata — message creation shared by the REST API and the built-in bot.
 import { db, newId, save, emitTo, audienceOf, messageView, publicUser, canIn, channelView, customEmojisIn, postView, removeUpload } from './core.js';
 
 export const hooks = { onMessage: [] };

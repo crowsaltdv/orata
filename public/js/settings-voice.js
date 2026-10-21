@@ -1,4 +1,4 @@
-// Orate — Settings → Voice & Video.
+// Orata — Settings → Voice & Video.
 import { html, useState, useEffect, useRef, cx } from '/js/lib.js';
 import { state, useSel, updateLocal, toast } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -58,7 +58,7 @@ export function VoicePage() {
       <${SettingRow} title=${t('Automatic gain control')}><${Toggle} checked=${v.autoGain} onChange=${(x) => setV({ autoGain: x })} /><//>
     <//>
     <${Section} title=${t('Push to talk')}>
-      <${SettingRow} title=${t('Use push to talk')} desc=${t('Your microphone is muted unless you hold the key (while Orate is focused).')}><${Toggle} checked=${v.pushToTalk} onChange=${(x) => setV({ pushToTalk: x })} /><//>
+      <${SettingRow} title=${t('Use push to talk')} desc=${t('Your microphone is muted unless you hold the key (while Orata is focused).')}><${Toggle} checked=${v.pushToTalk} onChange=${(x) => setV({ pushToTalk: x })} /><//>
       ${v.pushToTalk ? html`<${SettingRow} title=${t('Shortcut')}><button type="button" class=${cx('keybind', rec && 'rec')} onClick=${() => setRec(true)}>${rec ? t('Press a key…') : keyLabel(v.pttKey)}</button><//>` : null}
       <${SettingRow} title=${t('Join voice channels muted')}><${Toggle} checked=${v.joinMuted} onChange=${(x) => setV({ joinMuted: x })} /><//>
     <//>

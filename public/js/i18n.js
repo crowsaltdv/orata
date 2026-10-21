@@ -1,4 +1,4 @@
-// Orate — tiny i18n: English text is the key; other languages override via the dictionary in i18n-data.js.
+// Orata — tiny i18n: English text is the key; other languages override via the dictionary in i18n-data.js.
 import { state } from '/js/store.js';
 import { DICT } from '/js/i18n-data.js';
 

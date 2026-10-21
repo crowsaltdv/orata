@@ -1,4 +1,4 @@
-// Orate — the "swearing protection" a server can switch on (Server Settings → Safety). Off by default.
+// Orata — the "swearing protection" a server can switch on (Server Settings → Safety). Off by default.
 // A word list plus the usual tricks people use to get around one: repeated letters (fuuuck), symbols between letters (f.u.c.k), look-alike
 // characters (sh1t, a\$\$) and common endings. Whole words only, so "class" or "Scunthorpe" are never caught. The built-in list is stored ROT13
 // so that this file isn't full of expletives; servers can add their own words (Safety → Blocked words).

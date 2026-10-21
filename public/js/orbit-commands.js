@@ -1,4 +1,4 @@
-// Orate — the commands Orbit answers in a server (shared by the server, which runs them, and the message box, which suggests them).
+// Orata — the commands Orbit answers in a server (shared by the server, which runs them, and the message box, which suggests them).
 // `perm` is the permission a command needs by default; Orbit's /settings can narrow any command to chosen roles. `only` = the reply only shows to whoever used it.
 // No browser or server APIs in here on purpose.
 

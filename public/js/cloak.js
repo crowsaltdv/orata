@@ -1,4 +1,4 @@
-// Orate — tab cloak: make this tab look like another site (its title and its icon), and open Orate inside an about:blank tab.
+// Orata — tab cloak: make this tab look like another site (its title and its icon), and open Orata inside an about:blank tab.
 // The choice is kept on this device only (localStorage) and applied as soon as the page loads, before anyone has signed in.
 import { html, useState, cx } from '/js/lib.js';
 import { Btn, Field, TextInput, Section, SettingRow, Dropdown } from '/js/ui.js';
@@ -52,7 +52,7 @@ export function applyCloak(c = getCloak()) {
   if (!c) {
     watcher?.disconnect(); watcher = null;
     for (const o of original.links) { o.l.setAttribute('href', o.href); if (o.type) o.l.setAttribute('type', o.type); }
-    document.title = original.title || 'Orate'; return;
+    document.title = original.title || 'Orata'; return;
   }
   for (const o of original.links) { o.l.setAttribute('href', c.icon); o.l.removeAttribute('type'); }
   document.title = c.title;
@@ -69,11 +69,11 @@ export function initCloak() { applyCloak(); window.addEventListener('storage', (
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 /**
- * Opens Orate inside a blank tab (about:blank): the address bar shows nothing and the tab wears the cloak. Optionally sends this tab to another site.
+ * Opens Orata inside a blank tab (about:blank): the address bar shows nothing and the tab wears the cloak. Optionally sends this tab to another site.
  * Returns 'blocked' when the browser stopped the pop-up.
  */
 export function openAboutBlank(redirectTo = '') {
-  const c = getCloak(); const title = c?.title || 'Orate'; const icon = new URL(c?.icon || '/img/favicon.png', location.origin).href;
+  const c = getCloak(); const title = c?.title || 'Orata'; const icon = new URL(c?.icon || '/img/favicon.png', location.origin).href;
   const w = window.open('about:blank', '_blank'); if (!w) return 'blocked';
   const doc = w.document; doc.open();
   doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><link rel="icon" href="${esc(icon)}"><style>html,body{margin:0;height:100%;overflow:hidden;background:#0b0b10}iframe{display:block;border:0;width:100vw;height:100vh}</style></head><body><iframe src="${esc(location.href)}" allow="microphone; camera; display-capture; autoplay; clipboard-write; fullscreen" allowfullscreen></iframe></body></html>`);
@@ -82,7 +82,7 @@ export function openAboutBlank(redirectTo = '') {
   return 'ok';
 }
 
-/** `/cloak`: disguise this tab as Desmos and open Orate in an about:blank tab that wears the same cloak. Must run inside the key press that sent it (pop-up blockers). */
+/** `/cloak`: disguise this tab as Desmos and open Orata in an about:blank tab that wears the same cloak. Must run inside the key press that sent it (pop-up blockers). */
 export function cloakAsDesmos() {
   const p = CLOAKS.find((x) => x.id === 'desmos');
   setCloak({ id: p.id, title: p.title, icon: iconFor(p.url) });
@@ -108,9 +108,9 @@ export function CloakPage() {
   const redirects = [{ value: '', label: t('Stay here') }, ...CLOAKS.map((p) => ({ value: p.url, label: p.name }))];
   return html`<div class="s-page">
     <${Section} title=${t('Tab cloak')} desc=${t('Change how this browser tab looks — its title and its icon — so it looks like another site. It only changes this device and is remembered.')}>
-      <div class="cloak-now"><span class="ps-label">${t('This tab now')}</span><${TabPreview} title=${cur?.title || 'Orate'} icon=${cur?.icon || '/img/favicon.png'} /></div>
+      <div class="cloak-now"><span class="ps-label">${t('This tab now')}</span><${TabPreview} title=${cur?.title || 'Orata'} icon=${cur?.icon || '/img/favicon.png'} /></div>
       <div class="cloak-grid">
-        <button type="button" class=${cx('cloak-card', !cur && 'on')} onClick=${() => choose(null)}><img src="/img/favicon.png" alt="" /><span><b>Orate</b><small>${t('No cloak')}</small></span></button>
+        <button type="button" class=${cx('cloak-card', !cur && 'on')} onClick=${() => choose(null)}><img src="/img/favicon.png" alt="" /><span><b>Orata</b><small>${t('No cloak')}</small></span></button>
         ${CLOAKS.map((p) => html`<button type="button" key=${p.id} class=${cx('cloak-card', cur?.id === p.id && 'on')} onClick=${() => choose(p)} title=${p.title}><img src=${iconFor(p.url)} alt="" loading="lazy" /><span><b>${p.name}</b><small>${p.title}</small></span></button>`)}
       </div>
     <//>
@@ -119,8 +119,8 @@ export function CloakPage() {
         <${Field} label=${t('Icon (image link)')}><${TextInput} value=${custom.icon} onInput=${(v) => setCustom({ ...custom, icon: v })} maxlength="500" placeholder="https://…/icon.png" /><//></div>
       <div class="pe-btns"><${Btn} variant="primary" onClick=${applyCustom}>${t('Apply')}<//></div>
     <//>
-    <${Section} title=${t('Open in about:blank')} desc=${t('Opens Orate inside a blank tab, so the address bar shows about:blank instead of this site. The new tab uses your cloak above.')}>
-      <${SettingRow} title=${t('Then send this tab to')} desc=${t('After opening, this tab can jump to another site so it is not showing Orate.')}><${Dropdown} width=${220} value=${redirect} options=${redirects} onChange=${setRedirect} /><//>
+    <${Section} title=${t('Open in about:blank')} desc=${t('Opens Orata inside a blank tab, so the address bar shows about:blank instead of this site. The new tab uses your cloak above.')}>
+      <${SettingRow} title=${t('Then send this tab to')} desc=${t('After opening, this tab can jump to another site so it is not showing Orata.')}><${Dropdown} width=${220} value=${redirect} options=${redirects} onChange=${setRedirect} /><//>
       <div class="pe-btns"><${Btn} variant="primary" icon="external" onClick=${open}>${t('Open in about:blank')}<//></div>
       <p class="text-muted" style="font-size:13px;margin:10px 0 0">${t('If nothing opens, your browser blocked the pop-up — allow pop-ups for this site and press the button again.')}</p>
     <//>

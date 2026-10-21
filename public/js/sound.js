@@ -1,4 +1,4 @@
-// Orate — tiny synthesized UI sounds (no audio files needed).
+// Orata — tiny synthesized UI sounds (no audio files needed).
 import { state } from '/js/store.js';
 
 let ctx = null;

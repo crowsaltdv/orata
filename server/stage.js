@@ -1,4 +1,4 @@
-// Orate — stage channels: a voice room where only the speakers talk. Everybody else listens, can raise a hand, and is invited up by a moderator.
+// Orata — stage channels: a voice room where only the speakers talk. Everybody else listens, can raise a hand, and is invited up by a moderator.
 import { voice, emitTo, audienceOf, canIn } from './core.js';
 
 export const MAX_SPEAKERS = 10;

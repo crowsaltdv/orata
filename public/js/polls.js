@@ -1,4 +1,4 @@
-// Orate — polls: the "create poll" dialog and the poll shown inside a message.
+// Orata — polls: the "create poll" dialog and the poll shown inside a message.
 import { html, useState, useEffect, cx } from '/js/lib.js';
 import { state, useSel, closeModal, openModal, getChannel, hasChannelPerm } from '/js/store.js';
 import { Icon } from '/js/icons.js';

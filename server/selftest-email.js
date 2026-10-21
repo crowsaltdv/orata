@@ -1,4 +1,4 @@
-// Orate email self-test (runs after the main self-test):  npm test
+// Orata email self-test (runs after the main self-test):  npm test
 // Boots two scratch servers — A: SMTP configured (a fake SMTP server in this file), B: REQUIRE_EMAIL_VERIFICATION with no SMTP
 // (dev mode: codes and links are printed to the console) — and walks the whole flow:
 //   * sign-up needs the 6-digit code from the email (no account exists before that),
@@ -51,7 +51,7 @@ const decodeMail = (m) => {
   const part = /Content-Type: text\/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n([\s\S]*?)\r\n--/.exec(m.raw);
   const text = part ? Buffer.from(part[1].replace(/\r\n/g, ''), 'base64').toString('utf8') : '';
   const subject = /Subject: (.*)/.exec(m.raw)?.[1] || '';
-  return { text, subject, code: /^(\d{6}) is your Orate verification code/.exec(subject)?.[1], token: /\/verify\?token=([\w-]+)/.exec(text)?.[1], link: /(https?:\/\/\S+\/verify\?token=[\w-]+)/.exec(text)?.[1], headers: m.raw.split('\r\n\r\n')[0] };
+  return { text, subject, code: /^(\d{6}) is your Orata verification code/.exec(subject)?.[1], token: /\/verify\?token=([\w-]+)/.exec(text)?.[1], link: /(https?:\/\/\S+\/verify\?token=[\w-]+)/.exec(text)?.[1], headers: m.raw.split('\r\n\r\n')[0] };
 };
 const mailsTo = (smtp, addr) => smtp.mails.filter((m) => m.to[0] === addr);
 
@@ -82,7 +82,7 @@ const regBody = (name, email) => ({ email: email || `${name}@example.com`, usern
 
 async function main() {
   const smtp = await fakeSmtp();
-  const A = startServer(3800 + Math.floor(Math.random() * 40), { SMTP_HOST: '127.0.0.1', SMTP_PORT: String(smtp.port), SMTP_USER: 'smtpuser', SMTP_PASS: 'smtppass', MAIL_FROM: 'Orate <noreply@orate.test>', PUBLIC_URL: 'http://orate.test/' });
+  const A = startServer(3800 + Math.floor(Math.random() * 40), { SMTP_HOST: '127.0.0.1', SMTP_PORT: String(smtp.port), SMTP_USER: 'smtpuser', SMTP_PASS: 'smtppass', MAIL_FROM: 'Orata <noreply@orate.test>', PUBLIC_URL: 'http://orate.test/' });
   const B = startServer(3850 + Math.floor(Math.random() * 40), { REQUIRE_EMAIL_VERIFICATION: 'true' });
   await Promise.all([A.ready(), B.ready()]);
   console.log('Email verification self-test (SMTP server on', A.port, '· dev-mode server on', B.port + ')');
@@ -99,7 +99,7 @@ async function main() {
     const m1 = await until(() => mailsTo(smtp, 'alice@example.com')[0]); const d1 = m1 && decodeMail(m1);
     ok(!!m1 && /^\d{6}$/.test(d1.code || ''), 'a 6-digit code is emailed to the address (it is in the subject)');
     ok(d1?.text.includes(`${d1.code.slice(0, 3)} ${d1.code.slice(3)}`) && !d1.link, 'the body shows the code (no link)');
-    ok(m1?.from === 'noreply@orate.test' && /From: Orate <noreply@orate\.test>/.test(d1?.headers || ''), 'sent from MAIL_FROM');
+    ok(m1?.from === 'noreply@orate.test' && /From: Orata <noreply@orate\.test>/.test(d1?.headers || ''), 'sent from MAIL_FROM');
     ok(smtp.logins[0]?.u === 'smtpuser' && smtp.logins[0]?.p === 'smtppass', 'authenticated with SMTP_USER / SMTP_PASS');
     r = await A.api('POST', '/auth/register/confirm', null, { ticket: ticketA, code: d1.code === '000000' ? '111111' : '000000' });
     ok(r.status === 400 && r.body.code === 'code' && /4 tries left/.test(r.body.error), 'a wrong code is rejected and counted');
@@ -144,7 +144,7 @@ async function main() {
     r = await A.api('PATCH', '/me', bob, { email: 'bob2@example.com', password: PW });
     ok(r.status === 200 && r.body.emailVerified === false, 'changing the email makes the account unverified again');
     const l1 = await until(() => mailsTo(smtp, 'bob2@example.com')[0]); const dl1 = l1 && decodeMail(l1);
-    ok(!!dl1?.token && dl1.link.startsWith('http://orate.test/verify?token=') && dl1.subject === 'Confirm your email for Orate', 'a verification link (built from PUBLIC_URL) goes to the new address');
+    ok(!!dl1?.token && dl1.link.startsWith('http://orate.test/verify?token=') && dl1.subject === 'Confirm your email for Orata', 'a verification link (built from PUBLIC_URL) goes to the new address');
     r = await A.api('GET', '/ready', bob);
     ok(r.status === 200 && !r.body.gated, 'optional mode: the account keeps working meanwhile');
     r = await A.api('PATCH', '/me', bob, { email: 'bob3@example.com', password: PW });
@@ -168,7 +168,7 @@ async function main() {
     r = await B.api('POST', '/auth/register', null, regBody('carol'));
     ok(r.status === 200 && r.body.verify === true && r.body.mode === 'console', 'sign-up asks for a code (delivered via the console)');
     const ticketC = r.body.ticket;
-    const codeOut = await until(() => /Subject: (\d{6}) is your Orate verification code/.exec(B.out));
+    const codeOut = await until(() => /Subject: (\d{6}) is your Orata verification code/.exec(B.out));
     ok(!!codeOut && /SMTP is not configured/.test(B.out) && /carol@example\.com/.test(B.out), 'the code is printed in the server console');
     r = await B.api('POST', '/auth/register/confirm', null, { ticket: ticketC, code: codeOut[1] });
     ok(r.status === 200 && r.body.user.emailVerified === true, 'the printed code creates the account');

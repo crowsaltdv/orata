@@ -1,4 +1,4 @@
-// Orate — profile styling: every option you can pick, and the one function that checks them.
+// Orata — profile styling: every option you can pick, and the one function that checks them.
 // The server runs sanitizeProfileStyle() on what it is sent and the browser runs it on what it receives, so both always agree.
 // No browser or server APIs in here on purpose.
 

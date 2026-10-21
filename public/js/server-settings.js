@@ -1,4 +1,4 @@
-// Orate — server settings overlay (overview, roles, channels, members, invites, bans).
+// Orata — server settings overlay (overview, roles, channels, members, invites, bans).
 import { html, useState, useEffect, useRef, cx, formatMemberSince, relTime, copyText } from '/js/lib.js';
 import { state, set, useSel, openModal, closeModal, closePopover, toast, hasPerm, go, memberOf, addUsers, isOwnerOf } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -233,7 +233,7 @@ function Safety({ server }) {
     <//>
     <${Section} title=${t('AutoMod')} desc=${t('Stops messages that break these rules before anyone sees them, tells the sender why, and writes each block in the Audit Log. The owner, admins and people who can manage messages are never checked.')}>
       <${SettingRow} title=${t('Block links')} desc=${t('Any web address.')}><${Toggle} checked=${am.links} disabled=${!can} onChange=${(v) => setAm({ links: v })} /><//>
-      <${SettingRow} title=${t('Block invite links')} desc=${t('Invites to other Orate or Discord servers.')}><${Toggle} checked=${am.invites} disabled=${!can} onChange=${(v) => setAm({ invites: v })} /><//>
+      <${SettingRow} title=${t('Block invite links')} desc=${t('Invites to other Orata or Discord servers.')}><${Toggle} checked=${am.invites} disabled=${!can} onChange=${(v) => setAm({ invites: v })} /><//>
       <${SettingRow} title=${t('Too many mentions')} desc=${am.mentions ? `${t('Block a message that mentions more than')} ${am.mentions} ${t('people or roles')}.` : t('Off')}><${Dropdown} width=${150} value=${am.mentions} options=${[0, 3, 5, 10, 20].map((n) => ({ value: n, label: n ? `> ${n}` : t('Off') }))} onChange=${(v) => setAm({ mentions: v })} /><//>
       <${SettingRow} title=${t('Block spam')} desc=${t('5 messages within 5 seconds, or the same message 3 times in 30 seconds.')}><${Toggle} checked=${am.spam} disabled=${!can} onChange=${(v) => setAm({ spam: v })} /><//>
       <${SettingRow} title=${t('Time out rule breakers')} desc=${t('Also time out whoever AutoMod blocks.')}><${Dropdown} width=${150} value=${am.timeout} options=${[[0, 'No'], [1, '1 minute'], [5, '5 minutes'], [10, '10 minutes'], [60, '1 hour'], [1440, '1 day']].map(([value, label]) => ({ value, label: t(label) }))} onChange=${(v) => setAm({ timeout: v })} /><//>

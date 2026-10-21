@@ -1,4 +1,4 @@
-// Orate — email verification: one-time links sent at sign-up (and when the address changes).
+// Orata — email verification: one-time links sent at sign-up (and when the address changes).
 //
 // How it behaves is decided by .env:
 //   SMTP_HOST set                  -> verification is ON: every new account gets a link by email; an in-app banner asks until it is clicked.
@@ -33,15 +33,15 @@ export const maskEmail = (e) => String(e || '').replace(/^(.{1,2}).*(@.*)$/, (_,
 function mailFor(user, link) {
   const hours = Math.round(TTL_MS / 3600_000);
   const name = user.displayName || user.username;
-  const text = `Hi ${name},\n\nWelcome to Orate! Confirm your email address by opening this link:\n\n${link}\n\nThe link works for ${hours} hours and can only be used once.\nIf you didn't create an Orate account, you can safely ignore this email.\n`;
+  const text = `Hi ${name},\n\nWelcome to Orata! Confirm your email address by opening this link:\n\n${link}\n\nThe link works for ${hours} hours and can only be used once.\nIf you didn't create an Orata account, you can safely ignore this email.\n`;
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const html = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1b1830">
 <h2 style="margin:0 0 12px">Confirm your email</h2>
-<p>Hi ${esc(name)}, welcome to Orate! Tap the button to confirm this address.</p>
+<p>Hi ${esc(name)}, welcome to Orata! Tap the button to confirm this address.</p>
 <p style="margin:24px 0"><a href="${esc(link)}" style="background:#64748b;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;display:inline-block">Verify my email</a></p>
 <p style="font-size:13px;color:#555">Or paste this link into your browser:<br><a href="${esc(link)}" style="color:#475569;word-break:break-all">${esc(link)}</a></p>
-<p style="font-size:13px;color:#555">The link works for ${hours} hours and can only be used once. If you didn't create an Orate account, you can ignore this email.</p></div>`;
-  return { to: user.email, subject: 'Confirm your email for Orate', text, html };
+<p style="font-size:13px;color:#555">The link works for ${hours} hours and can only be used once. If you didn't create an Orata account, you can ignore this email.</p></div>`;
+  return { to: user.email, subject: 'Confirm your email for Orata', text, html };
 }
 
 /** Creates a fresh one-time token for the user's current email address and sends the link. Never throws; resolves `{ sent, mode?, error? }`. */
@@ -56,7 +56,7 @@ export async function issueVerification(user, req) {
     const res = await sendMail(mailFor(user, `${baseUrl(req)}/verify?token=${token}`));
     return { sent: true, mode: res.mode };
   } catch (e) {
-    console.error(`[orate] could not send the verification email to ${user.email}: ${e.message}`);
+    console.error(`[orata] could not send the verification email to ${user.email}: ${e.message}`);
     return { sent: false, error: e.message };
   }
 }

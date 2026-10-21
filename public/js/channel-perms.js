@@ -1,4 +1,4 @@
-// Orate — the channel / category permission editor (Discord-style: pick a role or member, then Allow / Inherit / Deny each permission).
+// Orata — the channel / category permission editor (Discord-style: pick a role or member, then Allow / Inherit / Deny each permission).
 // Channels inside a category can be "synced" with it: they then simply use the category's permissions.
 import { html, useState, cx } from '/js/lib.js';
 import { state, useSel } from '/js/store.js';

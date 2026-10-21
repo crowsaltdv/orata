@@ -1,4 +1,4 @@
-// Orate backend self-test:  npm test
+// Orata backend self-test:  npm test
 // Boots the server on a scratch port with a throw-away data dir and exercises the main flows.
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -36,7 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
   for (let i = 0; i < 50; i++) { try { await fetch(base + '/api/config'); break; } catch { await sleep(100); } }
-  console.log('Orate self-test on port', PORT);
+  console.log('Orata self-test on port', PORT);
 
   console.log('\nAuth');
   let r = await api('POST', '/auth/register', null, { email: 'a@test.dev', username: 'alice', displayName: 'Alice', password: 'hunter2hunter2', dob: { year: 1999, month: 5, day: 4 } });
@@ -56,7 +56,7 @@ async function main() {
 
   console.log('\nGateway');
   const wa = await connect(A); const wb = await connect(B);
-  ok(wa.ready.servers.length === 1 && wa.ready.servers[0].name === 'Orate Community', 'alice is in the community server');
+  ok(wa.ready.servers.length === 1 && wa.ready.servers[0].name === 'Orata Community', 'alice is in the community server');
   ok(wb.ready.servers.length === 1, 'bob auto-joined the community');
   ok(wa.ready.dms.length === 1, 'welcome DM with Orbit exists');
 

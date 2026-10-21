@@ -1,4 +1,4 @@
-// Orate — voice channel view, DM call stage, participant tiles and call controls.
+// Orata — voice channel view, DM call stage, participant tiles and call controls.
 import { html, useEffect, useRef, useState, cx } from '/js/lib.js';
 import { state, set, useSel, getChannel, dmName, openContext, go, goDm } from '/js/store.js';
 import { Icon } from '/js/icons.js';

@@ -1,4 +1,4 @@
-// Orate — REST client + WebSocket gateway connection.
+// Orata — REST client + WebSocket gateway connection.
 import { state, set } from '/js/store.js';
 
 export class ApiError extends Error {

@@ -1,4 +1,4 @@
-// Orate — entry point.
+// Orata — entry point.
 import { html, render } from '/js/lib.js';
 import { state, set, parseRoute } from '/js/store.js';
 import { initTheme } from '/js/theme.js';

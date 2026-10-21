@@ -1,4 +1,4 @@
-// Orate — REST API.
+// Orata — REST API.
 import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -171,7 +171,7 @@ export function createApi() {
   r.use(express.json({ limit: '2mb' }));
 
   r.get('/config', (req, res) => res.json({
-    name: 'Orate', gifs: !!ENV.KLIPY_API_KEY, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0 || hostedTurnConfigured(), maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
+    name: 'Orata', gifs: !!ENV.KLIPY_API_KEY, turn: csv(ENV.TURN_URLS || ENV.TURN_URL).length > 0 || hostedTurnConfigured(), maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
     users: Object.keys(db.users).length, botId: db.botId,
     emailVerification: verificationMode(),   // { enabled, required, smtp }
     music: musicConfigured(),
@@ -208,7 +208,7 @@ export function createApi() {
     const born = new Date(dob.year, dob.month - 1, dob.day); const now = new Date();
     let age = now.getFullYear() - born.getFullYear();
     if (now < new Date(now.getFullYear(), born.getMonth(), born.getDate())) age--;
-    if (age < 13) throw bad('You must be at least 13 years old to use Orate', 'dob');
+    if (age < 13) throw bad('You must be at least 13 years old to use Orata', 'dob');
     checkAccountLimits(req);
 
     ensureBot();
@@ -248,7 +248,7 @@ export function createApi() {
       const mins = Math.max(1, Math.ceil((recent[recent.length - perHour] + 3600_000 - Date.now()) / 60_000));
       throw new ApiError(429, `You can only create ${perHour} accounts an hour. Wait ${mins} minute${mins === 1 ? '' : 's'} to create more.`, 'account_wait');
     }
-    if (seen.filter((u) => !u.deleted).length >= perBrowser) throw new ApiError(403, `This browser already has ${perBrowser} Orate accounts, the most it can have at one time.`, 'account_limit');
+    if (seen.filter((u) => !u.deleted).length >= perBrowser) throw new ApiError(403, `This browser already has ${perBrowser} Orata accounts, the most it can have at one time.`, 'account_limit');
   }
 
   /** Creates the user, joins the community server, sets up the welcome DM and returns { token, user }. */
@@ -268,8 +268,8 @@ export function createApi() {
     // First user owns the shared community server; everybody after joins it — unless they are banned there from this browser.
     let community = db.defaultServerId && db.servers[db.defaultServerId]; let inCommunity = true;
     if (!community) {
-      community = createServer(user, { name: 'Orate Community', template: 'community' });
-      community.description = 'The default hangout for everyone on this Orate instance.';
+      community = createServer(user, { name: 'Orata Community', template: 'community' });
+      community.description = 'The default hangout for everyone on this Orata instance.';
       db.defaultServerId = community.id;
     } else if (isBannedFrom(community, user, req)) {
       inCommunity = false;
@@ -293,7 +293,7 @@ export function createApi() {
     }
     setTimeout(() => {
       const dm = db.channels[dmId]; if (!dm) return;
-      postMessage(dm, bot.id, { content: `**Welcome to Orate, ${displayName}!** 🎉\nI’m Orbit, your built-in helper. Say \`help\` any time to see what you can do.${inCommunity ? `\nA community server called **${community.name}** is already waiting for you on the left.` : ''}` });
+      postMessage(dm, bot.id, { content: `**Welcome to Orata, ${displayName}!** 🎉\nI’m Orbit, your built-in helper. Say \`help\` any time to see what you can do.${inCommunity ? `\nA community server called **${community.name}** is already waiting for you on the left.` : ''}` });
     }, 1500);
     return { token, user: selfUser(user) };
   }
@@ -1464,7 +1464,7 @@ export function createApi() {
     const file = `${id}${ext}`;
     try { await storeUpload(file, type, req.body); } catch (e) {   // files go to data/uploads, and with DATABASE_URL into the database too
       if (e.code === 'QUOTA') throw new ApiError(507, e.message, 'storage_full');
-      console.error('[orate] could not store an upload:', e.message); throw new ApiError(503, 'Could not save the file right now. Try again in a moment.', 'storage_error');
+      console.error('[orata] could not store an upload:', e.message); throw new ApiError(503, 'Could not save the file right now. Try again in a moment.', 'storage_error');
     }
     res.json({ id, url: `/uploads/${file}`, name: rawName, size: req.body.length, type });
   }));
@@ -1540,7 +1540,7 @@ export function createApi() {
       const addrs = await dns.lookup(u.hostname, { all: true });
       if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) throw bad('Blocked address');
       const go = (ua, accept) => fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(image ? 20000 : 5000), headers: { 'user-agent': ua, accept, 'accept-language': 'en' } });
-      let resp = await go(image ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' : 'Mozilla/5.0 (compatible; OrateBot/1.0; +link-preview)', image ? 'image/avif,image/webp,image/*;q=0.8' : 'text/html,application/xhtml+xml,image/*;q=0.8,*/*;q=0.5');
+      let resp = await go(image ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' : 'Mozilla/5.0 (compatible; OrataBot/1.0; +link-preview)', image ? 'image/avif,image/webp,image/*;q=0.8' : 'text/html,application/xhtml+xml,image/*;q=0.8,*/*;q=0.5');
       // some CDNs (Cloudflare bot rules) reject a full browser UA that lacks matching client hints but accept a bare one
       if (image && (resp.status === 403 || resp.status === 429)) { resp.body?.cancel().catch(() => {}); resp = await go('Mozilla/5.0', 'image/*,*/*;q=0.8'); }
       if (resp.status >= 300 && resp.status < 400 && resp.headers.get('location')) { u = new URL(resp.headers.get('location'), u); continue; }

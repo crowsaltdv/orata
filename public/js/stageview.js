@@ -1,4 +1,4 @@
-// Orate — stage channel view: speakers on the stage, the audience below (raised hands first) and the controls for both.
+// Orata — stage channel view: speakers on the stage, the audience below (raised hands first) and the controls for both.
 import { html, cx } from '/js/lib.js';
 import { state, set, useSel, getChannel, hasChannelPerm, openContext } from '/js/store.js';
 import { Icon } from '/js/icons.js';

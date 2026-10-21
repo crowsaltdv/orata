@@ -1,4 +1,4 @@
-// Orate — left sidebar: DM list (home) and channel list (server).
+// Orata — left sidebar: DM list (home) and channel list (server).
 import { html, useState, useMemo, cx, memo, useRef } from '/js/lib.js';
 import { state, useSel, go, goDm, goChannel, openModal, openContext, openPopover, updateSettings, unreadInfo, hasPerm, hasChannelPerm, getChannel, dmName, dmUserId, toast, isMuted } from '/js/store.js';
 import { Icon } from '/js/icons.js';

@@ -1,4 +1,4 @@
-/* Orate — shell layout, server rail, sidebar, user bar, headers */
+/* Orata — shell layout, server rail, sidebar, user bar, headers */
 .app-root { position: fixed; inset: 0; }
 .shell { position: fixed; inset: 0; padding: var(--gap); display: flex; gap: var(--gap); animation: fade-in var(--t-slow) ease; }
 

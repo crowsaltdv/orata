@@ -1,4 +1,4 @@
-// Orate — scrolling message list with date dividers, NEW marker, infinite history and jump-to-present.
+// Orata — scrolling message list with date dividers, NEW marker, infinite history and jump-to-present.
 import { html, useState, useEffect, useRef, useLayoutEffect, useMemo, cx, sameDay, formatDay, cmpId, formatStamp } from '/js/lib.js';
 import { state, useSel, set, getChannel, dmName, dmUserId } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';

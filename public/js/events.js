@@ -1,4 +1,4 @@
-// Orate — gateway event handlers, session lifecycle (login / logout / bootstrap).
+// Orata — gateway event handlers, session lifecycle (login / logout / bootstrap).
 import { state, set, rebuildIndex, addUsers, getChannel, toast, go, parseRoute, resolveRoute, updateSettings, dmName, nameOf, isMuted, notify } from '/js/store.js';
 import { api, gateway, hooks } from '/js/api.js';
 import { ls, lsRemove, cmpId } from '/js/lib.js';

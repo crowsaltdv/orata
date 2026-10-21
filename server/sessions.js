@@ -1,4 +1,4 @@
-// Orate — sign-in sessions.
+// Orata — sign-in sessions.
 //
 // A session is created on login and then lives until its owner logs out (or changes their password, or deletes the account) — there is no
 // expiry, so nobody is signed out "automatically". Where it is kept:

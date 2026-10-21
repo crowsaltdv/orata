@@ -1,4 +1,4 @@
-// Orate — quick switcher (Ctrl+K), image lightbox.
+// Orata — quick switcher (Ctrl+K), image lightbox.
 import { html, useState, useEffect, useRef, useMemo, cx, clamp, ls } from '/js/lib.js';
 import { state, set, useSel, go, goChannel, goDm, getChannel, dmName, dmUserId, unreadInfo } from '/js/store.js';
 import { Icon } from '/js/icons.js';

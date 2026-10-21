@@ -1,4 +1,4 @@
-// Orate — configuration from .env (plus real environment variables, which win). Shared by the server and the command-line tools.
+// Orata — configuration from .env (plus real environment variables, which win). Shared by the server and the command-line tools.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

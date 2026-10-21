@@ -1,4 +1,4 @@
-// Orate — onboarding: a server's rules screen. Newcomers read the rules and pick roles before they can talk (POST /servers/:id/onboarding);
+// Orata — onboarding: a server's rules screen. Newcomers read the rules and pick roles before they can talk (POST /servers/:id/onboarding);
 // anyone can come back to change their picks (server menu → Rules & roles). Set up in Server Settings → Onboarding.
 import { html, useState, cx } from '/js/lib.js';
 import { state, useSel, closeModal, hasPerm } from '/js/store.js';

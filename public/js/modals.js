@@ -1,4 +1,4 @@
-// Orate — create/join server, invites, channels, DMs.
+// Orata — create/join server, invites, channels, DMs.
 import { html, useState, useEffect, useMemo, cx, copyText } from '/js/lib.js';
 import { state, set, useSel, openModal, closeModal, go, goChannel, goDm, toast, getChannel, dmName, hasPerm, hasChannelPerm, addUsers } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
@@ -86,7 +86,7 @@ MODALS['invite-accept'] = function InviteAccept({ id, code }) {
   useEffect(() => { api.get(`/invites/${code}`).then(setInfo).catch((e) => setErr(errMsg(e))); }, [code]);
   const join = async () => { setBusy(true); try { const s = await api.post(`/invites/${code}/join`); closeModal(id); goChannel(s.id, null); } catch (e) { setErr(errMsg(e)); setBusy(false); } };
   return html`<${Modal} width=${420} hideClose onClose=${() => closeModal(id)}>
-    ${err ? html`<div class="invite-card"><div class="ic-bad"><${Icon} name="alert-circle" size=${42} sw=${1.6} /></div><h2>${t('Invite Invalid')}</h2><p>${err}</p><${Btn} variant="primary" onClick=${() => closeModal(id)}>${t('Continue to Orate')}<//></div>`
+    ${err ? html`<div class="invite-card"><div class="ic-bad"><${Icon} name="alert-circle" size=${42} sw=${1.6} /></div><h2>${t('Invite Invalid')}</h2><p>${err}</p><${Btn} variant="primary" onClick=${() => closeModal(id)}>${t('Continue to Orata')}<//></div>`
       : !info ? html`<div class="pk-center" style="padding:40px"><${Spinner} /></div>`
         : html`<div class="invite-card">${info.inviter ? html`<div class="ic-from"><${Avatar} user=${info.inviter} size=${24} /> <b>${info.inviter.displayName}</b> ${t('invited you to join')}</div>` : null}
           <${ServerIcon} server=${info.server} size=${84} class="ic-icon" /><h2>${info.server.name}</h2>

@@ -1,4 +1,4 @@
-// Orate — outgoing email.
+// Orata — outgoing email.
 //
 // A small SMTP client with no dependencies (so `npm install` stays express + ws): implicit TLS (port 465) or STARTTLS (port 587),
 // AUTH PLAIN / LOGIN, UTF-8 subjects, text + HTML bodies. Works with Gmail (app password), Outlook, Mailgun, SendGrid, Resend,
@@ -16,7 +16,7 @@ export const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
 const clean = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ').trim();           // header values must never contain line breaks
 const EMAIL = /[^\s<>"',;]+@[^\s<>"',;]+/;
 const addrOf = (s) => { const m = /<([^<>\s]+)>/.exec(s) || EMAIL.exec(s); return clean(m ? m[1] ?? m[0] : s); };
-/** Splits "Orate <a@b.c>" / "Orate a@b.c" / "a@b.c" into { name, addr }. */
+/** Splits "Orata <a@b.c>" / "Orata a@b.c" / "a@b.c" into { name, addr }. */
 const parseFrom = (s) => { const addr = addrOf(s); const name = clean(String(s).replace(addr, '').replace(/[<>"]/g, '')); return { name, addr }; };
 const isLoopback = (h) => /^(localhost|127\.\d+\.\d+\.\d+|::1|\[::1\])$/i.test(h);
 
@@ -26,7 +26,7 @@ export function mailConfig() {
   if (!host) return null;
   const secure = truthy(ENV.SMTP_SECURE);
   const user = clean(ENV.SMTP_USER); const pass = String(ENV.SMTP_PASS ?? '');
-  const fromRaw = clean(ENV.MAIL_FROM) || (user.includes('@') ? `Orate <${user}>` : `Orate <no-reply@${host}>`);
+  const fromRaw = clean(ENV.MAIL_FROM) || (user.includes('@') ? `Orata <${user}>` : `Orata <no-reply@${host}>`);
   const sender = parseFrom(fromRaw);
   return {
     host, secure, port: Number(ENV.SMTP_PORT) || (secure ? 465 : 587), user, pass,

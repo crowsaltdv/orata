@@ -1,4 +1,4 @@
-// Orate — tiny shared helpers + the Preact/htm bundle re-export.
+// Orata — tiny shared helpers + the Preact/htm bundle re-export.
 import { h, Component } from '/vendor/preact-htm.js';
 export { html, h, render, Component, createContext, useState, useReducer, useEffect, useLayoutEffect, useRef, useImperativeHandle, useMemo, useCallback, useContext } from '/vendor/preact-htm.js';
 

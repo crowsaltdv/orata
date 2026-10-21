@@ -1,4 +1,4 @@
-// Orate — voice, video & screen share. WebRTC full mesh, signalled over the gateway ("perfect negotiation").
+// Orata — voice, video & screen share. WebRTC full mesh, signalled over the gateway ("perfect negotiation").
 // On a stage channel only the speakers send audio: the audience connects to the speakers and nobody else, and a promotion starts the mic and the missing links.
 import { state, set, toast, getChannel, notify, hasPerm, hasChannelPerm } from '/js/store.js';
 import { gateway, api } from '/js/api.js';
@@ -49,7 +49,7 @@ const bump = () => { streamStore.version++; notify(); set({ voice: { ...state.vo
 const patchConn = (p) => set({ voice: { ...state.voice, conn: state.voice.conn ? { ...state.voice.conn, ...p } : null } });
 const me = () => state.me.id;
 /** Browsers only hand out the microphone, camera and screen on https:// pages (or localhost). */
-const needsSecure = () => (!navigator.mediaDevices?.getUserMedia ? 'Microphone, camera and screen sharing only work on https:// (or localhost). Open Orate over HTTPS to use them.' : null);
+const needsSecure = () => (!navigator.mediaDevices?.getUserMedia ? 'Microphone, camera and screen sharing only work on https:// (or localhost). Open Orata over HTTPS to use them.' : null);
 /** How the link to each other person is doing: 'connecting' | 'slow' | 'failed' | 'connected' (shown on their tile). */
 const setLink = (uid, st) => { const cur = state.voice.links || {}; if (cur[uid] === st) return; set({ voice: { ...state.voice, links: { ...cur, [uid]: st } } }); };
 const warned = new Set();

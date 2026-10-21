@@ -1,4 +1,4 @@
-// Orate — HTTP + WebSocket server.   Run with:  npm start
+// Orata — HTTP + WebSocket server.   Run with:  npm start
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
@@ -30,7 +30,7 @@ app.use((req, res, next) => {
       "img-src * data: blob:",
       "media-src * data: blob:",
       "connect-src 'self' ws: wss: blob: data:",
-      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com",   // 'self': the about:blank cloak opens Orate in a frame
+      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com",   // 'self': the about:blank cloak opens Orata in a frame
       "worker-src 'self' blob:",
       "object-src 'none'", "base-uri 'self'", "form-action 'self'",
     ].join('; '),
@@ -46,7 +46,7 @@ const INLINE = /\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm|mov|m4v|mp3|ogg|oga|wav|
 app.use('/uploads', (req, res, next) => {
   if (!pg) return next();
   let name; try { name = decodeURIComponent(req.path.replace(/^\//, '')); } catch { return next(); }
-  restoreUpload(name).then(() => next(), (e) => { console.error('[orate] could not load an upload from the database:', e.message); next(); });
+  restoreUpload(name).then(() => next(), (e) => { console.error('[orata] could not load an upload from the database:', e.message); next(); });
 });
 app.use('/uploads', express.static(UPLOAD_DIR, {
   index: false, dotfiles: 'deny', maxAge: '30d', immutable: true,
@@ -79,7 +79,7 @@ const PORT = Number(ENV.PORT || 3000);
 const HOST = ENV.HOST || '0.0.0.0';
 server.listen(PORT, HOST, () => {
   const lan = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
-  console.log(`\n  ▲ Orate is running\n`);
+  console.log(`\n  ▲ Orata is running\n`);
   const proto = useTls ? 'https' : 'http';
   console.log(`    Local:   ${proto}://localhost:${PORT}`);
   for (const ip of lan) console.log(`    Network: ${proto}://${ip}:${PORT}`);

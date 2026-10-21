@@ -1,4 +1,4 @@
-// Orate — sign-up with an emailed code.
+// Orata — sign-up with an emailed code.
 //
 // When email verification is on (SMTP_HOST set, or REQUIRE_EMAIL_VERIFICATION=true) nobody gets an account just by filling in the
 // form: the server emails a 6-digit code and only creates the account once that code is typed in. Until then the half-finished
@@ -26,19 +26,19 @@ function codeMail(fields, code) {
   const minutes = Math.round(CODE_TTL_MS / 60_000);
   const name = fields.displayName || fields.username;
   const spaced = `${code.slice(0, 3)} ${code.slice(3)}`;
-  const text = `Hi ${name},\n\nYour Orate verification code is:\n\n    ${spaced}\n\nType it into the sign-up page to finish creating your account. It expires in ${minutes} minutes.\nIf you didn't try to sign up for Orate, you can ignore this email — no account will be created.\n`;
+  const text = `Hi ${name},\n\nYour Orata verification code is:\n\n    ${spaced}\n\nType it into the sign-up page to finish creating your account. It expires in ${minutes} minutes.\nIf you didn't try to sign up for Orata, you can ignore this email — no account will be created.\n`;
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const html = `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1b1830">
 <h2 style="margin:0 0 12px">Your verification code</h2>
-<p>Hi ${esc(name)}, type this code into Orate to finish creating your account:</p>
+<p>Hi ${esc(name)}, type this code into Orata to finish creating your account:</p>
 <p style="margin:22px 0;text-align:center"><span style="display:inline-block;font-family:Consolas,Menlo,monospace;font-size:34px;letter-spacing:8px;font-weight:700;background:#eef1f5;color:#1e293b;padding:14px 22px;border-radius:12px">${esc(code)}</span></p>
-<p style="font-size:13px;color:#555">It expires in ${minutes} minutes. If you didn't try to sign up for Orate, you can ignore this email — no account will be created.</p></div>`;
-  return { to: fields.email, subject: `${code} is your Orate verification code`, text, html };
+<p style="font-size:13px;color:#555">It expires in ${minutes} minutes. If you didn't try to sign up for Orata, you can ignore this email — no account will be created.</p></div>`;
+  return { to: fields.email, subject: `${code} is your Orata verification code`, text, html };
 }
 
 async function deliver(fields, code) {
   try { return await sendMail(codeMail(fields, code)); } catch (e) {
-    console.error(`[orate] could not send the sign-up code to ${fields.email}: ${e.message}`);
+    console.error(`[orata] could not send the sign-up code to ${fields.email}: ${e.message}`);
     throw new ApiError(502, 'We couldn’t send the verification email. If you run this server, check the SMTP settings in .env and the console for the reason.', 'mail_failed');
   }
 }

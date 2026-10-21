@@ -1,6 +1,6 @@
-// Orate PostgreSQL storage self-test (runs after the other suites):  npm test
+// Orata PostgreSQL storage self-test (runs after the other suites):  npm test
 // Needs a Postgres to talk to. It uses PGlite (real Postgres compiled to WebAssembly) behind a local socket, so no install of
-// Postgres is required — but PGlite is not an Orate dependency; if it is missing this suite is skipped. To run it:
+// Postgres is required — but PGlite is not an Orata dependency; if it is missing this suite is skipped. To run it:
 //     npm install --no-save @electric-sql/pglite @electric-sql/pglite-socket
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -34,7 +34,7 @@ const sql = async (text, params) => { const c = new Client({ connectionString: D
 const resetDb = async () => { await sql('DROP TABLE IF EXISTS orate_state'); await sql('DROP TABLE IF EXISTS orate_files'); await sql('DROP TABLE IF EXISTS orate_sessions'); };
 const readState = async () => { const r = await sql('SELECT version, data FROM orate_state WHERE id = 1'); return r.rows[0] ? { version: Number(r.rows[0].version), db: JSON.parse(zlib.gunzipSync(r.rows[0].data).toString()) } : null; };
 
-/* ---------------------------------------------------------------- scratch Orate servers */
+/* ---------------------------------------------------------------- scratch Orata servers */
 let nextPort = 3700 + Math.floor(Math.random() * 90);
 function startServer(extraEnv = {}, { withDb = true, dataDir } = {}) {
   const port = nextPort++;
@@ -150,7 +150,7 @@ async function main() {
     await until(async () => (await readState())?.db && Object.values((await readState()).db.users).some((u) => u.username === 'carol'));
     await reg(a, 'dave');   // a loaded the old state: its write must be refused, not silently overwrite carol
     await until(() => a.exited !== null, 10000);
-    ok(a.exited === 1 && /another Orate instance/.test(a.out), 'the stale instance exits instead of overwriting the newer data');
+    ok(a.exited === 1 && /another Orata instance/.test(a.out), 'the stale instance exits instead of overwriting the newer data');
     const after = await readState();
     ok(Object.values(after.db.users).some((u) => u.username === 'carol') && !Object.values(after.db.users).some((u) => u.username === 'dave'), 'the data written by the other instance is intact');
     b.stop(); await until(() => b.exited !== null);
@@ -159,7 +159,7 @@ async function main() {
     console.log('\nMoving local files into the database');
     await resetDb();
     const local = await boot({}, { withDb: false });
-    ok(/Storage: local files/.test(local.out), 'without DATABASE_URL Orate still uses local files');
+    ok(/Storage: local files/.test(local.out), 'without DATABASE_URL Orata still uses local files');
     r = await reg(local, 'erin'); const erin = r.body.token;
     r = await local.api('POST', '/upload', erin, PNG, { 'content-type': 'image/png', 'x-filename': 'erin.png' }); const erinFile = r.body.url;
     await until(() => fs.existsSync(path.join(local.data, 'db.json')) && fs.readFileSync(path.join(local.data, 'db.json'), 'utf8').includes('erin'));
@@ -193,7 +193,7 @@ async function main() {
     ok(t.status === 0 && fs.readdirSync(outDir).some((n) => n.startsWith('db.json.bak-')), 'db:export --force keeps a backup of the old file');
     const back = await boot({}, { withDb: false, dataDir: outDir });   // the exported folder is a complete, working data directory
     r = await back.api('POST', '/auth/login', null, { login: 'erin', password: 'hunter2hunter2' });
-    ok(r.status === 200, 'an exported folder runs as a normal local Orate');
+    ok(r.status === 200, 'an exported folder runs as a normal local Orata');
     back.stop(); await until(() => back.exited !== null);
   } finally {
     for (const s of servers) { try { s.stop(); } catch { /* ignore */ } }

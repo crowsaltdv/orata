@@ -13,7 +13,7 @@ export const BALL = ['It is certain.', 'Without a doubt.', 'Ask again later.', '
 
 const TICKS = '`​`​`';   // looks like ``` but isn't read as one
 const HELP = [
-  '**Hey, I’m Orbit!** Here’s what you can do in Orate:',
+  '**Hey, I’m Orbit!** Here’s what you can do in Orata:',
   '• Create or join a **server** with the **+** in the server rail',
   '• Press **Ctrl+K** to jump to any chat, **Ctrl+/** for shortcuts',
   '• Format with `**bold**`, `*italic*`, `~~strike~~`, `||spoiler||` and `` `inline code` ``',

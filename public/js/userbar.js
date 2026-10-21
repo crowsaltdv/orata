@@ -1,4 +1,4 @@
-// Orate — user bar (avatar, mute/deafen, settings) + voice connection panel.
+// Orata — user bar (avatar, mute/deafen, settings) + voice connection panel.
 import { html, cx, useState } from '/js/lib.js';
 import { state, useSel, go, goChannel, updateSettings, openContext, openPopover, openModal, closeModal, toast, getChannel, dmName, set, closePopover } from '/js/store.js';
 import { Icon } from '/js/icons.js';

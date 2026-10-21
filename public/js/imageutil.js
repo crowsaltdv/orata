@@ -1,4 +1,4 @@
-// Orate — image picking, cropping (avatars / banners / icons) and uploading.
+// Orata — image picking, cropping (avatars / banners / icons) and uploading.
 import { html, useState, useEffect, useRef, clamp } from '/js/lib.js';
 import { state, openModal, closeModal } from '/js/store.js';
 import { Modal, Btn, Slider, MODALS } from '/js/ui.js';
@@ -42,7 +42,7 @@ MODALS.crop = function CropModal({ id, file, aspect, out, round, title, resolve 
     setBusy(true);
     if (gif) {   // an animated GIF keeps moving: every frame gets the same crop
       const gw = Math.min(out, aspect > 1.5 ? 640 : 512);
-      try { const g = await cropGif(file, { sx: -pos.x / scale, sy: -pos.y / scale, sw: frameW / scale, sh: frameH / scale, width: gw, height: Math.round(gw / aspect), onProgress: setProgress }); if (g) { done(g); return; } } catch (e) { console.warn('[orate] could not crop the GIF', e); }
+      try { const g = await cropGif(file, { sx: -pos.x / scale, sy: -pos.y / scale, sw: frameW / scale, sh: frameH / scale, width: gw, height: Math.round(gw / aspect), onProgress: setProgress }); if (g) { done(g); return; } } catch (e) { console.warn('[orata] could not crop the GIF', e); }
       setProgress(null);   // not animated, or the browser could not: crop the first frame like any picture
     }
     const c = document.createElement('canvas'); c.width = out; c.height = Math.round(out / aspect); const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high';

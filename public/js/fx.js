@@ -1,4 +1,4 @@
-// Orate — button feedback: press ripples and particle bursts (sparkles, confetti, emoji) so every click feels good.
+// Orata — button feedback: press ripples and particle bursts (sparkles, confetti, emoji) so every click feels good.
 import { state } from '/js/store.js';
 
 let canvas = null; let ctx = null; let dpr = 1; let raf = 0; let last = 0;

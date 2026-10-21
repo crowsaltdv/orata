@@ -1,4 +1,4 @@
-// Orate — profile effects: small canvas animations drawn over a profile card (and in the previews of the editor).
+// Orata — profile effects: small canvas animations drawn over a profile card (and in the previews of the editor).
 // An engine is { count, make(w,h,rnd,initial), update(p,dt,w,h,rnd,t), draw(g,p,c,c2,t,w,h) }. Engines with count <= 5 are "scenes" (always that many layers);
 // the others are particle systems whose number scales with the card size and the Amount slider. Pure canvas code, no DOM access outside startEffect().
 

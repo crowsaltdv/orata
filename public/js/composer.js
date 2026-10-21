@@ -1,4 +1,4 @@
-// Orate — message composer: attachments, drag & drop, paste, autocomplete (@ # :), slash commands, replies, pickers.
+// Orata — message composer: attachments, drag & drop, paste, autocomplete (@ # :), slash commands, replies, pickers.
 import { html, useState, useEffect, useRef, useLayoutEffect, useMemo, cx, fileSize, uid, isImageType, throttle } from '/js/lib.js';
 import { state, set, useSel, getChannel, dmName, dmUserId, toast, hasChannelPerm, allCustomEmojis, customToken, openContext, openModal, closePopover, openPopover, getUser } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -48,7 +48,7 @@ const COMMANDS = [
   { name: 'gif', desc: 'Search for a GIF', arg: 'query' },
   { name: 'poll', desc: 'Ask everybody a question', arg: 'question' },
   { name: 'theme', desc: 'Share your theme so others can try it', arg: 'name (optional)' },
-  { name: 'cloak', desc: 'Open Orate in about:blank, disguised as Desmos', noArg: true },
+  { name: 'cloak', desc: 'Open Orata in about:blank, disguised as Desmos', noArg: true },
   { name: 'nick', desc: 'Change your nickname in this server', arg: 'name', server: true },
 ];
 
@@ -128,7 +128,7 @@ export function Composer({ chId }) {
       const aType = audioType(f); let duration = null;
       if (aType) {   // every audio file becomes an audio message, so it must be 3 minutes or less
         duration = recorded || await audioLength(f);
-        if (!duration) { toast(`Orate can’t tell how long ${f.name} is, so it can’t be an audio message`, 'error'); continue; }
+        if (!duration) { toast(`Orata can’t tell how long ${f.name} is, so it can’t be an audio message`, 'error'); continue; }
         if (duration > MAX_AUDIO + 0.5) { toast(`${f.name} is ${clock(duration)} long. Audio messages can be at most 3 minutes.`, 'error', 6000); continue; }
       }
       const a = { id: uid(), file: f, name: f.name || 'pasted-file', size: f.size, type: aType || f.type || 'application/octet-stream', preview: isImageType(f.type) || f.type.startsWith('video/') ? URL.createObjectURL(f) : null, progress: 0, status: 'uploading', spoiler: /^SPOILER_/i.test(f.name), ...(aType ? { voice: true, duration } : {}) };
@@ -150,7 +150,7 @@ export function Composer({ chId }) {
   const startRec = async () => {
     if (!canAttach) { toast('You don’t have permission to upload files here', 'error'); return; }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { toast('This browser can’t record audio', 'error'); return; }
-    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { toast('Orate can’t use your microphone. Allow it for this site and try again.', 'error', 6000); return; }
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { toast('Orata can’t use your microphone. Allow it for this site and try again.', 'error', 6000); return; }
     const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm'].find((x) => MediaRecorder.isTypeSupported?.(x)) || '';
     const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
     const r = { mr, chunks: [], start: Date.now(), keep: false };

@@ -1,4 +1,4 @@
-// Orate — permission names and descriptions shared by the role editor and the channel / category permission editor.
+// Orata — permission names and descriptions shared by the role editor and the channel / category permission editor.
 export const PERM_INFO = {
   ADMINISTRATOR: ['Administrator', 'Grants every permission. Be careful!'], MANAGE_SERVER: ['Manage Server', 'Change the server name, icon and settings.'], MANAGE_CHANNELS: ['Manage Channels', 'Create, edit and delete channels.'],
   MANAGE_ROLES: ['Manage Roles', 'Create and edit roles below their own.'], MANAGE_MESSAGES: ['Manage Messages', 'Delete and pin other people’s messages.'], KICK_MEMBERS: ['Kick Members', 'Remove members (they can rejoin).'],

@@ -1,4 +1,4 @@
-// Orate — chat markdown → sanitized HTML (own parser; every user string is escaped before it is emitted).
+// Orata — chat markdown → sanitized HTML (own parser; every user string is escaped before it is emitted).
 import { state, getChannel, nameOf, memberOf, emojiById, allCustomEmojis, customToken } from '/js/store.js';
 import { formatClock, relTime, formatFull } from '/js/lib.js';
 

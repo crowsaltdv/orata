@@ -1,4 +1,4 @@
-// Orate — shared UI primitives: avatars, buttons, form controls, modals, menus, popovers, toasts, tooltips.
+// Orata — shared UI primitives: avatars, buttons, form controls, modals, menus, popovers, toasts, tooltips.
 import { html, cx, useState, useEffect, useRef, useLayoutEffect, useCallback, memo, clamp, hexToHsv, hsvToHex, avatarColor, uid } from '/js/lib.js';
 import { state, set, useSel, closeModal, closeContext, closePopover, dismissToast, openModal, toast } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';

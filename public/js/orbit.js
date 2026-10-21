@@ -1,4 +1,4 @@
-// Orate — Orbit in a server, on the browser side: who may use a command (mirrors server/orbit.js), replies only you can see, and the /settings dialog.
+// Orata — Orbit in a server, on the browser side: who may use a command (mirrors server/orbit.js), replies only you can see, and the /settings dialog.
 import { html, useState, cx } from '/js/lib.js';
 import { state, useSel, closeModal, closePopover, toast } from '/js/store.js';
 import { Modal, Btn, Field, TextInput, Avatar, Dropdown, MODALS } from '/js/ui.js';

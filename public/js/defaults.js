@@ -1,9 +1,9 @@
-// Orate — default settings and built-in presets (wallpapers, colour palettes).
+// Orata — default settings and built-in presets (wallpapers, colour palettes).
 
 export const PHOTO_WALLPAPERS = [
   { id: 'photo-1', name: 'Misty Dawn', url: 'https://t4.ftcdn.net/jpg/12/93/55/89/360_F_1293558974_ILjrwntCvlZe1rWFZvbIpnb69nvrgBS9.jpg' },
   { id: 'photo-2', name: 'Mirror Lake', url: 'https://images.unsplash.com/photo-1580137189272-c9379f8864fd?q=80&w=1740&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=NHwxMjA3fDA%3D' },
-  { id: 'photo-3', name: 'Snow Peaks', url: 'https://images.pexels.com/photos/32574837/pexels-photo-32574837.jpeg?cs=srgb&dl=pexels-raulling-32574837.jpg&fm=jpg', local: '/img/wallpapers/snow-peaks.jpg' },   // the default theme's wallpaper ships with Orate (1920px copy) so the login screen shows it instantly
+  { id: 'photo-3', name: 'Snow Peaks', url: 'https://images.pexels.com/photos/32574837/pexels-photo-32574837.jpeg?cs=srgb&dl=pexels-raulling-32574837.jpg&fm=jpg', local: '/img/wallpapers/snow-peaks.jpg' },   // the default theme's wallpaper ships with Orata (1920px copy) so the login screen shows it instantly
   { id: 'photo-4', name: 'Starry Pines', url: 'https://wallpapercave.com/wp/wp3946493.jpg' },
   { id: 'photo-5', name: 'Durdle Door', url: 'https://c4.wallpaperflare.com/wallpaper/149/190/473/nature-4k-computer-desktop-backgrounds-wallpaper-preview.jpg' },
   { id: 'photo-6', name: 'Turquoise Lake', url: 'https://i.pinimg.com/736x/8a/80/99/8a8099c1b53399dc2f22bc0ce3f940e4.jpg' },

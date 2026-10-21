@@ -1,4 +1,4 @@
-// Orate — theme engine: turns settings into CSS variables, wallpaper layers, fonts, glass (pure CSS) and rain.
+// Orata — theme engine: turns settings into CSS variables, wallpaper layers, fonts, glass (pure CSS) and rain.
 import { state, subscribe, toast } from '/js/store.js';
 import { DEFAULT_SETTINGS } from '/js/defaults.js';
 import { hexToRgb, luminance, mixHex, readableOn, ls } from '/js/lib.js';

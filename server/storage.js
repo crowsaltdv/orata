@@ -1,6 +1,6 @@
-// Orate — optional PostgreSQL storage (set DATABASE_URL).
+// Orata — optional PostgreSQL storage (set DATABASE_URL).
 //
-// Without DATABASE_URL Orate keeps everything in files under data/ (db.json + uploads/). That is perfect on your own computer but
+// Without DATABASE_URL Orata keeps everything in files under data/ (db.json + uploads/). That is perfect on your own computer but
 // useless on hosts whose disk is wiped on every restart (Render's free plan, Heroku, …). With DATABASE_URL — a free Neon or Supabase
 // database works — the same data lives in Postgres instead:
 //
@@ -19,7 +19,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SAFE_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 export const isSafeFileName = (n) => typeof n === 'string' && n.length < 200 && SAFE_NAME.test(n);
 
-export class ConflictError extends Error { constructor() { super('the database was changed by another Orate instance'); this.code = 'CONFLICT'; } }
+export class ConflictError extends Error { constructor() { super('the database was changed by another Orata instance'); this.code = 'CONFLICT'; } }
 export class QuotaError extends Error { constructor(msg) { super(msg); this.code = 'QUOTA'; } }
 
 const TRANSIENT = /Connection terminated|ECONNRESET|EPIPE|ETIMEDOUT|ECONNREFUSED|57P01|08006|08003|08001|terminating connection|timeout exceeded|server closed the connection/i;
@@ -58,7 +58,7 @@ export class PgStore {
     }
     const Pool = mod.Pool || mod.default?.Pool;
     this.pool = new Pool(poolOptions(this.url, this.env));
-    this.pool.on('error', (e) => console.error('[orate] database connection error (it will reconnect):', e.message));   // idle clients can be dropped by the server
+    this.pool.on('error', (e) => console.error('[orata] database connection error (it will reconnect):', e.message));   // idle clients can be dropped by the server
     try {
       await this.q('SELECT 1');
     } catch (e) {
@@ -86,7 +86,7 @@ export class PgStore {
   }
 
   /* ---- the database itself ---- */
-  /** Resolves `{ version, json }`, or null when this database has never held an Orate state. */
+  /** Resolves `{ version, json }`, or null when this database has never held an Orata state. */
   async loadState() {
     const r = await this.q('SELECT version, data FROM orate_state WHERE id = 1');
     if (!r.rows.length) return null;

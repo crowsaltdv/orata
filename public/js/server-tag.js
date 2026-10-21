@@ -1,4 +1,4 @@
-// Orate — server tags: a server's short tag (1–5 letters or numbers) with an icon and a color, which members can wear next to their name.
+// Orata — server tags: a server's short tag (1–5 letters or numbers) with an icon and a color, which members can wear next to their name.
 // Admins set it in Server Settings → Overview (once a week); people pick the one they wear in User Settings → Profile or from the server menu.
 import { html, useState, cx } from '/js/lib.js';
 import { state } from '/js/store.js';
@@ -28,7 +28,7 @@ export function ServerTagSection({ server }) {
   const save = async () => { setBusy(true); await act(api.put(`/servers/${server.id}/tag`, d), { success: t('Server tag saved') }); setBusy(false); };
   return html`<${Section} title=${t('Server tag')} desc=${t('Up to 5 letters or numbers with an icon. Members can wear it next to their name everywhere. Only admins can change it, once a week.')}>
     <div class="stag-edit"><span class="stag-preview"><${ServerTag} tag=${{ ...d, server: server.name }} /></span>
-      ${admin ? html`<${TextInput} class="stag-text" value=${d.text} maxlength="5" placeholder="ORATE" disabled=${locked} aria-label=${t('Tag')} onInput=${(v, e) => { const text = v.replace(/[^A-Za-z0-9]/g, '').slice(0, 5); e.target.value = text; setD({ ...d, text }); }} />
+      ${admin ? html`<${TextInput} class="stag-text" value=${d.text} maxlength="5" placeholder="ORATA" disabled=${locked} aria-label=${t('Tag')} onInput=${(v, e) => { const text = v.replace(/[^A-Za-z0-9]/g, '').slice(0, 5); e.target.value = text; setD({ ...d, text }); }} />
         <${ColorSwatch} value=${d.color} onChange=${(c) => { if (!locked) setD({ ...d, color: c }); }} label=${t('Tag color')} size=${34} />
         <${Btn} variant="primary" loading=${busy} disabled=${!d.text || same || locked} onClick=${save}>${cur ? t('Change') : t('Save')}<//>` : null}</div>
     ${admin ? html`<div class="stag-icons">${TAG_ICONS.map((ic) => html`<button type="button" key=${ic} class=${cx('stag-ic', d.icon === ic && 'on')} style=${{ '--tc': d.color }} disabled=${locked} aria-label=${ic} aria-pressed=${d.icon === ic} onClick=${() => setD({ ...d, icon: ic })}><${Icon} name=${ic} size=${18} /></button>`)}</div>

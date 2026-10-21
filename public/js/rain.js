@@ -1,11 +1,11 @@
-// Orate — rain on glass.
+// Orata — rain on glass.
 //
 // This is Lucas Bebber's "Rain & Water Effect Experiments" (Codrops, 2015 — https://tympanus.net/Development/RainEffect/,
-// https://tympanus.net/codrops/2015/11/04/rain-water-effect-experiments/) integrated into Orate: the same drop simulation
+// https://tympanus.net/codrops/2015/11/04/rain-water-effect-experiments/) integrated into Orata: the same drop simulation
 // (big drops that merge, creep down and leave trails; thousands of static droplets that big drops wipe away), the same
 // drop textures (public/img/rain/drop-alpha.png + drop-color.png, used as a normal-map-like refraction lookup) and the
 // same water fragment shader. Differences from the demo: the in-focus / out-of-focus textures are generated from the
-// user's wallpaper instead of the demo photos, the effect is driven by Orate's settings, and the loop can be paused.
+// user's wallpaper instead of the demo photos, the effect is driven by Orata's settings, and the loop can be paused.
 // Codrops demo code: free to integrate and build upon (see https://tympanus.net/codrops/licensing/).
 
 import { wallpaperCanvas, makeCanvas } from '/js/wpcanvas.js';
@@ -130,7 +130,7 @@ void main() {
     tex=blend(tex,shine);
   }
 
-  // lightning (Orate addition): flashes both the fogged glass and the drops
+  // lightning (Orata addition): flashes both the fogged glass and the drops
   bg.rgb=mix(bg.rgb,vec3(0.92,0.95,1.0),u_flash*0.6);
   tex.rgb=mix(tex.rgb,vec3(1.0),u_flash*0.5);
 
@@ -323,7 +323,7 @@ class Raindrops {
     }, this);
     this.drops = newDrops;
   }
-  /** One simulation + render step (the original schedules itself with requestAnimationFrame; Orate drives it). */
+  /** One simulation + render step (the original schedules itself with requestAnimationFrame; Orata drives it). */
   update(now = Date.now()) {
     this.clearCanvas();
     if (this.lastRender == null) this.lastRender = now;
@@ -394,7 +394,7 @@ class RainGL {
 const loadImage = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-/** Weather presets — the same moods as the original demo, expressed in Orate's slider units. */
+/** Weather presets — the same moods as the original demo, expressed in Orata's slider units. */
 export const RAIN_PRESETS = {
   rain: { label: 'Rain', amount: 0.7, size: 0.88, speed: 1, refraction: 1, mist: 3, trails: 1, droplets: 50, lightning: 0 },
   drizzle: { label: 'Drizzle', amount: 0.15, size: 0.8, speed: 1, refraction: 1, mist: 2, trails: 1, droplets: 10, lightning: 0 },

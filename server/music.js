@@ -1,4 +1,4 @@
-// Orate — music from Apple Music's public catalogue: search, 30-second previews and the "Listening to" status. No API key needed.
+// Orata — music from Apple Music's public catalogue: search, 30-second previews and the "Listening to" status. No API key needed.
 //
 // Uses Apple's keyless iTunes Search API (https://performance-partners.apple.com/search-api — `GET https://itunes.apple.com/search` and `/lookup`).
 // It is the same catalogue as Apple Music, with the same artwork, links and 30-second previews. (The Apple Music API proper,
@@ -8,7 +8,7 @@
 // The server does all the talking to Apple. A preview is downloaded when it is asked for (it is about 1 MB), kept in memory for a while and served
 // to the <audio> tag from /api/music/play/<id> with Range support so the seek bar works. An <audio> tag can't send a bearer token, so that link is
 // signed by this server (HMAC, short-lived) when a signed-in user asks for it. Apple allows roughly 20 searches a minute per IP address, so results
-// are cached and Orate never sends more than MUSIC_API_PER_MIN (default 18) requests a minute, however many people search.
+// are cached and Orata never sends more than MUSIC_API_PER_MIN (default 18) requests a minute, however many people search.
 import crypto from 'node:crypto';
 import net from 'node:net';
 import { ENV, db, save, emitTo, relatedUserIds, publicUser, selfUser, ApiError, bad, notFound } from './core.js';
@@ -39,7 +39,7 @@ async function apiGet(pathname, params) {
   try { res = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15_000) }); } catch { throw new ApiError(502, 'Could not reach Apple Music. Try again in a moment.', 'music_upstream'); }
   if (res.status === 403 || res.status === 429) throw new ApiError(429, 'Apple is limiting music searches right now. Try again in a minute.', 'rate_limited');   // that is how Apple says "too many requests"
   if (!res.ok) throw new ApiError(502, `Apple Music answered with an error (${res.status}).`, 'music_upstream');
-  try { return JSON.parse(await res.text()); } catch { throw new ApiError(502, 'Apple Music sent an answer Orate could not read.', 'music_upstream'); }   // it is served as text/javascript, so no res.json()
+  try { return JSON.parse(await res.text()); } catch { throw new ApiError(502, 'Apple Music sent an answer Orata could not read.', 'music_upstream'); }   // it is served as text/javascript, so no res.json()
 }
 
 /* ------------------------------------------------------------ tracks */

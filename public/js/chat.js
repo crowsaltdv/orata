@@ -1,4 +1,4 @@
-// Orate — chat view (channel / DM header + message list + composer) and right-panel routing.
+// Orata — chat view (channel / DM header + message list + composer) and right-panel routing.
 import { html, useEffect, useState, cx, copyText } from '/js/lib.js';
 import { state, set, useSel, getChannel, dmName, dmUserId, openModal, updateSettings, updateLocal, hasPerm, isMuted, toast, go, goChannel, openContext } from '/js/store.js';
 import { postMenu, TagChip } from '/js/forum.js';

@@ -1,4 +1,4 @@
-// Orate — profile styling: how a styled profile card is drawn (colors, outline, shadow, fonts, name style, effect) and the editor for it.
+// Orata — profile styling: how a styled profile card is drawn (colors, outline, shadow, fonts, name style, effect) and the editor for it.
 // The options and their validation live in profile-data.js (shared with the server); the effect animations in profile-effects.js.
 import { html, useState, useEffect, useRef, cx, hexToRgb } from '/js/lib.js';
 import { useSel, toast } from '/js/store.js';

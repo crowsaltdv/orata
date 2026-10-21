@@ -1,4 +1,4 @@
-// Orate feature self-test (runs after the main self-test):  npm test
+// Orata feature self-test (runs after the main self-test):  npm test
 // Channel & category permission overwrites (allow / deny / inherit, sync with the category), sessions that never expire, invite cards,
 // the keyless Apple Music preview player (against a fake iTunes Search server) and the "listening to" status.
 import { spawn } from 'node:child_process';
@@ -86,7 +86,7 @@ const register = async (username, email) => {
 async function main() {
   await new Promise((r) => fakeItunes.listen(AP_PORT, '127.0.0.1', r));
   startServer(); await ready();
-  console.log('Orate feature test on port', PORT);
+  console.log('Orata feature test on port', PORT);
 
   /* ---------------------------------------------------------------- permissions */
   console.log('\nChannel & category permissions');
@@ -280,7 +280,7 @@ async function main() {
   await stopServer(); startServer({ MUSIC_API_PER_MIN: '2' }); await ready();
   const before = ap.requests.length;
   r = await api('GET', '/music/search?q=one', A3); const r2 = await api('GET', '/music/search?q=two', A3); r = await api('GET', '/music/search?q=three', A3);
-  ok(r2.status === 200 && r.status === 429 && r.body.code === 'rate_limited' && ap.requests.length === before + 2, 'Orate never sends Apple more than MUSIC_API_PER_MIN requests a minute, however many people search');
+  ok(r2.status === 200 && r.status === 429 && r.body.code === 'rate_limited' && ap.requests.length === before + 2, 'Orata never sends Apple more than MUSIC_API_PER_MIN requests a minute, however many people search');
   r = await api('GET', '/music/search?q=one', A3); ok(r.status === 200, '… and cached searches still work when the budget is used up');
 
   console.log('\nMusic switched off');

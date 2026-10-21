@@ -1,4 +1,4 @@
-// Orate community-features self-test (runs after the other suites):  npm test
+// Orata community-features self-test (runs after the other suites):  npm test
 // Optional emails at sign-up, bans that follow the person's browser (hashed, never shown; networks are ignored), ban reasons, timeouts, GIF icons / banners,
 // custom emoji and stickers, forum channels and polls.
 import { spawn } from 'node:child_process';
@@ -57,7 +57,7 @@ const register = async (username, { email, ip, dev } = {}) => {
 
 async function main() {
   startServer(); await ready();
-  console.log('Orate community-features test on port', PORT);
+  console.log('Orata community-features test on port', PORT);
 
   /* ---------------------------------------------------------------- sign-up without an email */
   console.log('\nSign-up without an email');
@@ -180,7 +180,7 @@ async function main() {
 
   /* ---------------------------------------------------------------- a ban follows the browser into the community server too (it is joined automatically at sign-up) */
   console.log('\nBans and the default community server');
-  const comm = (await api('GET', '/ready', A.token)).body.servers.find((s) => s.name === 'Orate Community');
+  const comm = (await api('GET', '/ready', A.token)).body.servers.find((s) => s.name === 'Orata Community');
   const mkc = async (name, ip, dev, cookie) => {
     const h = { ...(ip ? { 'x-forwarded-for': ip } : {}), ...(dev ? { 'x-orate-device': dev } : {}), ...(cookie ? { cookie: `theme=dark; orate_dev=${cookie}; other=1` } : {}) };
     const reg0 = await api('POST', '/auth/register', null, { username: name, displayName: name, password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, h);
@@ -614,6 +614,15 @@ async function main() {
   await api('PATCH', '/me', MB.token, { tagServer: BG.id }); await api('POST', `/servers/${BG.id}/leave`, MB.token);
   r = await api('GET', `/users/${MB.user.id}`, PL.token); ok(!r.body.user.tag, 'leaving the server takes the tag off');
   r = await api('PATCH', '/me', PL.token, { tagServer: null }); ok(r.status === 200 && !r.body.tag, 'it can be taken off');
+
+  /* ---------------------------------------------------------------- Orate → Orata */
+  console.log('\nRenamed to Orata');
+  await stopServer();
+  const nj = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8')); const OC = nj.servers[nj.defaultServerId]; const OB = Object.values(nj.users).find((u) => u.bot);
+  OC.name = 'Orate Community'; OB.bio = 'Your friendly Orate helper. Say "help" in a DM.'; delete nj.orataRenameV1;
+  fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(nj)); startServer(); await ready();
+  r = await api('GET', '/ready', A.token); ok(r.body.servers.find((s) => s.id === OC.id)?.name === 'Orata Community', 'the community server saved as “Orate Community” is renamed');
+  r = await api('GET', `/users/${OB.id}`, A.token); ok(r.body.user.bio === 'Your friendly Orata helper. Say "help" in a DM.', '… and so is Orbit’s bio');
 
   /* ---------------------------------------------------------------- accounts per browser */
   console.log('\nAccounts per browser');

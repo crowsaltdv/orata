@@ -1,4 +1,4 @@
-// Orate — Server Settings → Audit Log: who did what in the server (moderators' actions, settings changes and AutoMod blocks), newest first.
+// Orata — Server Settings → Audit Log: who did what in the server (moderators' actions, settings changes and AutoMod blocks), newest first.
 import { html, useState, useEffect, relTime, formatFull } from '/js/lib.js';
 import { state, addUsers } from '/js/store.js';
 import { Btn, Dropdown, Spinner, Empty } from '/js/ui.js';

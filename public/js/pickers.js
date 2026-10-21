@@ -1,4 +1,4 @@
-// Orate — emoji / GIF / sticker picker popover.
+// Orata — emoji / GIF / sticker picker popover.
 import { html, useState, useEffect, useRef, useMemo, useCallback, memo, cx, debounce, uid } from '/js/lib.js';
 import { state, set, useSel, updateSettings } from '/js/store.js';
 import { Icon } from '/js/icons.js';

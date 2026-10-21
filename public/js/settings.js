@@ -1,4 +1,4 @@
-// Orate — user settings overlay (account, profile, appearance, voice, notifications, language …).
+// Orata — user settings overlay (account, profile, appearance, voice, notifications, language …).
 import { html, useState, useEffect, useRef, cx, copyText, formatMemberSince, relTime, ls } from '/js/lib.js';
 import { state, set, useSel, closeModal, openModal, closePopover, setSetting, updateSettings, resetSettings, toast, updateLocal } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
@@ -100,7 +100,7 @@ function ProfilePage() {
   useSaveBar(dirty, { save, reset: () => setD(orig), busy });
   return html`<div class="s-page profile-edit">
     <div class="pe-form">
-      <${Section} title=${t('Profile')} desc=${t('How you appear to everyone on Orate.')}>
+      <${Section} title=${t('Profile')} desc=${t('How you appear to everyone on Orata.')}>
         <${Field} label=${t('Display name')}><${TextInput} value=${d.displayName} onInput=${(v) => up1('displayName', v)} maxlength="32" /><//>
         <${Field} label=${t('Pronouns')}><${TextInput} value=${d.pronouns} onInput=${(v) => up1('pronouns', v)} maxlength="40" placeholder="they/them" /><//>
         <${Field} label=${t('About me')} hint=${`${d.bio.length}/400 — ${t('supports markdown')}`}><textarea class="textarea" rows="4" maxlength="400" value=${d.bio} onInput=${(e) => up1('bio', e.target.value)} placeholder=${t('Tell everyone a little about yourself')}></textarea><//>
@@ -140,11 +140,11 @@ function AccessPage() {
 }
 function NotificationsPage() {
   const n = useSel((s) => s.settings.notif); const [perm, setPerm] = useState('Notification' in window ? Notification.permission : 'unsupported');
-  const ask = async () => { const r = await Notification.requestPermission(); setPerm(r); if (r === 'granted') { setSetting('notif.desktop', true); new Notification('Orate notifications are on', { body: 'You’ll be notified of DMs and mentions while Orate is in the background.', icon: '/img/icon-192.png' }); } };
+  const ask = async () => { const r = await Notification.requestPermission(); setPerm(r); if (r === 'granted') { setSetting('notif.desktop', true); new Notification('Orata notifications are on', { body: 'You’ll be notified of DMs and mentions while Orata is in the background.', icon: '/img/icon-192.png' }); } };
   const muted = useSel((s) => s.settings.mutedServers); const servers = useSel((s) => s.servers);
   return html`<div class="s-page">
     <${Section} title=${t('Desktop notifications')}>
-      ${perm === 'unsupported' ? html`<div class="note-chip">${t('This browser does not support notifications.')}</div>` : perm === 'granted' ? html`<${SettingRow} title=${t('Enable desktop notifications')} desc=${t('Shown when Orate is in the background.')}><${SToggle} path="notif.desktop" /><//>`
+      ${perm === 'unsupported' ? html`<div class="note-chip">${t('This browser does not support notifications.')}</div>` : perm === 'granted' ? html`<${SettingRow} title=${t('Enable desktop notifications')} desc=${t('Shown when Orata is in the background.')}><${SToggle} path="notif.desktop" /><//>`
         : html`<${SettingRow} title=${t('Enable desktop notifications')} desc=${perm === 'denied' ? t('Blocked by your browser — allow notifications for this site in its settings.') : t('Get alerted about DMs and mentions in the background.')}><${Btn} variant="primary" disabled=${perm === 'denied'} onClick=${ask}>${t('Enable')}<//><//>`}
       <${SettingRow} title=${t('Flash tab title for unread')}><${SToggle} path="notif.flash" /><//>
     <//>
@@ -174,7 +174,7 @@ const SHORTCUTS = [
 ];
 export function Shortcuts() { return html`<div class="shortcut-grid">${SHORTCUTS.map(([k, d]) => html`<div class="sc-row"><span class="keys">${k.split(' ').map((x) => (x === '/' && k.includes('Ctrl') ? html`<span class="kbd">/</span>` : html`<span class="kbd">${x}</span>`))}</span><span>${d}</span></div>`)}</div>`; }
 MODALS.shortcuts = function ShortcutsModal({ id }) { return html`<${Modal} title="Keyboard shortcuts" width=${560} onClose=${() => closeModal(id)}><${Shortcuts} /><//>`; };
-function KeybindsPage() { return html`<div class="s-page"><${Section} title=${t('Keybinds')} desc=${t('Orate’s built-in shortcuts. Push-to-talk can be set under Voice & Video.')}><${Shortcuts} /><//></div>`; }
+function KeybindsPage() { return html`<div class="s-page"><${Section} title=${t('Keybinds')} desc=${t('Orata’s built-in shortcuts. Push-to-talk can be set under Voice & Video.')}><${Shortcuts} /><//></div>`; }
 function PrivacyPage() {
   const rel = useSel((s) => s.relationships); const users = useSel((s) => s.users);
   const blocked = Object.keys(rel).filter((id) => rel[id] === 'blocked' && users[id]);
@@ -191,10 +191,10 @@ function PrivacyPage() {
 MODALS['theme-io'] = function ThemeIO({ id, mode }) {
   const [txt, setTxt] = useState(() => (mode === 'export' ? JSON.stringify(exportTheme(), null, 2) : '')); const [err, setErr] = useState(null);
   const apply = () => { try { const j = JSON.parse(txt); const out = {}; for (const k of ['theme', 'bg', 'rain', 'glass', 'fonts', 'motion', 'chat']) if (j[k] && typeof j[k] === 'object') out[k] = j[k]; if (!Object.keys(out).length) throw new Error('No theme data found'); updateSettings(out); toast('Theme imported', 'success'); closeModal(id); } catch (e) { setErr(e.message); } };
-  return html`<${Modal} title=${mode === 'export' ? 'Export theme' : 'Import theme'} subtitle=${mode === 'export' ? 'Copy this JSON to share your look with a friend.' : 'Paste a theme JSON exported from Orate.'} width=${560} onClose=${() => closeModal(id)} footer=${mode === 'export' ? html`<${Btn} variant="primary" icon="copy" onClick=${async () => { await copyText(txt); toast('Copied', 'success', 1400); }}>Copy<//>` : html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>Cancel<//><${Btn} variant="primary" onClick=${apply}>Import<//>`}>
+  return html`<${Modal} title=${mode === 'export' ? 'Export theme' : 'Import theme'} subtitle=${mode === 'export' ? 'Copy this JSON to share your look with a friend.' : 'Paste a theme JSON exported from Orata.'} width=${560} onClose=${() => closeModal(id)} footer=${mode === 'export' ? html`<${Btn} variant="primary" icon="copy" onClick=${async () => { await copyText(txt); toast('Copied', 'success', 1400); }}>Copy<//>` : html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>Cancel<//><${Btn} variant="primary" onClick=${apply}>Import<//>`}>
     <textarea class="textarea code-area" rows="12" spellcheck="false" readonly=${mode === 'export'} value=${txt} onInput=${(e) => { setTxt(e.target.value); setErr(null); }} placeholder='{ "theme": { … } }'></textarea>${err ? html`<div class="auth-error">${err}</div>` : null}<//>`;
 };
-export function exportTheme() { const s = state.settings; return { app: 'Orate', version: 1, theme: s.theme, bg: { ...s.bg, library: [] }, rain: s.rain, glass: s.glass, fonts: s.fonts, motion: s.motion, chat: s.chat }; }
+export function exportTheme() { const s = state.settings; return { app: 'Orata', version: 1, theme: s.theme, bg: { ...s.bg, library: [] }, rain: s.rain, glass: s.glass, fonts: s.fonts, motion: s.motion, chat: s.chat }; }
 function AdvancedPage() {
   const conn = useSel((s) => s.connection);
   return html`<div class="s-page">
@@ -209,7 +209,7 @@ function AdvancedPage() {
         <${Btn} onClick=${() => { ls('x', null, null); localStorage.removeItem('orate:local'); toast('Cleared local device data', 'success'); }}>${t('Clear device preferences')}<//></div>
     <//>
     <${Section} title=${t('About')}>
-      <div class="about"><${Logo} size=${46} /><div><b>Orate 1.0</b><small>${t('Connection')}: ${conn} · ${location.host}</small></div></div>
+      <div class="about"><${Logo} size=${46} /><div><b>Orata 1.0</b><small>${t('Connection')}: ${conn} · ${location.host}</small></div></div>
     <//></div>`;
 }
 
@@ -234,7 +234,7 @@ export function SettingsHost() {
     <nav class="settings-nav panel">
       <div class="sn-scroll">${NAV.map((g) => html`<div class="sn-group" key=${g.group}><h5>${t(g.group)}</h5>${g.items.map(([k, ic, l]) => html`<button type="button" class=${cx('sn-item', shown === k && 'on')} onClick=${() => openSettings(k)}><${Icon} name=${ic} size=${18} /><span>${t(l)}</span></button>`)}</div>`)}
         <div class="sn-group"><button type="button" class="sn-item danger" onClick=${async () => { if (await confirmDialog({ title: 'Log out', body: 'Are you sure you want to log out?', confirmLabel: 'Log Out', danger: true })) { closeSettings(); logout(); } }}><${Icon} name="log-out" size=${18} /><span>${t('Log Out')}</span></button></div>
-        <div class="sn-foot"><${Logo} size=${22} /> Orate 1.0</div></div>
+        <div class="sn-foot"><${Logo} size=${22} /> Orata 1.0</div></div>
     </nav>
     <section class="settings-body panel">
       <header class="sb-title"><h2 key=${shown}>${t(label)}</h2><button type="button" class="settings-close" onClick=${closeSettings} aria-label="Close settings"><span><${Icon} name="x" size=${20} /></span><small>ESC</small></button></header>

@@ -1,7 +1,7 @@
 {
   "name": "orate",
   "version": "1.0.0",
-  "description": "Orate - a realtime chat app with servers, DMs, voice and a fully customizable glass UI.",
+  "description": "Orata - a realtime chat app with servers, DMs, voice and a fully customizable glass UI.",
   "private": true,
   "type": "module",
   "main": "server/index.js",

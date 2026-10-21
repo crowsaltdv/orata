@@ -1,4 +1,4 @@
-// Orate — a single chat message (header, markdown body, attachments, GIFs, embeds, reactions, toolbar).
+// Orata — a single chat message (header, markdown body, attachments, GIFs, embeds, reactions, toolbar).
 import { html, useState, useEffect, useRef, useMemo, memo, cx, formatStamp, formatClock, formatFull, fileSize, copyText, isImageType, shallowEq } from '/js/lib.js';
 import { state, set, useSel, nameOf, roleColor, openContext, openPopover, openModal, toast, getChannel, hasPerm, hasChannelPerm, dmName, goChannel, goDm, go, emojiById } from '/js/store.js';
 import { Icon } from '/js/icons.js';

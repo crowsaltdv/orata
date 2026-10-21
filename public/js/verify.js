@@ -1,4 +1,4 @@
-// Orate — email verification UI: the /verify?token=… page, the "verify your email" screen (REQUIRE_EMAIL_VERIFICATION)
+// Orata — email verification UI: the /verify?token=… page, the "verify your email" screen (REQUIRE_EMAIL_VERIFICATION)
 // and the optional reminder banner.
 import { html, useState, useEffect, cx } from '/js/lib.js';
 import { state, set, useSel, go, toast, openModal } from '/js/store.js';
@@ -23,7 +23,7 @@ function AuthShell({ children }) {
   return html`<div class="auth-screen">
     <div class="auth-orb o1"></div><div class="auth-orb o2"></div><div class="auth-orb o3"></div>
     <div class="auth-col">
-      <div class="auth-hero panel"><div class="auth-mark"><${Logo} size=${52} /></div><h1>Orate</h1></div>
+      <div class="auth-hero panel"><div class="auth-mark"><${Logo} size=${52} /></div><h1>Orata</h1></div>
       <div class="auth-card panel"><div class="auth-card-in verify-card">${children}</div></div>
     </div>
   </div>`;
@@ -52,10 +52,10 @@ export function VerifyScreen() {
   return html`<${AuthShell}>
     ${st === 'working' ? html`<header><div class="verify-ic"><${Spinner} size=${34} /></div><h2>${t('Verifying your email…')}</h2></header>`
       : st === 'ok' ? html`<header><div class="verify-ic ok"><${Icon} name="check" size=${34} sw=${3} /></div><h2>${t('Email verified!')}</h2><p>${info?.email ? html`${info.email} ${t('is confirmed.')}` : t('Your email address is confirmed.')}</p></header>
-        <${Btn} variant="primary" size="lg" class="btn-block" onClick=${cont}>${signedIn ? t('Continue to Orate') : t('Log in')}<//>`
+        <${Btn} variant="primary" size="lg" class="btn-block" onClick=${cont}>${signedIn ? t('Continue to Orata') : t('Log in')}<//>`
         : html`<header><div class="verify-ic bad"><${Icon} name="alert-circle" size=${34} /></div><h2>${t('This link didn’t work')}</h2><p>${err}</p></header>
           ${signedIn ? html`<${Btn} variant="primary" size="lg" class="btn-block" onClick=${async () => { await resendVerification(); }}>${t('Send me a new link')}<//>` : null}
-          <${Btn} variant=${signedIn ? 'ghost' : 'primary'} size="lg" class="btn-block" onClick=${cont}>${signedIn ? t('Back to Orate') : t('Log in')}<//>`}
+          <${Btn} variant=${signedIn ? 'ghost' : 'primary'} size="lg" class="btn-block" onClick=${cont}>${signedIn ? t('Back to Orata') : t('Log in')}<//>`}
   <//>`;
 }
 
@@ -74,7 +74,7 @@ export function VerifyGate() {
   };
   return html`<${AuthShell}>
     <header><div class="verify-ic"><${Icon} name="at" size=${34} /></div><h2>${t('Verify your email')}</h2>
-      <p>${t('We sent a link to')} <b>${maskEmail(me?.email)}</b>. ${t('Open it to start using Orate.')}</p></header>
+      <p>${t('We sent a link to')} <b>${maskEmail(me?.email)}</b>. ${t('Open it to start using Orata.')}</p></header>
     ${smtp ? null : html`<div class="note-chip"><${Icon} name="info" size=${14} /> ${t('No email server is configured, so the link was printed in the server console (or run npm run verify-email <username>).')}</div>`}
     <div class="auth-form">
       <${Btn} variant="primary" size="lg" class="btn-block" loading=${checking} onClick=${check}>${t('I’ve verified — continue')}<//>
