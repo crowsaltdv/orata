@@ -64,14 +64,14 @@ let child = null;
 function startServer() {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '', ACCOUNTS_PER_BROWSER: '1000', ACCOUNTS_PER_HOUR: '1000',
-      DISCORD_BOT_TOKEN: 'fake-token', DISCORD_API: `http://127.0.0.1:${FPORT}/api`, DISCORD_GATEWAY: `ws://127.0.0.1:${FPORT}/gateway`, PUBLIC_URL: 'https://orata.example' },
+      DISCORD_BOT_TOKEN: 'fake-token', DISCORD_API: `http://127.0.0.1:${FPORT}/api`, DISCORD_GATEWAY: `ws://127.0.0.1:${FPORT}/gateway`, PUBLIC_URL: '', TRUST_PROXY: '1' },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
 }
 async function ready() { for (let i = 0; i < 60; i++) { try { await fetch(base + '/api/config'); return; } catch { await sleep(100); } } }
 async function stopServer() { if (!child) return; await sleep(900); const c = child; child = null; const done = new Promise((r) => c.once('exit', r)); c.kill('SIGINT'); await Promise.race([done, sleep(3000)]); }
-async function api(method, url, token, body) {
-  const res = await fetch(base + '/api' + url, { method, headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+async function api(method, url, token, body, headers = {}) {
+  const res = await fetch(base + '/api' + url, { method, headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: 'Bearer ' + token } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
   let j = null; try { j = await res.json(); } catch { /* no body */ }
   return { status: res.status, body: j };
 }
@@ -97,7 +97,7 @@ async function main() {
   const A = await register('alice'); const B = await register('bob');
   const S = (await api('POST', '/servers', A.token, { name: 'Bridge Town', orbit: true })).body; const text = S.channels.find((c) => c.type === 'text');
   await api('POST', `/invites/${(await api('POST', `/servers/${S.id}/invites`, A.token, {})).body.code}/join`, B.token);
-  const cmd = (tok, name) => api('POST', `/channels/${text.id}/command`, tok, { name, args: '' });
+  const cmd = (tok, name) => api('POST', `/channels/${text.id}/command`, tok, { name, args: '' }, { 'x-forwarded-proto': 'https' });   // like behind Render's proxy
   const msgs = async () => (await api('GET', `/channels/${text.id}/messages?limit=50`, A.token)).body.messages;
   let r = await cmd(B.token, 'link'); ok(r.status === 403, 'a member without Manage Server can’t /link');
   r = await cmd(A.token, 'link'); const code = /code:([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(r.body?.ephemeral || '')?.[1];
@@ -137,11 +137,14 @@ async function main() {
   const mineId = r.body.id;
   let h = await until(() => hookPosts().find((c) => said(c).content?.startsWith('hey')));
   ok(said(h).content === 'hey @Bob @everyone' && said(h).username === 'Alice', 'an Orata message goes to Discord under the sender’s name, mentions as plain names', said(h || { body: {} }).content);
-  ok(said(h).avatar_url === 'https://orata.example/img/icon-192.png' && said(h).allowed_mentions?.parse.length === 0, '… with their picture (the logo without one), and it can’t ping anyone on Discord');
+  ok(said(h).avatar_url === `https://127.0.0.1:${PORT}/img/icon-192.png` && said(h).allowed_mentions?.parse.length === 0, '… with their picture from the address /link was typed at (the logo without one), and it can’t ping anyone on Discord', said(h || { body: {} }).avatar_url);
   const up = await (await fetch(base + '/api/upload', { method: 'POST', headers: { authorization: 'Bearer ' + A.token, 'content-type': 'image/png', 'x-filename': 'dog.png' }, body: PNG })).json();
   r = await api('POST', `/channels/${text.id}/messages`, A.token, { content: 'look', attachments: [up] }); const lookId = r.body.id;
   h = await until(() => hookPosts().find((c) => typeof c.body === 'string' && c.body.includes('look')));
   ok(h?.type.startsWith('multipart/form-data') && h.body.includes('name="files[0]"; filename="dog.png"'), 'pictures are uploaded to Discord as real files');
+  await api('PATCH', '/me', A.token, { avatar: up.url }); await api('POST', `/channels/${text.id}/messages`, A.token, { content: 'new face' });
+  h = await until(() => hookPosts().find((c) => said(c).content === 'new face'));
+  ok(said(h || { body: {} }).avatar_url === `https://127.0.0.1:${PORT}${up.url}`, 'an uploaded profile picture shows on Discord too', said(h || { body: {} }).avatar_url);
   await api('PATCH', `/channels/${text.id}/messages/${mineId}`, A.token, { content: 'hey (edited)' });
   const patch = await until(() => calls.find((c) => c.method === 'PATCH' && c.path.includes('/messages/')));
   ok(patch?.body.content === 'hey (edited)', 'editing in Orata edits the Discord copy');

@@ -15,7 +15,7 @@ const TOKEN = ENV.DISCORD_BOT_TOKEN || '';
 export const discordOn = !!TOKEN;
 const API = (ENV.DISCORD_API || 'https://discord.com/api/v10').replace(/\/$/, '');   // both can point at the self-test's fake Discord
 const GATEWAY = ENV.DISCORD_GATEWAY || 'wss://gateway.discord.gg/?v=10&encoding=json';
-const PUBLIC = (ENV.PUBLIC_URL || '').replace(/\/$/, '');
+const PUBLIC = (ENV.PUBLIC_URL || '').trim().replace(/\/+$/, '');
 const MAX_FILE = Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024;
 const DISCORD_MAX_FILE = 10 * 1024 * 1024;   // the most Discord takes in one file from a webhook (without boosts)
 const INTENTS = 1 | 512 | 32768;   // servers, server messages, message content (privileged: switched on in the Developer Portal)
@@ -27,7 +27,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const later = (a, b) => (BigInt(a) > BigInt(b || 0) ? a : b);   // the newer of two Discord ids (they grow with time)
 
 let guard = (ch, uid, text) => text;   // the server's swearing protection, handed over by api.js
-const links = () => (db.discord ||= { links: {} }).links;   // Orata channel id -> { guildId, channelId, webhookId, webhookToken, by, at, lastSeen, pairs }
+const links = () => (db.discord ||= { links: {} }).links;   // Orata channel id -> { guildId, channelId, webhookId, webhookToken, site, by, at, lastSeen, pairs }
 const linkOf = (discordChannelId) => Object.entries(links()).find(([, l]) => l.channelId === discordChannelId) || [];
 const orbitOf = (s) => (s?.orbitId && s.members[s.orbitId] && db.users[s.orbitId] ? s.orbitId : null);
 const codes = new Map();   // one-time link codes: code -> { channelId, userId, at }
@@ -119,14 +119,15 @@ async function registerCommands() {
   if (!same) await rest('PUT', `/applications/${bot.appId}/commands`, COMMANDS);
 }
 
-/** /link in Orata: a one-time code (10 minutes) for /orata-link in the Discord channel. Returns what Orbit tells the person. */
-export function linkCode(s, ch, userId) {
+/** /link in Orata: a one-time code (10 minutes) for /orata-link in the Discord channel. Returns what Orbit tells the person.
+ *  `site` is Orata's public address (PUBLIC_URL, or the one /link was typed at): Discord loads Orata people's pictures from it. */
+export function linkCode(s, ch, userId, site) {
   if (!TOKEN) throw bad('Discord linking isn’t set up on this Orata server yet: it needs DISCORD_BOT_TOKEN (README → “Discord bridge”).');
   if (ch.type !== 'text') throw bad('Only text channels can be linked with Discord.');
   if (links()[ch.id]) throw bad('This channel is already linked with Discord. Type /unlink first.');
   for (const [k, v] of codes) if (v.channelId === ch.id || Date.now() - v.at > CODE_TTL) codes.delete(k);
   const code = Array.from(crypto.randomBytes(8), (b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
-  codes.set(code, { channelId: ch.id, userId, at: Date.now() });
+  codes.set(code, { channelId: ch.id, userId, site, at: Date.now() });
   const invite = bot.appId && `https://discord.com/oauth2/authorize?client_id=${bot.appId}&permissions=${BOT_PERMISSIONS}&scope=bot%20applications.commands`;
   return `In the Discord channel you want to link, type:\n\`/orata-link code:${code.slice(0, 4)}-${code.slice(4)}\`\nThe code works for 10 minutes.${invite ? `\nIs the Orata bot not in your Discord server yet? [Add it here](${invite}) first.` : ''}`;
 }
@@ -139,7 +140,7 @@ export async function unlinkChannel(chId, { why = '', fromOrata = false, actor =
   if (s) audit(s, actor, 'discord_unlink', { channel: ch.name, ...(discordUser ? { discordUser } : {}), ...(why ? { why } : {}) });
   if (ch && orbitOf(s)) postMessage(ch, orbitOf(s), { content: `🔗 This channel is no longer linked with Discord${why ? ` (${why})` : ''}.` });
   queue(chId, async () => {
-    if (fromOrata) await rest('POST', hookUrl(l, '?wait=true'), { content: '🔗 This channel is no longer linked with Orata.', username: 'Orbit', avatar_url: avatarUrl(null), allowed_mentions: { parse: [] } }).catch(() => {});
+    if (fromOrata) await rest('POST', hookUrl(l, '?wait=true'), { content: '🔗 This channel is no longer linked with Orata.', username: 'Orbit', avatar_url: avatarUrl(null, l), allowed_mentions: { parse: [] } }).catch(() => {});
     await rest('DELETE', hookUrl(l)).catch(() => {});
   });
   return true;
@@ -172,7 +173,7 @@ async function onCommand(i) {
   catch (e) { return reply(e.status === 403 ? 'I need the **Manage Webhooks** permission in this channel. Give it to me, then run the command again.' : 'Discord didn’t let me set up the link. Try again in a moment.'); }
   codes.delete(code);
   const g = bot.guilds.get(i.guild_id); const there = g?.channels.get(i.channel_id) || i.channel?.name || 'channel';
-  links()[ch.id] = { guildId: i.guild_id, channelId: i.channel_id, webhookId: hook.id, webhookToken: hook.token, by: c.userId, at: Date.now(), lastSeen: i.id, pairs: [] };
+  links()[ch.id] = { guildId: i.guild_id, channelId: i.channel_id, webhookId: hook.id, webhookToken: hook.token, site: /^https:\/\//.test(c.site || '') ? c.site : null, by: c.userId, at: Date.now(), lastSeen: i.id, pairs: [] };
   audit(s, c.userId, 'discord_link', { channel: ch.name, discordChannel: there, guild: g?.name || null });
   save();
   await reply(`🔗 Linked with **#${ch.name}** in **${s.name}** on Orata.`);
@@ -191,11 +192,11 @@ const pairByDiscord = (l, id) => l.pairs.find((p) => p.d.includes(id));
 
 /* ---------------------------------------------------------------- Orata → Discord */
 const hookName = (s, u) => (s?.members[u?.id]?.nick || u?.displayName || 'Orata user').replace(/discord|clyde/gi, (w) => `${w.slice(0, 3)}​${w.slice(3)}`).slice(0, 80);   // Discord refuses webhook names with these words
-function avatarUrl(u) {
+function avatarUrl(u, l) {
   const a = u?.avatar || '';
   if (/^https:\/\//.test(a)) return a;
-  if (!PUBLIC) return undefined;   // Discord can't fetch pictures without a public address
-  return PUBLIC + (a.startsWith('/uploads/') ? a : '/img/icon-192.png');   // Discord can't draw Orata's gradient default pictures, so: the logo
+  const site = PUBLIC || l.site; if (!site) return undefined;   // Discord can't fetch pictures without a public address
+  return site + (a.startsWith('/uploads/') ? a : '/img/icon-192.png');   // Discord can't draw Orata's gradient default pictures, so: the logo
 }
 /** An Orata message as Discord text. Mentions become plain names (they'd point at the wrong people on Discord), custom emoji :name:. */
 function textFor(ch, m) {
@@ -229,12 +230,12 @@ async function sendToDiscord(ch, l, m) {
   for (const a of m.attachments || []) {
     const name = path.basename(a.url);
     if (a.size <= DISCORD_MAX_FILE && await restoreUpload(name)) files.push({ data: fs.readFileSync(path.join(UPLOAD_DIR, name)), type: a.type, name: (a.spoiler ? 'SPOILER_' : '') + a.name });
-    else text += `\n${PUBLIC ? PUBLIC + a.url : a.name}`;   // too big for Discord: a link instead
+    else text += `\n${PUBLIC || l.site ? (PUBLIC || l.site) + a.url : a.name}`;   // too big for Discord: a link instead
   }
   const parts = split(text);
   if (!parts.length && !files.length) return;
   if (!parts.length) parts.push('');
-  const base = { username: hookName(s, u), avatar_url: avatarUrl(u), allowed_mentions: { parse: [] } };   // nothing from Orata can ping anyone on Discord
+  const base = { username: hookName(s, u), avatar_url: avatarUrl(u, l), allowed_mentions: { parse: [] } };   // nothing from Orata can ping anyone on Discord
   const sent = [];
   try {
     for (let k = 0; k < parts.length; k++) sent.push((await rest('POST', hookUrl(l, '?wait=true'), { ...base, content: parts[k] }, k === parts.length - 1 ? files : null)).id);

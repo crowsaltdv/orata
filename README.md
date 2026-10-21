@@ -168,7 +168,7 @@ Link an Orata channel with a Discord channel and they act as one conversation: m
 1. On the [Discord Developer Portal](https://discord.com/developers/applications) make a **New Application** (call it Orbit and give it Orbit's picture if you like).
 2. On its **Bot** page, switch on **Message Content Intent** (under *Privileged Gateway Intents*), then **Reset Token** and copy the token.
 3. Put it in `.env` (or your host's environment) as `DISCORD_BOT_TOKEN=…` and restart Orata. The console says `[discord] connected as …`. Keep the token secret: anyone with it controls the bot.
-4. Set `PUBLIC_URL` to Orata's public address, so Discord can show Orata people's pictures.
+4. Discord loads Orata people's pictures from Orata's public address: `PUBLIC_URL` when it's set, otherwise the `https://` address `/link` was typed at. (From `localhost` Discord can't reach them, so it shows its default picture.)
 
 **Link a channel (any admin):** Orbit has to be in the Orata server. In the Orata channel type **`/link`** (needs *Manage Server*): Orbit privately gives you a code that works for 10 minutes, plus a link to add the bot to your Discord server if it isn't there yet. In the Discord channel, someone with *Manage Server* types **`/orata-link code:XXXX-XXXX`**. To stop, type `/unlink` in Orata or `/orata-unlink` in Discord. Links and unlinks go in the audit log.
 
