@@ -5,7 +5,7 @@ import { db, save, newId, emitTo, publicUser, memberView, messageView, serverAud
 import { postMessage, messagesDeleted } from './messages.js';
 import { JOKES, BALL, rollDice } from './bot.js';
 import { ORBIT_COMMANDS, orbitCommand, parseDuration, formatDuration } from '../public/js/orbit-commands.js';
-import { discordOn, linkCode, unlinkChannel } from './discord.js';
+import { discordOn, linkCode, linkInstructions, unlinkChannel } from './discord.js';
 import { baseUrl } from './verify.js';
 
 const UPLOAD = /^\/uploads\/[A-Za-z0-9_.-]{1,120}$/;
@@ -202,6 +202,7 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
       case 'settings': return res.json(only('Type /settings in the message box to open Orbit’s settings.'));
       case 'reactionroles': return res.json(only('Type /reactionroles in the message box to set up a reaction-roles message.'));
       case 'link': return res.json(only(linkCode(s, ch, me, baseUrl(req))));
+      case 'link-instructions': return res.json(only(linkInstructions(ch)));
       case 'unlink': if (!await unlinkChannel(ch.id, { fromOrata: true, actor: me })) throw bad('This channel isn’t linked with Discord.'); return res.json({ ok: true });
       default: throw new ApiError(400, 'Unknown command');
     }

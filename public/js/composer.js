@@ -68,7 +68,7 @@ function getTrigger(text, caret) {
   const before = text.slice(0, caret);
   let m = /(^|[\s(])([@#])([^\s@#]{0,32})$/.exec(before); if (m) return { kind: m[2], query: m[3], start: caret - m[3].length - 1 };
   m = /(^|[\s(]):([a-z0-9_+-]{2,32})$/i.exec(before); if (m) return { kind: ':', query: m[2], start: caret - m[2].length - 1 };
-  if (/^\/[a-z0-9]*$/i.test(before) && before.length === text.length) return { kind: '/', query: before.slice(1), start: 0 };
+  if (/^\/[a-z0-9-]*$/i.test(before) && before.length === text.length) return { kind: '/', query: before.slice(1), start: 0 };
   return null;
 }
 
@@ -182,7 +182,7 @@ export function Composer({ chId }) {
     const ready = atts.filter((a) => a.status !== 'error');
     if (!v.trim() && !ready.length && !media) return;
     // slash commands
-    const cm = /^\/([a-z0-9]+)(?:\s+([\s\S]*))?$/i.exec(v);
+    const cm = /^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/i.exec(v);
     if (cm && orbitOn && orbitCommand(cm[1]) && !COMMANDS.some((c) => c.name === cm[1].toLowerCase())) {
       setText(''); drafts.delete(chId); setAc(null); await runOrbit(cm[1].toLowerCase(), (cm[2] || '').trim()); return;
     }

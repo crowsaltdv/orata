@@ -20,6 +20,7 @@ export const ORBIT_COMMANDS = [
   { name: 'reactionroles', desc: 'Post a message where reacting gives a role', perm: 'MANAGE_ROLES', only: true },
   { name: 'settings', desc: 'Change Orbit’s name, picture and who can use each command', perm: 'MANAGE_SERVER', only: true },
   { name: 'link', desc: 'Link this channel with a Discord channel', perm: 'MANAGE_SERVER', only: true, discord: true },
+  { name: 'link-instructions', desc: 'How linking with Discord works and what comes across', only: true, discord: true },
   { name: 'unlink', desc: 'Stop mirroring this channel with Discord', perm: 'MANAGE_SERVER', discord: true },
 ];
 export const orbitCommand = (name) => ORBIT_COMMANDS.find((c) => c.name === String(name || '').toLowerCase()) || null;

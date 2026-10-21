@@ -102,7 +102,9 @@ async function main() {
   await api('POST', `/invites/${(await api('POST', `/servers/${S.id}/invites`, A.token, {})).body.code}/join`, B.token);
   const cmd = (tok, name) => api('POST', `/channels/${text.id}/command`, tok, { name, args: '' });
   const msgs = async () => (await api('GET', `/channels/${text.id}/messages?limit=50`, A.token)).body.messages;
-  let r = await cmd(B.token, 'link'); ok(r.status === 403, 'a member without Manage Server can’t /link');
+  let r = await cmd(B.token, 'link-instructions');
+  ok(r.status === 200 && r.body.ephemeral.includes('isn’t linked') && r.body.ephemeral.includes('/orata-link code:') && r.body.ephemeral.includes('polls') && r.body.ephemeral.includes('client_id=900'), 'anyone can read /link-instructions: what comes across, how to link, and that it isn’t linked yet');
+  r = await cmd(B.token, 'link'); ok(r.status === 403, 'a member without Manage Server can’t /link');
   r = await cmd(A.token, 'link'); const code = /code:([A-Z0-9]{4}-[A-Z0-9]{4})/.exec(r.body?.ephemeral || '')?.[1];
   ok(r.status === 200 && code && r.body.ephemeral.includes('client_id=900'), '/link gives the admin a one-time code (and the link to add the bot)');
   ok(!(await msgs()).some((m) => m.content.includes(code)), '… that nobody else sees');
@@ -120,6 +122,7 @@ async function main() {
   const notice = await until(async () => (await msgs()).find((m) => m.authorId === S.orbitId && /now linked/.test(m.content)));
   ok(notice?.content.includes('#general') && notice.content.includes('Fake Guild'), 'Orbit says so in the Orata channel');
   ok(!!await until(() => hookPosts().find((c) => /now linked/.test(said(c).content))), '… and the same notice shows up on Discord');
+  r = await cmd(B.token, 'link-instructions'); ok(r.body.ephemeral.includes('linked with **#general** in **Fake Guild**'), '/link-instructions then says which Discord channel it’s linked with');
 
   console.log('\nDiscord → Orata');
   const d1 = snow();

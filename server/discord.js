@@ -133,6 +133,26 @@ export function linkCode(s, ch, userId, site) {
   return `In the Discord channel you want to link, type:\n\`/orata-link code:${code.slice(0, 4)}-${code.slice(4)}\`\nThe code works for 10 minutes.${invite ? `\nIs the Orata bot not in your Discord server yet? [Add it here](${invite}) first.` : ''}`;
 }
 
+/** /link-instructions: whether this channel is linked, what a link carries, and how to set one up. */
+export function linkInstructions(ch) {
+  const l = links()[ch.id]; const g = l && bot.guilds.get(l.guildId);
+  const invite = bot.appId && `https://discord.com/oauth2/authorize?client_id=${bot.appId}&permissions=${BOT_PERMISSIONS}&scope=bot%20applications.commands`;
+  return [
+    '**🔗 Linking a channel with Discord**',
+    l ? `This channel is linked with **#${g?.channels.get(l.channelId) || l.channelName || 'a channel'}**${g?.name || l.guildName ? ` in **${g?.name || l.guildName}**` : ''} on Discord.` : 'This channel isn’t linked with Discord yet.',
+    '',
+    '**What comes across, both ways:** messages with their formatting, replies, edits and deletes, pictures and files, GIFs and stickers (Discord’s own animated ones too). Everyone keeps their name and profile picture. Mentions become plain names, and custom Discord emoji show as `:name:`.',
+    '**What doesn’t:** polls (an Orata poll shows on Discord as text), reactions, threads, voice, and messages from bots.',
+    '',
+    '**How to link** (each step needs the **Manage Server** permission):',
+    `1. Add the Orata bot to your Discord server${invite ? ` ([add it here](${invite}))` : ''}. In the Discord channel it needs **View Channel**, **Read Message History**, **Send Messages**, **Attach Files** and **Manage Webhooks**.`,
+    '2. Type `/link` in this channel. Orbit privately gives you a code that works for 10 minutes.',
+    '3. In the Discord channel, type `/orata-link code:XXXX-XXXX` with that code.',
+    '',
+    'To stop, type `/unlink` here or `/orata-unlink` on Discord. A channel can be linked with one Discord channel at a time.',
+  ].join('\n');
+}
+
 /** Remembers Orata's public https address for a link that doesn't know it yet (made before it was saved, or when /link didn't come over https):
  *  Discord loads Orata people's pictures from it. Called for every message sent in a channel. */
 export function noteSite(chId, site) {
@@ -181,7 +201,7 @@ async function onCommand(i) {
   catch (e) { return reply(e.status === 403 ? 'I need the **Manage Webhooks** permission in this channel. Give it to me, then run the command again.' : 'Discord didn’t let me set up the link. Try again in a moment.'); }
   codes.delete(code);
   const g = bot.guilds.get(i.guild_id); const there = g?.channels.get(i.channel_id) || i.channel?.name || 'channel';
-  links()[ch.id] = { guildId: i.guild_id, channelId: i.channel_id, webhookId: hook.id, webhookToken: hook.token, site: /^https:\/\//.test(c.site || '') ? c.site : null, by: c.userId, at: Date.now(), lastSeen: i.id, pairs: [] };
+  links()[ch.id] = { guildId: i.guild_id, channelId: i.channel_id, webhookId: hook.id, webhookToken: hook.token, site: /^https:\/\//.test(c.site || '') ? c.site : null, channelName: there, guildName: g?.name || null, by: c.userId, at: Date.now(), lastSeen: i.id, pairs: [] };
   audit(s, c.userId, 'discord_link', { channel: ch.name, discordChannel: there, guild: g?.name || null });
   save();
   await reply(`🔗 Linked with **#${ch.name}** in **${s.name}** on Orata.`);
