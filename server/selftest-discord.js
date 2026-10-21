@@ -16,6 +16,7 @@ const base = `http://127.0.0.1:${PORT}`;
 let pass = 0; let fail = 0;
 const ok = (c, name, extra = '') => { if (c) { pass++; console.log('  ✓', name); } else { fail++; console.log('  ✗', name, extra); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const LOTTIE = { v: '5.7.4', fr: 30, ip: 0, op: 30, w: 160, h: 160, layers: [] };   // the smallest Lottie animation
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 async function until(fn, ms = 4000) { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v || Date.now() > end) return v; await sleep(60); } }
 
@@ -29,7 +30,8 @@ const fake = http.createServer((req, res) => {
   req.on('end', () => {
     const raw = Buffer.concat(chunks); const type = req.headers['content-type'] || ''; const u = new URL(req.url, 'http://x');
     let body = null; try { body = type.includes('json') ? JSON.parse(raw) : raw.toString('latin1'); } catch { body = raw.toString(); }
-    if (u.pathname === '/files/cat.png') { res.writeHead(200, { 'content-type': 'image/png' }); return res.end(PNG); }
+    if (u.pathname === '/files/cat.png' || /^\/stickers\/\d+\.png$/.test(u.pathname)) { res.writeHead(200, { 'content-type': 'image/png' }); return res.end(PNG); }
+    if (/^\/stickers\/\d+\.json$/.test(u.pathname)) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify(LOTTIE)); }
     calls.push({ method: req.method, path: u.pathname, query: u.search, body, type, auth: req.headers.authorization });
     const json = (v, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
     const p = u.pathname.replace(/^\/api/, '');
@@ -88,7 +90,7 @@ async function main() {
 
   console.log('\nConnecting');
   await until(() => identify);
-  ok(identify?.token === 'fake-token' && identify.intents === (1 | 512 | 32768), 'logs in to Discord with the token, asking for messages and their text');
+  ok(identify?.token === 'fake-token' && identify.intents === (1 | 512 | 32768 | (1 << 24)), 'logs in to Discord with the token, asking for messages, their text and poll votes');
   const put = await until(() => calls.find((c) => c.method === 'PUT' && c.path === '/api/applications/900/commands'));
   ok(put?.body.some((c) => c.name === 'orata-link' && c.default_member_permissions === '32') && put.body.some((c) => c.name === 'orata-unlink'), 'sets up /orata-link and /orata-unlink, shown only to people who can manage the server');
   ok((await api('GET', '/config')).body.discord === true, 'Orata says Discord linking is on');
@@ -150,6 +152,40 @@ async function main() {
   ok(patch?.body.content === 'hey (edited)', 'editing in Orata edits the Discord copy');
   await api('DELETE', `/channels/${text.id}/messages/${mineId}`, A.token);
   ok(!!await until(() => calls.find((c) => c.method === 'DELETE' && c.path.includes(`/webhooks/wh1/${HOOK_TOKEN}/messages/`))), 'deleting in Orata deletes the Discord copy');
+
+  console.log('\nGIFs, stickers and polls');
+  const gifv = (n) => ({ type: 'gifv', url: `https://tenor.com/view/cat-gif-${n}`, provider: { name: 'Tenor' }, thumbnail: { url: `https://media.tenor.com/x/cat${n}.png`, width: 220, height: 200 }, video: { url: `https://media.tenor.com/x/cat${n}.mp4`, width: 220, height: 200 } });
+  const dana = { id: '1001', username: 'dana', global_name: 'Dana' };
+  dispatch('MESSAGE_CREATE', { id: snow(), channel_id: '2001', guild_id: '4001', type: 0, content: 'https://tenor.com/view/cat-gif-1', author: dana, mentions: [], attachments: [], embeds: [gifv(1)] });
+  const g1 = await until(async () => (await msgs()).find((m) => m.gif?.mp4 === 'https://media.tenor.com/x/cat1.mp4'));
+  ok(g1 && g1.content === '' && g1.gif.w === 220, 'a GIF from Discord’s GIF picker shows as a GIF (not as its link)');
+  const late = snow();
+  dispatch('MESSAGE_CREATE', { id: late, channel_id: '2001', guild_id: '4001', type: 0, content: 'https://tenor.com/view/cat-gif-2', author: dana, mentions: [], attachments: [], embeds: [] });
+  await until(async () => (await msgs()).find((m) => m.content === 'https://tenor.com/view/cat-gif-2'));
+  dispatch('MESSAGE_UPDATE', { id: late, channel_id: '2001', guild_id: '4001', embeds: [gifv(2)] });
+  const g2 = await until(async () => (await msgs()).find((m) => m.gif?.mp4 === 'https://media.tenor.com/x/cat2.mp4'));
+  ok(g2 && g2.content === '' && !g2.editedAt, '… also when Discord adds the GIF a moment later (and it isn’t marked edited)');
+  dispatch('MESSAGE_CREATE', { id: snow(), channel_id: '2001', guild_id: '4001', type: 0, content: '', author: dana, mentions: [], attachments: [], sticker_items: [{ id: '5001', name: 'party', format_type: 1 }] });
+  const s1 = await until(async () => (await msgs()).find((m) => m.sticker?.title === 'party'));
+  ok(s1?.sticker.url.startsWith('/uploads/') && !s1.sticker.lottie && (await fetch(base + s1.sticker.url)).status === 200, 'a server sticker comes across as an Orata sticker');
+  dispatch('MESSAGE_CREATE', { id: snow(), channel_id: '2001', guild_id: '4001', type: 0, content: '', author: dana, mentions: [], attachments: [], sticker_items: [{ id: '5002', name: 'wave', format_type: 3 }] });
+  const s2 = await until(async () => (await msgs()).find((m) => m.sticker?.title === 'wave'));
+  ok(s2?.sticker.lottie && (await (await fetch(base + s2.sticker.url)).json()).w === 160, '… and Discord’s own (animated Lottie) stickers too');
+  const pd = snow();
+  dispatch('MESSAGE_CREATE', { id: pd, channel_id: '2001', guild_id: '4001', type: 0, content: '', author: dana, mentions: [], attachments: [],
+    poll: { question: { text: 'Best pet?' }, answers: [{ answer_id: 1, poll_media: { text: 'Cat', emoji: { name: '🐱' } } }, { answer_id: 2, poll_media: { text: 'Dog' } }], expiry: new Date(Date.now() + 3600_000).toISOString(), allow_multiselect: false } });
+  const p1 = await until(async () => (await msgs()).find((m) => m.poll?.question === 'Best pet?'));
+  ok(p1 && p1.poll.answers.map((a) => a.id + a.text + (a.emoji || '')).join() === '1Cat🐱,2Dog' && p1.poll.expiresAt > Date.now(), 'a Discord poll becomes a real poll in Orata');
+  dispatch('MESSAGE_POLL_VOTE_ADD', { user_id: '1005', channel_id: '2001', message_id: pd, guild_id: '4001', answer_id: 2 });
+  const p2 = await until(async () => (await msgs()).find((m) => m.id === p1.id && m.poll.total === 1));
+  ok(p2?.poll.answers[1].discord === 1 && !p2.poll.answers[1].voters.length, 'votes on Discord count in Orata');
+  dispatch('MESSAGE_POLL_VOTE_REMOVE', { user_id: '1005', channel_id: '2001', message_id: pd, guild_id: '4001', answer_id: 2 });
+  ok(!!await until(async () => (await msgs()).find((m) => m.id === p1.id && m.poll.total === 0)), '… and taking a vote back takes it off');
+  r = await api('POST', `/channels/${text.id}/messages`, A.token, { poll: { question: 'Lunch?', answers: [{ text: 'Pizza', emoji: '🍕' }, { text: 'Tacos' }], hours: 4 } }); const lunchId = r.body.id;
+  h = await until(() => hookPosts().find((c) => said(c).poll?.question?.text === 'Lunch?'));
+  ok(said(h).poll.answers[0].poll_media.emoji.name === '🍕' && said(h).poll.answers[1].poll_media.text === 'Tacos' && said(h).poll.duration === 4, 'an Orata poll goes to Discord as a real poll');
+  dispatch('MESSAGE_POLL_VOTE_ADD', { user_id: '1006', channel_id: '2001', message_id: h.id, guild_id: '4001', answer_id: 1 });
+  ok(!!await until(async () => (await msgs()).find((m) => m.id === lunchId && m.poll.answers[0].discord === 1)), '… and votes on the Discord copy count in Orata');
 
   console.log('\nEdits, replies and deletes from Discord');
   dispatch('MESSAGE_UPDATE', { id: d1, channel_id: '2001', guild_id: '4001', content: 'hi again', mentions: [] });

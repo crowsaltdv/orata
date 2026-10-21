@@ -99,13 +99,26 @@ function GifMedia({ g, onImage }) {
     <span class="gif-badge">GIF</span>${g.id ? html`<button type="button" class=${cx('gif-fav', fav && 'on')} aria-label=${fav ? t('Remove from Favorites') : t('Add to Favorites')} data-tip=${fav ? t('Remove from Favorites') : t('Add to Favorites')} onClick=${(e) => { e.stopPropagation(); toggleFavGif(gifFromMessage(g)); }}><${Icon} name="star" size=${15} fill=${fav} /></button>` : null}</div>`;
 }
 
+/** A sticker: a picture, or (Discord's own stickers, from a linked channel) a Lottie animation played by the vendored lottie-web player. */
+function Sticker({ s }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!s.lottie) return undefined;
+    let anim = null; let gone = false;
+    import('/vendor/lottie_light.min.js').then(() => { if (!gone && ref.current) anim = globalThis.lottie.loadAnimation({ container: ref.current, renderer: 'svg', loop: true, autoplay: true, path: s.url }); });
+    return () => { gone = true; anim?.destroy(); };
+  }, [s.url, s.lottie]);
+  return s.lottie ? html`<div class="msg-sticker" ref=${ref} role="img" aria-label=${s.title || 'sticker'} title=${s.title}></div>`
+    : html`<img class="msg-sticker" src=${s.url} alt=${s.title || 'sticker'} title=${s.title} loading="lazy" />`;
+}
+
 /** A message forwarded from somewhere else: its words, pictures and GIF, and where and when it was first said. */
 function Forwarded({ f, onImage }) {
   const body = f.content ? renderMarkdown(f.content, {}) : '';
   return html`<div class="fwd"><div class="fwd-head"><${Icon} name="arrow-right" size=${13} sw=${2.4} />${t('Forwarded')}</div>
     ${body ? html`<div class="msg-content" dangerouslySetInnerHTML=${{ __html: body }}></div>` : null}
     ${f.gif ? html`<${GifMedia} g=${f.gif} onImage=${onImage} />` : null}
-    ${f.sticker ? html`<img class="msg-sticker" src=${f.sticker.url} alt=${f.sticker.title || 'sticker'} loading="lazy" />` : null}
+    ${f.sticker ? html`<${Sticker} s=${f.sticker} />` : null}
     ${f.attachments?.length ? html`<div class="attachments">${f.attachments.map((a) => html`<${Attachment} key=${a.id || a.url} a=${a} onImage=${onImage} />`)}</div>` : null}
     <div class="fwd-foot">${f.authorName} · ${f.from} · ${formatStamp(f.createdAt, !state.settings.chat.hour24)}</div></div>`;
 }
@@ -243,7 +256,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
         ${m.editedAt && !editing ? html`<span class="edited" data-tip=${formatFull(m.editedAt)}>(${t('edited')})</span>` : null}
         ${m.forward ? html`<${Forwarded} f=${m.forward} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />` : null}
         ${m.gif ? html`<${GifMedia} g=${m.gif} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />` : null}
-        ${m.sticker ? html`<img class="msg-sticker" src=${m.sticker.url} alt=${m.sticker.title || 'sticker'} title=${m.sticker.title} loading="lazy" />` : null}
+        ${m.sticker ? html`<${Sticker} s=${m.sticker} />` : null}
         ${m.poll ? html`<${PollView} m=${m} ch=${ch} />` : null}
         ${m.theme ? html`<${ThemeCard} m=${m} />` : null}
         ${m.attachments?.length ? html`<div class="attachments">${m.attachments.map((a) => (a.voice ? html`<${VoiceMessage} key=${a.id || a.url} a=${a} expiresAt=${m.expiresAt} />` : html`<${Attachment} key=${a.id || a.url} a=${a} onImage=${onImage} />`))}</div>` : null}

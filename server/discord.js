@@ -18,7 +18,7 @@ const GATEWAY = ENV.DISCORD_GATEWAY || 'wss://gateway.discord.gg/?v=10&encoding=
 const PUBLIC = (ENV.PUBLIC_URL || '').trim().replace(/\/+$/, '');
 const MAX_FILE = Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024;
 const DISCORD_MAX_FILE = 10 * 1024 * 1024;   // the most Discord takes in one file from a webhook (without boosts)
-const INTENTS = 1 | 512 | 32768;   // servers, server messages, message content (privileged: switched on in the Developer Portal)
+const INTENTS = 1 | 512 | 32768 | (1 << 24);   // servers, server messages, message content (privileged: switched on in the Developer Portal), poll votes
 const MANAGE_GUILD = 0x20n; const ADMINISTRATOR = 0x8n;
 const BOT_PERMISSIONS = '536988672';   // view channels, send messages, embed links, attach files, read message history, manage webhooks
 const CODE_TTL = 10 * 60_000; const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -105,6 +105,8 @@ async function dispatch(t, d) {
     case 'MESSAGE_UPDATE': return fromDiscordEdit(d);
     case 'MESSAGE_DELETE': return fromDiscordDelete(d.channel_id, [d.id]);
     case 'MESSAGE_DELETE_BULK': return fromDiscordDelete(d.channel_id, d.ids);
+    case 'MESSAGE_POLL_VOTE_ADD': return pollVote(d, true);
+    case 'MESSAGE_POLL_VOTE_REMOVE': return pollVote(d, false);
   }
 }
 
@@ -199,7 +201,7 @@ function avatarUrl(u, l) {
   return site + (a.startsWith('/uploads/') ? a : '/img/icon-192.png');   // Discord can't draw Orata's gradient default pictures, so: the logo
 }
 /** An Orata message as Discord text. Mentions become plain names (they'd point at the wrong people on Discord), custom emoji :name:. */
-function textFor(ch, m) {
+function textFor(ch, m, pollText = true) {
   const s = db.servers[ch.serverId];
   const plain = (t) => String(t || '')
     .replace(/<@!?(\d{6,20})>/g, (_, id) => '@' + (s?.members[id]?.nick || db.users[id]?.displayName || 'someone'))
@@ -211,7 +213,7 @@ function textFor(ch, m) {
   if (ref) lines.push(`> ↪ **${ref.bridge?.name || s?.members[ref.authorId]?.nick || db.users[ref.authorId]?.displayName || 'Someone'}**: ${plain(ref.content).replace(/\s+/g, ' ').slice(0, 100) || '(attachment)'}`);
   if (m.forward) lines.push(`↪ *Forwarded from ${m.forward.from}*`, ...(m.forward.content ? plain(m.forward.content).split('\n').map((x) => `> ${x}`) : []));
   if (m.content) lines.push(plain(m.content));
-  if (m.poll) lines.push(`📊 **${m.poll.question}**`, ...m.poll.answers.map((a) => `• ${a.emoji ? a.emoji + ' ' : ''}${a.text}`));
+  if (m.poll && pollText) lines.push(`📊 **${m.poll.question}**`, ...m.poll.answers.map((a) => `• ${a.emoji ? a.emoji + ' ' : ''}${a.text}`));
   if (m.theme) lines.push('🎨 *shared a theme on Orata*');
   for (const media of [m.gif, m.sticker, m.forward?.gif, m.forward?.sticker]) if (media) lines.push(media.gif || media.png || media.webp || media.url);
   return lines.join('\n');
@@ -226,16 +228,20 @@ function split(text, max = 2000) {
 async function sendToDiscord(ch, l, m) {
   if (links()[ch.id] !== l) return;
   const s = db.servers[ch.serverId]; const u = db.users[m.authorId];
-  let text = textFor(ch, m); const files = [];
+  let text = textFor(ch, m, !m.poll); const files = [];
   for (const a of m.attachments || []) {
     const name = path.basename(a.url);
     if (a.size <= DISCORD_MAX_FILE && await restoreUpload(name)) files.push({ data: fs.readFileSync(path.join(UPLOAD_DIR, name)), type: a.type, name: (a.spoiler ? 'SPOILER_' : '') + a.name });
     else text += `\n${PUBLIC || l.site ? (PUBLIC || l.site) + a.url : a.name}`;   // too big for Discord: a link instead
   }
+  const base = { username: hookName(s, u), avatar_url: avatarUrl(u, l), allowed_mentions: { parse: [] } };   // nothing from Orata can ping anyone on Discord
+  if (m.poll) {   // a real Discord poll (votes on it count in Orata too); if Discord refuses it, it goes as text instead
+    try { const r = await rest('POST', hookUrl(l, '?wait=true'), { ...base, content: text.slice(0, 2000), poll: discordPoll(m.poll) }, files); return remember(l, { o: m.id, d: [r.id] }); }
+    catch (e) { if (e.status === 404) return unlinkChannel(ch.id, { why: 'its webhook was deleted on Discord' }); text = textFor(ch, m); }
+  }
   const parts = split(text);
   if (!parts.length && !files.length) return;
   if (!parts.length) parts.push('');
-  const base = { username: hookName(s, u), avatar_url: avatarUrl(u, l), allowed_mentions: { parse: [] } };   // nothing from Orata can ping anyone on Discord
   const sent = [];
   try {
     for (let k = 0; k < parts.length; k++) sent.push((await rest('POST', hookUrl(l, '?wait=true'), { ...base, content: parts[k] }, k === parts.length - 1 ? files : null)).id);
@@ -278,7 +284,7 @@ function fromDiscordText(d, gid) {
     .replace(/<t:(-?\d+)(?::\w)?>/g, (_, t) => new Date(t * 1000).toUTCString().replace('GMT', 'UTC'))
     .replace(/<\/([\w -]+):\d+>/g, '/$1');
 }
-const fileOk = (url) => /^https:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)\//.test(url) || (!!ENV.DISCORD_API && url.startsWith(new URL(API).origin + '/'));
+const fileOk = (url) => /^https:\/\/(cdn\.discordapp\.com\/|media\.discordapp\.net\/|discord\.com\/stickers\/)/.test(url) || (!!ENV.DISCORD_API && url.startsWith(new URL(API).origin + '/'));
 /** Copies a Discord file into Orata's uploads (Discord's own links stop working after about a day). Null when it can't, or it's too big. */
 async function download(a) {
   if (!fileOk(String(a.url)) || a.size > MAX_FILE) return null;
@@ -291,6 +297,30 @@ async function download(a) {
     return { id, url: `/uploads/${id}${ext}`, name: String(a.filename || 'file').replace(/^SPOILER_/, '').slice(0, 200), size: buf.length, type, ...(a.width ? { width: a.width, height: a.height } : {}), spoiler: /^SPOILER_/.test(a.filename || '') };
   } catch { return null; }
 }
+/** Discord's GIF picker sends a Tenor or Giphy link that Discord plays as a GIF (a "gifv" embed): here it becomes an Orata GIF. */
+function gifOf(d) {
+  const e = (d.embeds || []).find((x) => x.type === 'gifv' && x.video?.url);
+  return e ? { id: '', title: e.provider?.name || 'GIF', url: e.thumbnail?.url || e.video.url, mp4: e.video.url, poster: e.thumbnail?.url, w: e.video.width || e.thumbnail?.width, h: e.video.height || e.thumbnail?.height, kind: 'gif', link: e.url } : null;
+}
+const STICKERS = ENV.DISCORD_API ? `${new URL(API).origin}/stickers` : null;   // the self-test's fake Discord serves them
+/** A Discord sticker as an Orata sticker, copied into uploads: server stickers are pictures (PNG, APNG, GIF); Discord's own are Lottie animations. */
+async function stickerOf(st) {
+  const [host, ext, type] = st.format_type === 3 ? ['https://discord.com/stickers', 'json', 'application/json']
+    : st.format_type === 4 ? ['https://media.discordapp.net/stickers', 'gif', 'image/gif'] : ['https://cdn.discordapp.com/stickers', 'png', 'image/png'];
+  const f = await download({ url: `${STICKERS || host}/${st.id}.${ext}`, filename: `${st.name}.${ext}`, content_type: type });
+  return f && { url: f.url, title: String(st.name || 'sticker').slice(0, 60), ...(ext === 'json' ? { lottie: true } : {}) };
+}
+/** A Discord poll as an Orata poll. Discord numbers the answers 1, 2, 3 … like Orata does, so votes line up both ways. */
+const pollFrom = (dp) => ({
+  question: String(dp.question?.text || 'Poll').slice(0, 300), multi: !!dp.allow_multiselect, expiresAt: Date.parse(dp.expiry) || null, votes: {}, closed: false,
+  answers: (dp.answers || []).slice(0, 10).map((a) => ({ id: String(a.answer_id), text: String(a.poll_media?.text || '…').slice(0, 55), emoji: a.poll_media?.emoji?.name && !a.poll_media.emoji.id ? a.poll_media.emoji.name : null })),
+});
+/** An Orata poll as a Discord poll (Discord counts its length in hours: 1 to 768). */
+const discordPoll = (p) => ({
+  question: { text: p.question.slice(0, 300) }, allow_multiselect: !!p.multi, layout_type: 1,
+  duration: Math.min(768, Math.max(1, Math.ceil(((p.expiresAt || Date.now() + 86400_000) - Date.now()) / 3600_000))),
+  answers: p.answers.map((a) => ({ poll_media: { text: a.text.slice(0, 55), ...(a.emoji && !/[<:]/.test(a.emoji) ? { emoji: { name: a.emoji } } : {}) } })),
+});
 const mirrored = (d) => !d.webhook_id && !d.author?.bot && (d.type === 0 || d.type === 19);   // people's messages and replies; never bots (or our own webhook)
 async function mirrorIn(chId, l, d) {
   if (links()[chId] !== l || pairByDiscord(l, d.id)) return;
@@ -298,19 +328,20 @@ async function mirrorIn(chId, l, d) {
   const ch = db.channels[chId]; const s = ch && db.servers[ch.serverId]; const orbit = orbitOf(s);
   if (!ch) return unlinkChannel(chId);
   if (!orbit) return save();   // Orbit was removed from the server: nothing is posted until it's back
-  let content = fromDiscordText(d, l.guildId);
-  try { content = guard(ch, orbit, content); } catch { return save(); }   // the server's swearing protection blocks it
+  let content = fromDiscordText(d, l.guildId); const poll = d.poll ? pollFrom(d.poll) : null;
+  try {   // the server's swearing protection can block it
+    content = guard(ch, orbit, content);
+    if (poll) { poll.question = guard(ch, orbit, poll.question); for (const a of poll.answers) a.text = guard(ch, orbit, a.text); }
+  } catch { return save(); }
+  const gif = gifOf(d); if (gif && content.trim() === gif.link) content = '';   // a GIF from Discord's GIF picker is only its link
   const attachments = [];
   for (const a of (d.attachments || []).slice(0, 10)) { const f = await download(a); if (f) attachments.push(f); else content += `\n${a.url}`; }
-  for (const st of d.sticker_items || []) {
-    if (st.format_type === 3) { content += `\n[sticker: ${st.name}]`; continue; }   // animated Lottie stickers can't be shown here
-    const ext = st.format_type === 4 ? 'gif' : 'png';
-    const f = await download({ url: `https://media.discordapp.net/stickers/${st.id}.${ext}`, filename: `${st.name}.${ext}`, content_type: `image/${ext}` }); if (f) attachments.push(f);
-  }
+  const st = d.sticker_items?.[0]; const sticker = st ? await stickerOf(st) : null;
+  if (st && !sticker) content += `\n[sticker: ${st.name}]`;
   if (links()[chId] !== l) return;   // unlinked while the files were downloading
-  if (!content.trim() && !attachments.length) return save();
+  if (!content.trim() && !attachments.length && !gif && !sticker && !poll) return save();
   const ref = d.message_reference?.message_id && pairByDiscord(l, d.message_reference.message_id);
-  const msg = postMessage(ch, orbit, { content: content.trim().slice(0, 4000), attachments, replyTo: ref?.o || null, bridge: { id: d.author.id, name: nameOf(d), avatar: avatarOf(d, l.guildId) } });
+  const msg = postMessage(ch, orbit, { content: content.trim().slice(0, 4000), attachments, gif, sticker, poll, replyTo: ref?.o || null, bridge: { id: d.author.id, name: nameOf(d), avatar: avatarOf(d, l.guildId) } });
   remember(l, { o: msg.id, d: [d.id], in: true });
 }
 function fromDiscordCreate(d) {
@@ -319,15 +350,33 @@ function fromDiscordCreate(d) {
   else l.lastSeen = later(d.id, l.lastSeen);
 }
 function fromDiscordEdit(d) {
-  const [chId, l] = linkOf(d.channel_id);
-  if (!l || typeof d.content !== 'string') return;   // an update without text is Discord adding a link preview
+  const [chId, l] = linkOf(d.channel_id); if (!l) return;
   queue(chId, () => {
     const p = pairByDiscord(l, d.id); const ch = db.channels[chId]; const m = p?.in && ch && (db.messages[chId] || []).find((x) => x.id === p.o);
     if (!m) return;
-    let content; try { content = guard(ch, m.authorId, fromDiscordText(d, l.guildId)).trim().slice(0, 4000); } catch { return; }
-    if (content === m.content || (!content && !m.attachments?.length)) return;
-    m.content = content; m.editedAt = Date.now(); save();
-    emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
+    let changed = false;
+    const gif = !m.gif && gifOf(d);   // Discord often adds the GIF a moment after the message (an update with only the embed)
+    if (gif) { m.gif = gif; if (m.content.trim() === gif.link) m.content = ''; changed = true; }
+    if (typeof d.content === 'string') {
+      let content; try { content = guard(ch, m.authorId, fromDiscordText(d, l.guildId)).trim().slice(0, 4000); } catch { content = m.content; }
+      if (m.gif && content === m.gif.link) content = '';
+      if (content !== m.content && (content || m.attachments?.length || m.gif || m.sticker || m.poll)) { m.content = content; m.editedAt = Date.now(); changed = true; }
+    }
+    if (!changed) return;
+    save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
+  });
+}
+/** Someone voted (or took a vote back) on Discord: it counts in the Orata copy of the poll (as "d:<their id>"). Orata votes can't reach Discord: a bot can't vote for people. */
+function pollVote(d, add) {
+  const [chId, l] = linkOf(d.channel_id); if (!l) return;
+  queue(chId, () => {
+    const p = pairByDiscord(l, d.message_id); const ch = db.channels[chId]; const m = p && ch && (db.messages[chId] || []).find((x) => x.id === p.o);
+    const poll = m?.poll; const id = String(d.answer_id);
+    if (!poll || poll.closed || !poll.answers.some((a) => a.id === id)) return;
+    const k = `d:${d.user_id}`; const had = poll.votes[k] || [];
+    const next = add ? (poll.multi ? [...new Set([...had, id])] : [id]) : had.filter((x) => x !== id);
+    if (next.length) poll.votes[k] = next; else delete poll.votes[k];
+    save(); emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });
   });
 }
 function fromDiscordDelete(discordChannelId, ids) {

@@ -162,7 +162,7 @@ Orata uses Apple's public, keyless [iTunes Search API](https://performance-partn
 
 ## Discord bridge
 
-Link an Orata channel with a Discord channel and they act as one conversation: messages, pictures, files, replies, edits and deletes go both ways. Discord people show up in Orata with their Discord name and picture and a **DISCORD** tag; Orata people show up in Discord with their Orata name and picture (Discord adds its usual **APP** label). Mentions become plain names on the other side, custom Discord emoji plain `:name:` text, and nothing from Orata can ping anyone on Discord. Bots' messages aren't mirrored.
+Link an Orata channel with a Discord channel and they act as one conversation: messages, pictures, files, GIFs, stickers, polls, replies, edits and deletes go both ways. Discord people show up in Orata with their Discord name and picture and a **DISCORD** tag; Orata people show up in Discord with their Orata name and picture (Discord adds its usual **APP** label). Mentions become plain names on the other side, custom Discord emoji plain `:name:` text, and nothing from Orata can ping anyone on Discord. Bots' messages aren't mirrored. GIFs from Discord's GIF picker play as GIFs, Discord stickers come across as stickers (Discord's own animated ones are played with [lottie-web](https://github.com/airbnb/lottie-web)), and polls are real polls on both sides: votes on Discord count in Orata ("+2 on Discord"), but Orata votes can't be added to the Discord poll, because Discord doesn't let a bot vote for people.
 
 **Set it up once (the host):**
 1. On the [Discord Developer Portal](https://discord.com/developers/applications) make a **New Application** (call it Orbit and give it Orbit's picture if you like).
@@ -330,6 +330,7 @@ Passwords are hashed with scrypt; sessions are random 256-bit tokens (stored has
 ## Credits
 
 * **Rain on glass** is a port of Lucas Bebber's [Rain & Water Effect Experiments](https://tympanus.net/codrops/2015/11/04/rain-water-effect-experiments/) (Codrops, 2015): the drop simulation, the drop textures (`public/img/rain/`) and the water shader come from the [original project](https://github.com/codrops/RainEffect), adapted into a single ES module with Orata's sliders, presets and lightning. Its licence lets you integrate or build upon it in personal or commercial projects, but not republish or redistribute it as-is — so keep it as part of Orata rather than extracting it on its own.
+* **Discord's animated stickers** are played with [lottie-web](https://github.com/airbnb/lottie-web) (MIT, `public/vendor/lottie_light.min.js`, license in `public/vendor/lottie-web.LICENSE.md`).
 * **Music** comes from Apple's public iTunes Search API (the Apple Music catalogue and its 30-second previews); tracks and artwork belong to their artists and Apple.
 * **Liquid glass** is a pure-CSS glass-button recipe — inset highlights, a blurred diagonal corner glow and a light backdrop blur.
 

@@ -38,9 +38,9 @@ MODALS['poll-voters'] = function PollVoters({ id, channelId, messageId }) {
   const p = m?.poll; if (!p) return null;
   return html`<${Modal} title=${p.question} subtitle=${`${p.total} ${p.total === 1 ? t('vote') : t('votes')}`} width=${460} onClose=${() => closeModal(id)} footer=${html`<${Btn} variant="primary" onClick=${() => closeModal(id)}>${t('Done')}<//>`}>
     <div class="pv-list">${p.answers.map((a) => {
-      const n = a.voters.length; const pct = p.total ? Math.round((n / p.total) * 100) : 0;
+      const n = a.voters.length + (a.discord || 0); const pct = p.total ? Math.round((n / p.total) * 100) : 0;
       return html`<section class="pv-ans" key=${a.id}><header><b>${a.text}</b><span>${n} ${n === 1 ? t('vote') : t('votes')} · ${pct}%</span></header>
-        ${n ? html`<div class="pv-voters">${a.voters.map((uid) => html`<div class="pv-voter" key=${uid}><${Avatar} user=${users[uid]} size=${28} /><span>${users[uid]?.displayName || '…'}</span></div>`)}</div>` : html`<small class="pv-none">${t('No votes yet')}</small>`}
+        ${n ? html`<div class="pv-voters">${a.voters.map((uid) => html`<div class="pv-voter" key=${uid}><${Avatar} user=${users[uid]} size=${28} /><span>${users[uid]?.displayName || '…'}</span></div>`)}${a.discord ? html`<small class="pv-none">+ ${a.discord} ${t('on Discord')}</small>` : null}</div>` : html`<small class="pv-none">${t('No votes yet')}</small>`}
       </section>`;
     })}</div>
   <//>`;
@@ -55,7 +55,7 @@ export function PollView({ m, ch }) {
   useEffect(() => { if (p.closed || !p.expiresAt) return undefined; const id = setInterval(() => setNow(Date.now()), 20000); return () => clearInterval(id); }, [p.closed, p.expiresAt]);
   const closed = p.closed || (p.expiresAt && p.expiresAt <= now);
   const mine = p.answers.filter((a) => a.voters.includes(me)).map((a) => a.id);
-  const top = Math.max(0, ...p.answers.map((a) => a.voters.length));
+  const top = Math.max(0, ...p.answers.map((a) => a.voters.length + (a.discord || 0)));
   const vote = (answers) => act(api.put(`/channels/${ch.id}/messages/${m.id}/poll/votes`, { answers }));
   const pick = (id) => { if (closed) return; vote(p.multi ? (mine.includes(id) ? mine.filter((x) => x !== id) : [...mine, id]) : (mine[0] === id ? [] : [id])); };
   const canClose = !closed && (m.authorId === me || (ch.serverId && hasChannelPerm(ch, 'MANAGE_MESSAGES')));
@@ -63,8 +63,8 @@ export function PollView({ m, ch }) {
     <div class="poll-q">${p.question}</div>
     <div class="poll-hint">${closed ? t('Final results') : p.multi ? t('Select one or more answers') : t('Select one answer')}</div>
     <div class="poll-answers">${p.answers.map((a) => {
-      const n = a.voters.length; const pct = p.total ? Math.round((n / p.total) * 100) : 0; const on = mine.includes(a.id);
-      const names = a.voters.slice(0, 12).map((id) => users[id]?.displayName || '…').join(', ') + (n > 12 ? ` +${n - 12}` : '');
+      const n = a.voters.length + (a.discord || 0); const pct = p.total ? Math.round((n / p.total) * 100) : 0; const on = mine.includes(a.id);
+      const names = a.voters.slice(0, 12).map((id) => users[id]?.displayName || '…').join(', ') + (a.voters.length > 12 ? ` +${a.voters.length - 12}` : '') + (a.discord ? `${a.voters.length ? ', ' : ''}${a.discord} ${t('on Discord')}` : '');
       return html`<button type="button" key=${a.id} class=${cx('poll-ans', on && 'mine', closed && n && n === top && 'win')} disabled=${closed} onClick=${() => pick(a.id)} title=${n ? names : ''}>
         <span class="pa-bar" style=${{ width: `${pct}%` }}></span>
         <span class="pa-check">${on ? html`<${Icon} name="check" size=${13} sw=${3.5} />` : null}</span>
