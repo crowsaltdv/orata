@@ -41,6 +41,7 @@ const fake = http.createServer((req, res) => {
     if (p === `/webhooks/wh1/${HOOK_TOKEN}` && req.method === 'POST') { const id = snow(); calls[calls.length - 1].id = id; return json({ id }); }
     if (p.startsWith(`/webhooks/wh1/${HOOK_TOKEN}`)) { res.writeHead(204); return res.end(); }
     if (/^\/interactions\//.test(p)) { res.writeHead(204); return res.end(); }
+    if (p.startsWith('/webhooks/900/itok/')) return json({});   // filling in a "thinking…" answer
     if (p === '/channels/2003/messages') return json({ message: 'Missing Access' }, 403);   // a channel the bot can't read
     if (p === '/channels/2001/messages') { const after = BigInt(u.searchParams.get('after') || 0); return json(backlog.filter((m) => BigInt(m.id) > after).reverse()); }   // newest first, like Discord
     json({ message: 'Unknown' }, 404);
@@ -81,8 +82,9 @@ async function api(method, url, token, body, headers = {}) {
 const register = async (username) => (await api('POST', '/auth/register', null, { username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } })).body;
 const hookPosts = () => calls.filter((c) => c.method === 'POST' && c.path === `/api/webhooks/wh1/${HOOK_TOKEN}`);
 const said = (c) => (typeof c.body === 'string' ? JSON.parse(/name="payload_json"\r\n(?:Content-Type: [^\r]*\r\n)?\r\n([^\r]*)/.exec(c.body)?.[1] || '{}') : c.body);
-const interaction = (extra) => ({ id: snow(), token: 'itok', type: 2, guild_id: '4001', channel_id: '2001', channel: { id: '2001', type: 0, name: 'general' }, member: { permissions: '32', user: { id: '1007', username: 'admin7', global_name: 'Ada' } }, ...extra });
-const callbacks = () => calls.filter((c) => c.path.startsWith('/api/interactions/'));
+const interaction = (extra) => ({ id: snow(), token: 'itok', application_id: '900', type: 2, guild_id: '4001', channel_id: '2001', channel: { id: '2001', type: 0, name: 'general' }, member: { permissions: '32', user: { id: '1007', username: 'admin7', global_name: 'Ada' } }, ...extra });
+// what the bot answered on Discord: at once (type 4), or "thinking…" (type 5) filled in afterwards
+const answers = () => calls.filter((c) => (c.path.startsWith('/api/interactions/') && c.body?.type === 4) || (c.method === 'PATCH' && c.path === '/api/webhooks/900/itok/messages/@original')).map((c) => ({ content: c.body.data?.content ?? c.body.content, flags: c.body.data?.flags }));
 
 async function main() {
   await new Promise((r) => fake.listen(FPORT, '127.0.0.1', r));
@@ -109,19 +111,21 @@ async function main() {
   ok(r.status === 200 && code && r.body.ephemeral.includes('client_id=900'), '/link gives the admin a one-time code (and the link to add the bot)');
   ok(!(await msgs()).some((m) => m.content.includes(code)), '… that nobody else sees');
   dispatch('INTERACTION_CREATE', interaction({ member: { permissions: '0', user: { id: '1008', username: 'rando' } }, data: { name: 'orata-link', options: [{ name: 'code', value: code }] } }));
-  let cb = await until(() => callbacks()[0]);
-  ok(cb?.body.data.content.includes('Manage Server') && cb.body.data.flags === 64, 'on Discord, only someone who can manage the server can link (told privately)');
+  let cb = await until(() => answers()[0]);
+  ok(cb?.content.includes('Manage Server') && cb.flags === 64, 'on Discord, only someone who can manage the server can link (told privately)');
   dispatch('INTERACTION_CREATE', interaction({ data: { name: 'orata-link', options: [{ name: 'code', value: 'ZZZZ-ZZZZ' }] } }));
-  cb = await until(() => callbacks()[1]); ok(cb?.body.data.content.includes('isn’t valid'), 'a wrong code is refused');
+  cb = await until(() => answers()[1]); ok(cb?.content.includes('isn’t valid'), 'a wrong code is refused');
+  ok(calls.some((c) => c.path.startsWith('/api/interactions/') && c.body?.type === 5 && c.body.data.flags === 64), '… after answering Discord at once with a private “thinking…” (Discord waits only 3 seconds)');
   dispatch('INTERACTION_CREATE', interaction({ channel_id: '2003', channel: { id: '2003', type: 0, name: 'secret' }, data: { name: 'orata-link', options: [{ name: 'code', value: code } ] } }));
-  cb = await until(() => callbacks()[2]);
-  ok(cb?.body.data.content.includes('Read Message History') && !calls.some((c) => c.path === '/api/channels/2003/webhooks'), 'a channel the bot can’t read isn’t linked (it says which permissions it needs)');
+  cb = await until(() => answers()[2]);
+  ok(cb?.content.includes('Read Message History') && !calls.some((c) => c.path === '/api/channels/2003/webhooks'), 'a channel the bot can’t read isn’t linked (it says which permissions it needs)');
   dispatch('INTERACTION_CREATE', interaction({ data: { name: 'orata-link', options: [{ name: 'code', value: code.toLowerCase() } ] } }));
-  cb = await until(() => callbacks()[3]);
-  ok(cb?.body.data.content.includes('Linked with **#') && calls.some((c) => c.path === '/api/channels/2001/webhooks'), 'the right code links the channels (and makes a webhook to post with)');
+  cb = await until(() => answers()[3]);
+  ok(cb?.content.includes('Linked with **#') && calls.some((c) => c.path === '/api/channels/2001/webhooks'), 'the right code links the channels (and makes a webhook to post with)');
   const notice = await until(async () => (await msgs()).find((m) => m.authorId === S.orbitId && /now linked/.test(m.content)));
   ok(notice?.content.includes('#general') && notice.content.includes('Fake Guild'), 'Orbit says so in the Orata channel');
   ok(!!await until(() => hookPosts().find((c) => /now linked/.test(said(c).content))), '… and the same notice shows up on Discord');
+  ok(hookPosts().every((c) => !c.auth) && calls.some((c) => c.path.includes('/channels/') && c.auth === 'Bot fake-token'), 'webhook posts don’t send the bot token (a webhook’s address is its key), Discord’s API does');
   r = await cmd(B.token, 'link-instructions'); ok(r.body.ephemeral.includes('linked with **#general** in **Fake Guild**'), '/link-instructions then says which Discord channel it’s linked with');
 
   console.log('\nDiscord → Orata');
@@ -158,7 +162,7 @@ async function main() {
   const png = pngUrl.startsWith(`https://127.0.0.1:${PORT}/uploads/`) && pngUrl.endsWith('.png') ? Buffer.from(await (await fetch(base + pngUrl.slice(`https://127.0.0.1:${PORT}`.length))).arrayBuffer()) : null;
   ok(png?.subarray(1, 4).toString() === 'PNG', 'a WebP profile picture goes to Discord as a PNG copy (Discord can’t show WebP ones)', pngUrl);
   await api('PATCH', `/channels/${text.id}/messages/${mineId}`, A.token, { content: 'hey (edited)' });
-  const patch = await until(() => calls.find((c) => c.method === 'PATCH' && c.path.includes('/messages/')));
+  const patch = await until(() => calls.find((c) => c.method === 'PATCH' && c.path.startsWith(`/api/webhooks/wh1/${HOOK_TOKEN}/messages/`)));
   ok(patch?.body.content === 'hey (edited)', 'editing in Orata edits the Discord copy');
   await api('DELETE', `/channels/${text.id}/messages/${mineId}`, A.token);
   ok(!!await until(() => calls.find((c) => c.method === 'DELETE' && c.path.includes(`/webhooks/wh1/${HOOK_TOKEN}/messages/`))), 'deleting in Orata deletes the Discord copy');

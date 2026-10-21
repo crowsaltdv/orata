@@ -12,8 +12,10 @@ import sharp from 'sharp';
 import { db, save, ENV, UPLOAD_DIR, newId, emitTo, audienceOf, messageView, storeUpload, restoreUpload, removeUpload, audit, bad } from './core.js';
 import { hooks, postMessage } from './messages.js';
 
-const TOKEN = ENV.DISCORD_BOT_TOKEN || '';
+const TOKEN = (ENV.DISCORD_BOT_TOKEN || '').trim();
 export const discordOn = !!TOKEN;
+const TOKEN_APP = Buffer.from(TOKEN.split('.')[0] || '', 'base64').toString();   // a bot token starts with its app's id: the add-the-bot link works even before the bot connects
+const APP_ID = /^\d{15,22}$/.test(TOKEN_APP) ? TOKEN_APP : null;
 const API = (ENV.DISCORD_API || 'https://discord.com/api/v10').replace(/\/$/, '');   // both can point at the self-test's fake Discord
 const GATEWAY = ENV.DISCORD_GATEWAY || 'wss://gateway.discord.gg/?v=10&encoding=json';
 const PUBLIC = (ENV.PUBLIC_URL || '').trim().replace(/\/+$/, '');
@@ -32,16 +34,20 @@ const links = () => (db.discord ||= { links: {} }).links;   // Orata channel id 
 const linkOf = (discordChannelId) => Object.entries(links()).find(([, l]) => l.channelId === discordChannelId) || [];
 const orbitOf = (s) => (s?.orbitId && s.members[s.orbitId] && db.users[s.orbitId] ? s.orbitId : null);
 const codes = new Map();   // one-time link codes: code -> { channelId, userId, at }
-const bot = { ws: null, seq: null, session: null, resumeUrl: null, appId: null, beat: null, acked: true, backoff: 1000, guilds: new Map() };
+const bot = { ws: null, seq: null, session: null, resumeUrl: null, appId: null, beat: null, acked: true, backoff: 1000, guilds: new Map(), online: false, error: null };
+const inviteUrl = () => { const id = bot.appId || APP_ID; return id && `https://discord.com/oauth2/authorize?client_id=${id}&permissions=${BOT_PERMISSIONS}&scope=bot%20applications.commands`; };
+/** A warning when the bot isn't connected to Discord right now (null when it is). */
+const offline = () => (bot.error ? `⚠️ The Discord bot can’t log in right now: ${bot.error}.` : bot.online ? null : '⚠️ The Discord bot is still connecting to Discord, so Discord’s commands may not answer for a moment.');
 
 /* ---------------------------------------------------------------- Discord's API */
 async function rest(method, route, body, files) {
   for (let tries = 0; ; tries++) {
-    const headers = { authorization: `Bot ${TOKEN}`, 'user-agent': 'DiscordBot (https://github.com/crowsaltdv/orata, 1.0)' };
+    const headers = { 'user-agent': 'DiscordBot (https://github.com/crowsaltdv/orata, 1.0)' };
+    if (!/^\/(webhooks|interactions)\//.test(route)) headers.authorization = `Bot ${TOKEN}`;   // webhooks and interaction replies carry their own token in the address
     let payload;
     if (files?.length) { payload = new FormData(); payload.append('payload_json', JSON.stringify(body)); files.forEach((f, i) => payload.append(`files[${i}]`, new Blob([f.data], { type: f.type }), f.name)); }
     else if (body !== undefined) { headers['content-type'] = 'application/json'; payload = JSON.stringify(body); }
-    const res = await fetch(API + route, { method, headers, body: payload });
+    const res = await fetch(API + route, { method, headers, body: payload, signal: AbortSignal.timeout(20_000) });   // one stuck request can't hold up a link
     if (res.status === 429 && tries < 3) { const j = await res.json().catch(() => ({})); await sleep(Math.min(10, Number(j.retry_after) || 1) * 1000); continue; }
     if (!res.ok) { const e = new Error(`Discord said ${res.status} to ${method} ${route.split('?')[0].replace(/\/[\w-]{40,}/g, '/…')}`); e.status = res.status; throw e; }
     return res.status === 204 ? null : res.json();
@@ -78,8 +84,8 @@ const FATAL = { 4004: 'DISCORD_BOT_TOKEN is wrong', 4010: 'bad shard', 4011: 'sh
   4014: 'switch on "Message Content Intent" for the bot (Discord Developer Portal → your app → Bot → Privileged Gateway Intents)' };
 function onClose(code, ws) {
   if (ws !== bot.ws) return;
-  clearInterval(bot.beat);
-  if (FATAL[code]) return console.error(`[discord] stopped: ${FATAL[code]}`);
+  clearInterval(bot.beat); bot.online = false;
+  if (FATAL[code]) { bot.error = FATAL[code]; return console.error(`[discord] stopped: ${FATAL[code]}`); }
   if (code === 4007 || code === 4009) { bot.session = null; bot.seq = null; }   // a session that can't be picked up again
   const wait = bot.backoff; bot.backoff = Math.min(60_000, bot.backoff * 2);
   setTimeout(() => connect(!!bot.session), wait);
@@ -91,11 +97,11 @@ function cacheGuild(g) {
 async function dispatch(t, d) {
   switch (t) {
     case 'READY':
-      Object.assign(bot, { session: d.session_id, resumeUrl: d.resume_gateway_url, appId: d.application.id, backoff: 1000 });
+      Object.assign(bot, { session: d.session_id, resumeUrl: d.resume_gateway_url, appId: d.application.id, backoff: 1000, online: true, error: null });
       console.log(`[discord] connected as ${d.user.username}`);
       await registerCommands().catch((e) => console.error('[discord] could not set up the slash commands:', e.message));
       return catchUp();
-    case 'RESUMED': bot.backoff = 1000; return;
+    case 'RESUMED': Object.assign(bot, { backoff: 1000, online: true }); return;
     case 'GUILD_CREATE': case 'GUILD_UPDATE': return cacheGuild(d);
     case 'GUILD_DELETE': if (!d.unavailable) for (const [id, l] of Object.entries(links())) if (l.guildId === d.id) unlinkChannel(id, { why: 'the Orata bot was removed from the Discord server' }); return;
     case 'CHANNEL_CREATE': case 'CHANNEL_UPDATE': bot.guilds.get(d.guild_id)?.channels.set(d.id, d.name); return;
@@ -126,19 +132,21 @@ export function linkCode(s, ch, userId, site) {
   if (!TOKEN) throw bad('Discord linking isn’t set up on this Orata server yet: it needs DISCORD_BOT_TOKEN (README → “Discord bridge”).');
   if (ch.type !== 'text') throw bad('Only text channels can be linked with Discord.');
   if (links()[ch.id]) throw bad('This channel is already linked with Discord. Type /unlink first.');
+  if (bot.error) throw bad(`The Discord bot can’t log in right now: ${bot.error}.`);
   for (const [k, v] of codes) if (v.channelId === ch.id || Date.now() - v.at > CODE_TTL) codes.delete(k);
   const code = Array.from(crypto.randomBytes(8), (b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
   codes.set(code, { channelId: ch.id, userId, site, at: Date.now() });
-  const invite = bot.appId && `https://discord.com/oauth2/authorize?client_id=${bot.appId}&permissions=${BOT_PERMISSIONS}&scope=bot%20applications.commands`;
-  return `In the Discord channel you want to link, type:\n\`/orata-link code:${code.slice(0, 4)}-${code.slice(4)}\`\nThe code works for 10 minutes.${invite ? `\nIs the Orata bot not in your Discord server yet? [Add it here](${invite}) first.` : ''}`;
+  const invite = inviteUrl();
+  return `In the Discord channel you want to link, type:\n\`/orata-link code:${code.slice(0, 4)}-${code.slice(4)}\`\nThe code works for 10 minutes.${invite ? `\nIs the Orata bot not in your Discord server yet? [Add it here](${invite}) first.` : ''}${offline() ? `\n${offline()}` : ''}`;
 }
 
 /** /link-instructions: whether this channel is linked, what a link carries, and how to set one up. */
 export function linkInstructions(ch) {
   const l = links()[ch.id]; const g = l && bot.guilds.get(l.guildId);
-  const invite = bot.appId && `https://discord.com/oauth2/authorize?client_id=${bot.appId}&permissions=${BOT_PERMISSIONS}&scope=bot%20applications.commands`;
+  const invite = inviteUrl();
   return [
     '**🔗 Linking a channel with Discord**',
+    ...(offline() ? [offline()] : []),
     l ? `This channel is linked with **#${g?.channels.get(l.channelId) || l.channelName || 'a channel'}**${g?.name || l.guildName ? ` in **${g?.name || l.guildName}**` : ''} on Discord.` : 'This channel isn’t linked with Discord yet.',
     '',
     '**What comes across, both ways:** messages with their formatting, replies, edits and deletes, pictures and files, GIFs and stickers (Discord’s own animated ones too). Everyone keeps their name and profile picture. Mentions become plain names, and custom Discord emoji show as `:name:`.',
@@ -177,14 +185,18 @@ export async function unlinkChannel(chId, { why = '', fromOrata = false, actor =
 /** /orata-link and /orata-unlink, typed in Discord. */
 async function onCommand(i) {
   if (i.type !== 2 || !['orata-link', 'orata-unlink'].includes(i.data?.name)) return;
-  const reply = (content, ephemeral = true) => rest('POST', `/interactions/${i.id}/${i.token}/callback`, { type: 4, data: { content, flags: ephemeral ? 64 : 0, allowed_mentions: { parse: [] } } });
-  if (!(BigInt(i.member?.permissions || 0) & (MANAGE_GUILD | ADMINISTRATOR))) return reply('You need the **Manage Server** permission to do that.');
+  const callback = (body) => rest('POST', `/interactions/${i.id}/${i.token}/callback`, body);
+  if (!(BigInt(i.member?.permissions || 0) & (MANAGE_GUILD | ADMINISTRATOR))) return callback({ type: 4, data: { content: 'You need the **Manage Server** permission to do that.', flags: 64 } });
+  // Discord gives up on an answer after 3 seconds, and a small free host can be slower than that: say "thinking…" at once, fill in the answer after
+  const unlink = i.data.name === 'orata-unlink';
+  const thinking = callback({ type: 5, data: { flags: unlink ? 0 : 64 } });   // unlinking is said to the whole channel, the rest only to whoever typed it
+  const reply = async (content) => { await thinking; return rest('PATCH', `/webhooks/${i.application_id || bot.appId}/${i.token}/messages/@original`, { content, allowed_mentions: { parse: [] } }); };
   const who = i.member.nick || i.member.user?.global_name || i.member.user?.username || 'A Discord admin';
   const [linkedId] = linkOf(i.channel_id);
-  if (i.data.name === 'orata-unlink') {
+  if (unlink) {
     if (!linkedId) return reply('This channel isn’t linked with Orata.');
     await unlinkChannel(linkedId, { discordUser: who });
-    return reply(`🔗 **${who}** unlinked this channel from Orata. Messages here no longer show up there.`, false);
+    return reply(`🔗 **${who}** unlinked this channel from Orata. Messages here no longer show up there.`);
   }
   if (linkedId) return reply(`This channel is already linked with **#${db.channels[linkedId]?.name || 'a channel'}** on Orata. Type /orata-unlink first.`);
   if (i.channel && ![0, 5].includes(i.channel.type)) return reply('Only text channels can be linked.');
@@ -324,7 +336,7 @@ const fileOk = (url) => /^https:\/\/(cdn\.discordapp\.com\/|media\.discordapp\.n
 async function download(a) {
   if (!fileOk(String(a.url)) || a.size > MAX_FILE) return null;
   try {
-    const res = await fetch(a.url); if (!res.ok) return null;
+    const res = await fetch(a.url, { signal: AbortSignal.timeout(30_000) }); if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer()); if (!buf.length || buf.length > MAX_FILE) return null;
     const ext = path.extname(String(a.filename || '')).toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 10);
     const id = newId(); const type = String(a.content_type || 'application/octet-stream').split(';')[0].slice(0, 100);
@@ -418,5 +430,12 @@ function catchUp() {
 /** Called once by api.js: hands over the swearing protection and, with DISCORD_BOT_TOKEN set, connects to Discord. */
 export function startDiscord({ guardText }) {
   guard = guardText;
-  if (TOKEN) connect(false);
+  if (!TOKEN) return;
+  connect(false);
+  // Hosts that sleep when nobody visits (Render's free plan, after 15 minutes) take the bot offline with them. KEEP_AWAKE=1 visits Orata's own
+  // address every 10 minutes so it stays up. ponytail: uses the host's free hours around the clock (Render gives 750 a month for all free services).
+  if (/^(1|true|on|yes)$/i.test(ENV.KEEP_AWAKE || '')) setInterval(() => {
+    const site = PUBLIC || Object.values(links()).find((l) => l.site)?.site;
+    if (site) fetch(`${site}/api/config`, { signal: AbortSignal.timeout(20_000) }).catch(() => {});
+  }, 10 * 60_000).unref();
 }
