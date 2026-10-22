@@ -19,6 +19,7 @@ import '/js/forward.js';   // the Forward dialog
 import { ServerTag } from '/js/server-tag.js';
 import { ApplicationCard } from '/js/applications.js';
 import { isStaffMe } from '/js/staff.js';
+import { LITE, thumb } from '/js/lite.js';
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -84,7 +85,7 @@ function Attachment({ a, onImage }) {
   if (isImg) {
     const w = a.width || 400; const h = a.height || 300; const scale = Math.min(1, 420 / w, 340 / h);
     return html`<div class=${cx('att-img-wrap', !revealed && 'spoilered')} style=${a.width ? { width: Math.round(w * scale) + 'px', aspectRatio: `${w} / ${h}` } : null} onClick=${() => (revealed ? onImage(a) : setRevealed(true))}>
-      <img class="att-img" src=${a.url} alt=${a.name} loading="lazy" draggable=${false} />${!revealed ? html`<span class="spoiler-cover">SPOILER</span>` : null}</div>`;
+      <img class="att-img" src=${thumb(a.url, 480)} alt=${a.name} loading="lazy" draggable=${false} />${!revealed ? html`<span class="spoiler-cover">SPOILER</span>` : null}</div>`;
   }
   if (a.type?.startsWith('video/')) return html`<video class="att-video" src=${a.url} controls preload="metadata" playsinline></video>`;
   if (a.type?.startsWith('audio/')) return html`<div class="att-audio"><div class="att-audio-head"><${Icon} name="music" size=${18} /><span>${a.name}</span><small>${fileSize(a.size)}</small></div><audio src=${a.url} controls preload="metadata"></audio></div>`;
@@ -96,8 +97,9 @@ function GifMedia({ g, onImage }) {
   // the whole GIF, at its own proportions (never cropped or rounded): as big as it is, up to 440 × 380
   const gw = g.w || 280; const gh = g.h || 200; const k = Math.min(1, 440 / gw, 380 / gh); const w = Math.max(60, Math.round(gw * k));
   const autoplay = state.settings.chat.gifAutoplay; const favs = useFavGifs(); const fav = favs.some((x) => x.id === String(g.id));
+  const mp4 = (LITE && g.smallMp4) || g.mp4; const moving = (LITE && (g.smallWebp || g.smallGif)) || g.gif || g.url;   // Lite mode plays the smaller copy
   return html`<div class=${cx('gif-wrap', fav && 'fav')} style=${{ width: w + 'px', aspectRatio: `${gw} / ${gh}` }} onClick=${() => onImage({ url: g.gif || g.url, name: g.title || 'GIF', video: g.mp4, gif: true })}>
-    ${g.mp4 && autoplay ? html`<video src=${g.mp4} poster=${g.poster} autoplay loop muted playsinline preload="metadata" aria-label=${g.title}></video>` : html`<img src=${autoplay ? (g.gif || g.url) : (g.poster || g.url)} alt=${g.title || 'GIF'} loading="lazy" />`}
+    ${mp4 && autoplay ? html`<video src=${mp4} poster=${g.poster} autoplay loop muted playsinline preload="metadata" aria-label=${g.title}></video>` : html`<img src=${autoplay ? moving : (g.poster || g.url)} alt=${g.title || 'GIF'} loading="lazy" />`}
     <span class="gif-badge">GIF</span>${g.id ? html`<button type="button" class=${cx('gif-fav', fav && 'on')} aria-label=${fav ? t('Remove from Favorites') : t('Add to Favorites')} data-tip=${fav ? t('Remove from Favorites') : t('Add to Favorites')} onClick=${(e) => { e.stopPropagation(); toggleFavGif(gifFromMessage(g)); }}><${Icon} name="star" size=${15} fill=${fav} /></button>` : null}</div>`;
 }
 
@@ -241,7 +243,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
   const htmlContent = m.content ? renderMarkdown(m.content, { serverId: ch.serverId, emojis: m.emojis }) : '';
   const links = m.content && !m.pending ? [...new Set((m.content.replace(/```[\s\S]*?```|`[^`]*`/g, '').match(URL_RE) || []).map((u) => u.replace(/[.,;:!?)]+$/, '')))] : [];
   const invites = [...new Set(links.map(inviteCodeOf).filter(Boolean))].slice(0, 2);   // invite links become join cards, whatever the link-preview setting says
-  const urls = showEmbeds && !m.ephemeral ? links.filter((u) => !inviteCodeOf(u)).slice(0, 2) : [];   // Orbit's private replies stay compact
+  const urls = showEmbeds && !m.ephemeral && !LITE ? links.filter((u) => !inviteCodeOf(u)).slice(0, 2) : [];   // Orbit's private replies stay compact
   const onImage = (a) => { const imgs = (m.attachments || []).filter((x) => isImageType(x.type)).map((x) => ({ url: x.url, name: x.name })); const i = imgs.findIndex((x) => x.url === a.url); set({ lightbox: { items: i >= 0 ? imgs : [a], index: Math.max(0, i) } }); };
   const b = m.bridge;   // from a linked Discord channel: shown as the Discord sender, not as Orbit who posted it
   const who = b ? discordUser(b) : author;

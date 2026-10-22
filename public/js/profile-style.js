@@ -5,7 +5,7 @@ import { useSel, toast } from '/js/store.js';
 import { chooseAndUploadImage } from '/js/imageutil.js';
 import { Btn, Segmented, Dropdown, Slider, Toggle, ColorSwatch } from '/js/ui.js';
 import { loadFont } from '/js/theme.js';
-import { startEffect } from '/js/profile-effects.js';
+import { LITE, HEAVY_EFFECTS } from '/js/lite.js';
 import { t } from '/js/i18n.js';
 import { PROFILE_FONTS, EFFECTS, OUTLINE_STYLES, PROFILE_DEFAULTS, fontFamily, effectColors } from '/js/profile-data.js';
 
@@ -68,8 +68,14 @@ export function UserName({ user, text, class: c }) {
 /** The effect drawn over a profile card. Pauses when the tab is hidden and shows a still picture under Reduce motion. */
 export function ProfileEffect({ fx }) {
   const ref = useRef(null); const reduce = useSel((s) => s.settings.motion?.reduce);
-  const eff = rainbowFx(fx);
-  useEffect(() => (ref.current ? startEffect(ref.current, eff, { reduce }) : undefined), [fx?.id, eff.color, eff.color2, fx?.density, fx?.speed, fx?.opacity, reduce]);
+  const eff = rainbowFx(fx); const off = LITE && HEAVY_EFFECTS.has(fx?.id);   // Lite mode: only the lighter effects, sparser and at 20 frames a second
+  useEffect(() => {
+    if (!ref.current || off) return undefined;
+    let stop = () => {}; let gone = false;
+    import('/js/profile-effects.js').then((m) => { if (!gone && ref.current) stop = m.startEffect(ref.current, LITE ? { ...eff, density: Math.min(eff.density ?? 0.6, 0.35) } : eff, LITE ? { reduce, fps: 20 } : { reduce }); });
+    return () => { gone = true; stop(); };
+  }, [fx?.id, eff.color, eff.color2, fx?.density, fx?.speed, fx?.opacity, reduce]);
+  if (off) return null;
   return html`<canvas class=${cx('pf-fx', fx?.rainbow && 'rainbow')} ref=${ref} aria-hidden="true"></canvas>`;
 }
 /** A rainbow effect is drawn in two far-apart colors; the canvas then hue-rotates through the whole spectrum (see extras.css). */
@@ -84,7 +90,7 @@ export function CardDecor({ profile: p }) {
 /** Loads the fonts a profile uses (once per page). */
 export function useProfileFonts(p) {
   const a = p?.fonts?.name; const b = p?.fonts?.text;
-  useEffect(() => { for (const id of [a, b]) { const f = fontFamily(id); if (f) loadFont(f); } }, [a, b]);
+  useEffect(() => { if (LITE) return; for (const id of [a, b]) { const f = fontFamily(id); if (f) loadFont(f); } }, [a, b]);   // Lite mode downloads no fonts
 }
 
 /* ------------------------------------------------------------------ editor */

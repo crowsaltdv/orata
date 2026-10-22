@@ -1,5 +1,6 @@
 // Orata — profile card (popout, side panel and full modal) + user context menus.
 import { html, useState, useEffect, cx, formatMemberSince, copyText, avatarColor } from '/js/lib.js';
+import { thumb } from '/js/lite.js';
 import { state, set, useSel, openModal, closeModal, closePopover, openContext, toast, hasPerm, memberOf, topRole, nameOf, goDm, isOwnerOf } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, Btn, IconBtn, MODALS, POPOVERS, Modal, Spinner, TextInput, confirmDialog } from '/js/ui.js';
@@ -66,7 +67,7 @@ export function userMenu(userId, serverId) {
 
 /** A banner picture is shown at the shape it was cropped to (3 : 1), so what you chose in the crop dialog is exactly what shows. `shape={false}` keeps a fixed strip. */
 export function Banner({ user, height = 96, server, shape = true }) {
-  const style = user.banner ? { backgroundImage: `url("${user.banner}")` } : { background: `linear-gradient(135deg, ${user.bannerColor || avatarColor(user.id)}, ${user.accentColor || 'var(--accent-2)'})` };
+  const style = user.banner ? { backgroundImage: `url("${thumb(user.banner, 480)}")` } : { background: `linear-gradient(135deg, ${user.bannerColor || avatarColor(user.id)}, ${user.accentColor || 'var(--accent-2)'})` };
   void server;
   return html`<div class="pc-banner" style=${{ ...(user.banner && shape ? { aspectRatio: '3 / 1' } : { height: height + 'px' }), ...style }}></div>`;
 }

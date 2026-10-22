@@ -3,7 +3,11 @@ import { state, subscribe, toast } from '/js/store.js';
 import { DEFAULT_SETTINGS } from '/js/defaults.js';
 import { hexToRgb, luminance, mixHex, readableOn, ls } from '/js/lib.js';
 import { MESH_WALLPAPERS, PHOTO_WALLPAPERS } from '/js/defaults.js';
-import { rain } from '/js/rain.js';
+import { LITE } from '/js/lite.js';
+
+// the rain (26 KB) loads only once it's switched on
+let rainMod = null;
+const rain = { start: (cfg) => (rainMod ||= import('/js/rain.js')).then((m) => m.rain.start(cfg)), stop: () => rainMod?.then((m) => m.rain.stop()) };
 
 const root = document.documentElement;
 const $ = (s) => document.querySelector(s);
@@ -44,7 +48,16 @@ export function drawMesh(ctx, w, h, def) {
   }
 }
 /** The look to render. Nobody signed in (the login / sign-up screens) always gets the default theme, never what a previous account left in this browser. */
-function look() { return state.token ? state.settings : DEFAULT_SETTINGS; }
+let liteFrom = null; let liteLook = null;
+/** Lite mode's look: no rain, glass, wallpaper picture, blur or downloaded fonts (the saved settings stay as they are). */
+function lite(s) {
+  if (s === liteFrom) return liteLook; liteFrom = s;
+  const light = s.theme.mode === 'light' || (s.theme.mode === 'auto' && window.matchMedia('(prefers-color-scheme: light)').matches);
+  liteLook = { ...s, rain: { ...s.rain, enabled: false }, glass: { ...s.glass, style: 'off' }, bg: { ...s.bg, type: 'solid', color: mixHex(s.theme.panelColor, light ? '#ffffff' : '#000000', 0.55), parallax: false, blur: 0 },
+    fonts: { ...s.fonts, ui: 'System UI', chat: null, code: null }, theme: { ...s.theme, panelBlur: 0 } };
+  return liteLook;
+}
+function look() { const s = state.token ? state.settings : DEFAULT_SETTINGS; return LITE ? lite(s) : s; }
 export function wallpaperSource(bg = look().bg) {
   switch (bg.type) {
     case 'mesh': { const def = MESH_WALLPAPERS.find((m) => m.id === bg.mesh) || MESH_WALLPAPERS[0]; return { kind: 'mesh', def, css: meshCss(def), key: 'mesh:' + def.id }; }

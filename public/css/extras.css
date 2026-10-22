@@ -591,3 +591,18 @@ button.stat-tile { text-align: left; font: inherit; } button.stat-tile:disabled 
 .sdm-avs { display: flex; flex: none; } .sdm-avs > * + * { margin-left: -10px; } .sdm-excerpt { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; }
 .flag-hidden { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-style: italic; }
 .flag-hidden .flag-kind { white-space: nowrap; flex: none; font-style: normal; }
+
+/* Lite mode (public/js/lite.js): nothing blurred or see-through, no wallpaper picture or rain */
+html.lite *, html.lite *::before, html.lite *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+html.lite #rain, html.lite .wp-image { display: none !important; }
+/* the launch screen: Normal or Lite mode (app.js ModeChooser) */
+.mode-screen { position: fixed; inset: 0; z-index: 9000; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / .62); }
+.mode-box { width: min(580px, 100%); padding: 26px; border-radius: var(--radius-lg); background: rgb(var(--panel-rgb) / .97); border: 1px solid var(--border); text-align: center; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+.mode-box h2 { margin: 0; font-size: 22px; } .mode-box p { margin: 0; color: var(--text-2); line-height: 1.5; }
+.mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; }
+@media (max-width: 520px) { .mode-cards { grid-template-columns: 1fr; } }
+.mode-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 16px; border-radius: var(--radius); background: var(--input-bg); border: 2px solid var(--border); color: var(--text-2); text-align: center; transition: border-color var(--t-fast); }
+.mode-card:hover { border-color: var(--accent); } .mode-card b { font-size: 17px; color: var(--text); } .mode-card span { font-size: 13px; line-height: 1.45; }
+.mode-card .icon { color: var(--accent); } .mode-card small { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
+.mode-card.current { border-color: rgb(var(--accent-rgb) / .55); }
+.mode-keep { justify-content: center; }

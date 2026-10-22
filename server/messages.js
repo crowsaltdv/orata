@@ -22,7 +22,7 @@ export function sanitizeMedia(obj, kind) {
   const url = String(obj.url || '');
   if (!URL_HOSTS_OK.test(url)) return null;
   const clean = { id: String(obj.id || '').slice(0, 40), title: String(obj.title || '').slice(0, 200), url, w: clampInt(obj.w, 1, 4000, 220), h: clampInt(obj.h, 1, 4000, 220) };
-  for (const k of ['gif', 'webp', 'mp4', 'webm', 'jpg', 'png', 'poster']) if (obj[k] && URL_HOSTS_OK.test(String(obj[k]))) clean[k] = String(obj[k]);
+  for (const k of ['gif', 'webp', 'mp4', 'webm', 'jpg', 'png', 'poster', 'smallMp4', 'smallWebp', 'smallGif']) if (obj[k] && URL_HOSTS_OK.test(String(obj[k]))) clean[k] = String(obj[k]);   // small*: the lighter copy Lite mode shows
   clean.kind = kind;
   return clean;
 }

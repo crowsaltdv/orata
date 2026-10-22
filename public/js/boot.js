@@ -1,4 +1,5 @@
 // Orata — entry point.
+import '/js/lite.js';   // first: Lite mode decides what the rest loads and shows
 import { html, render } from '/js/lib.js';
 import { state, set, parseRoute } from '/js/store.js';
 import { initTheme } from '/js/theme.js';

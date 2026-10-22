@@ -139,6 +139,12 @@ async function main() {
   ok(r.body.attachments?.length === 1 && r.body.attachments[0].size === 11, 'attachment message');
   const f = await fetch(base + up.url);
   ok(f.status === 200, 'uploaded file is served');
+  // Lite mode's smaller pictures, and the page asking for every start-up module at once
+  r = await api('POST', '/upload', A, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'), { 'x-filename': 'dot.png', 'content-type': 'image/png' });
+  const small = await fetch(`${base}/thumbs/96/${r.body.url.slice('/uploads/'.length)}`);
+  ok(small.status === 200 && small.headers.get('content-type') === 'image/webp', 'an uploaded picture has a small copy for Lite mode');
+  ok((await fetch(`${base}/thumbs/97/${r.body.url.slice('/uploads/'.length)}`)).status === 404 && (await fetch(`${base}/thumbs/96/..%2Fdb.json`)).status === 404, '… only at the set sizes, and only for uploads');
+  ok((await (await fetch(base + '/channels/@me')).text()).includes('<link rel="modulepreload" href="/js/app.js"'), 'the page asks for every start-up module at once');
   r = await api('GET', '/gifs?mode=trending&per_page=4', A);
   ok(r.status === 200 && r.body.items?.length > 0, 'GIF trending via KLIPY', JSON.stringify(r.body).slice(0, 120));
   if (r.body.items?.[0]) {

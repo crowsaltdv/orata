@@ -1,6 +1,9 @@
 // Orata — tiny i18n: English text is the key; other languages override via the dictionary in i18n-data.js.
-import { state } from '/js/store.js';
-import { DICT } from '/js/i18n-data.js';
+import { state, set } from '/js/store.js';
+
+// the other languages' text (40 KB) loads only when someone picks one; App re-renders (key) once it's here
+let DICT = null; let loading = null;
+const loadDict = () => (loading ||= import('/js/i18n-data.js').then((m) => { DICT = m.DICT; set({ i18nVer: Date.now() }); }));
 
 export const LANGUAGES = [
   { code: 'en', name: 'English', native: 'English' }, { code: 'es', name: 'Spanish', native: 'Español' }, { code: 'fr', name: 'French', native: 'Français' },
@@ -11,7 +14,8 @@ export const LANGUAGES = [
 
 export function t(key, vars) {
   const lang = state.settings.lang || 'en';
-  let s = (lang !== 'en' && DICT[lang]?.[key]) || key;
+  if (lang !== 'en' && !DICT) loadDict();
+  let s = (lang !== 'en' && DICT?.[lang]?.[key]) || key;
   if (vars) s = s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`));
   return s;
 }

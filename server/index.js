@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import sharp from 'sharp';
 import { ROOT, UPLOAD_DIR, ENV, ensureBot, db, pg, restoreUpload, storageSummary } from './core.js';
 import { discordOn } from './discord.js';
 import { createApi, turnConfigured } from './api.js';
@@ -58,6 +59,23 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
   },
 }));
 
+// Lite mode's lighter pictures (public/js/lite.js): an uploaded image 96, 256 or 480 pixels wide as WebP (a GIF's first frame), made once and kept
+const THUMB_W = new Set([96, 256, 480]); const THUMBS = path.join(os.tmpdir(), 'orata-thumbs');
+app.get('/thumbs/:w/:name', async (req, res) => {
+  const w = Number(req.params.w); const name = String(req.params.name);
+  if (!THUMB_W.has(w) || !/^[A-Za-z0-9_.-]{1,120}\.(png|jpe?g|gif|webp|avif)$/i.test(name)) return res.status(404).end();
+  const out = path.join(THUMBS, `${w}-${name}.webp`);
+  try {
+    if (!fs.existsSync(out)) {
+      if (pg) await restoreUpload(name);   // with Postgres the disk is only a cache
+      const src = path.join(UPLOAD_DIR, name); if (!fs.existsSync(src)) return res.status(404).end();
+      fs.mkdirSync(THUMBS, { recursive: true });
+      await sharp(src, { limitInputPixels: 50_000_000 }).rotate().resize({ width: w, withoutEnlargement: true }).webp({ quality: 55 }).toFile(out);
+    }
+    res.set({ 'Cache-Control': 'public, max-age=2592000, immutable', 'Content-Security-Policy': "sandbox; default-src 'none'", 'Cross-Origin-Resource-Policy': 'cross-origin' }).type('image/webp').sendFile(out);
+  } catch { res.status(404).end(); }
+});
+
 app.use(express.static(path.join(ROOT, 'public'), {
   index: false, extensions: ['html'],   // /terms, /privacy and /guidelines are plain pages (public/*.html)
   setHeaders(res, file) {
@@ -65,10 +83,22 @@ app.use(express.static(path.join(ROOT, 'public'), {
     else if (/\.(png|jpg|webp|svg|json|woff2?)$/.test(file)) res.set('Cache-Control', 'public, max-age=86400');
   },
 }));
+// the page, with every module it loads at start (found once from boot.js's imports) as <link rel="modulepreload">: the browser fetches them
+// all at once instead of one level of imports at a time
+const INDEX_HTML = (() => {
+  const seen = new Set();
+  const walk = (f) => {
+    if (seen.has(f)) return; seen.add(f); let src = '';
+    try { src = fs.readFileSync(path.join(ROOT, 'public', f), 'utf8'); } catch { return; }
+    for (const m of src.matchAll(/^\s*import\s+(?:[^'"]*?from\s+)?['"](\/(?:js|vendor)\/[^'"]+)['"]/gm)) walk(m[1]);
+  };
+  walk('/js/boot.js');
+  return fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8').replace('</head>', `${[...seen].map((f) => `  <link rel="modulepreload" href="${f}" />`).join('\n')}\n</head>`);
+})();
 // SPA fallback (client-side routes: /channels/…, /invite/…, /login …)
 app.get('*', (req, res, next) => {
-  if (/^\/(api|uploads|gateway)\b/.test(req.path)) return next();
-  res.set('Cache-Control', 'no-cache').sendFile(path.join(ROOT, 'public', 'index.html'));
+  if (/^\/(api|uploads|gateway|thumbs)\b/.test(req.path)) return next();
+  res.set('Cache-Control', 'no-cache').type('html').send(INDEX_HTML);
 });
 
 const useTls = ENV.HTTPS_KEY && ENV.HTTPS_CERT;

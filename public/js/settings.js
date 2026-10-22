@@ -1,5 +1,6 @@
 // Orata — user settings overlay (account, profile, appearance, voice, notifications, language …).
 import { html, useState, useEffect, useRef, cx, copyText, formatMemberSince, relTime, ls } from '/js/lib.js';
+import { LITE, MODE_OWNER, preferredMode, setMode } from '/js/lite.js';
 import { state, set, useSel, closeModal, openModal, closePopover, setSetting, updateSettings, resetSettings, toast, updateLocal } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
 import { Btn, Field, TextInput, Toggle, SettingRow, Section, Segmented, Modal, MODALS, Avatar, ColorSwatch, Empty, confirmDialog, Dropdown, useEscape, useSaveBar } from '/js/ui.js';
@@ -196,8 +197,13 @@ MODALS['theme-io'] = function ThemeIO({ id, mode }) {
 };
 export function exportTheme() { const s = state.settings; return { app: 'Orata', version: 1, theme: s.theme, bg: { ...s.bg, library: [] }, rain: s.rain, glass: s.glass, fonts: s.fonts, motion: s.motion, chat: s.chat }; }
 function AdvancedPage() {
-  const conn = useSel((s) => s.connection);
+  const conn = useSel((s) => s.connection); const [pref, setPref] = useState(preferredMode());
   return html`<div class="s-page">
+    ${state.me?.username === MODE_OWNER ? html`<${Section} title=${t('Lite mode')} desc=${t('Made for Chromebooks and low-end laptops: no rain, glass, wallpaper picture or downloaded fonts, no link previews, only the lighter profile effects, and smaller pictures and GIFs. Saved on this device.')}>
+      <${SettingRow} title=${t('Mode right now')} desc=${t('Switching reloads Orata.')}><${Segmented} value=${LITE ? 'lite' : 'normal'} options=${[{ value: 'normal', label: t('Normal') }, { value: 'lite', label: t('Lite') }]} onChange=${(v) => setMode(v)} /><//>
+      <${SettingRow} title=${t('Open Orata in')} desc=${t('“Ask every time” shows the choice whenever Orata opens.')}>
+        <${Dropdown} width=${200} value=${pref} options=${[{ value: 'ask', label: t('Ask every time') }, { value: 'normal', label: t('Normal mode') }, { value: 'lite', label: t('Lite mode') }]} onChange=${(v) => { setPref(v); setMode(v === 'ask' ? (LITE ? 'lite' : 'normal') : v, v); }} /><//>
+    <//>` : null}
     <${Section} title=${t('Advanced')}>
       <${SettingRow} title=${t('Developer mode')} desc=${t('Adds “Copy ID” to context menus.')}><${SToggle} path="advanced.devMode" /><//>
     <//>

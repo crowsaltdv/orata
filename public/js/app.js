@@ -1,16 +1,17 @@
 // Orata — application root: shell layout, routing, hotkeys, document title.
-import { html, useEffect, cx, ls, lsRemove } from '/js/lib.js';
+import { html, useEffect, useState, cx, ls, lsRemove } from '/js/lib.js';
 import { state, set, useSel, go, openModal, closeModal, unreadInfo, getChannel, dmName } from '/js/store.js';
 import { AuthScreen, Splash } from '/js/auth.js';
-import { ModalHost, ContextMenu, PopoverHost, ToastHost, SaveBarHost } from '/js/ui.js';
+import { ModalHost, ContextMenu, PopoverHost, ToastHost, SaveBarHost, Btn } from '/js/ui.js';
+import { Icon } from '/js/icons.js';
+import { t } from '/js/i18n.js';
+import { LITE, MODE_OWNER, preferredMode, setMode, modeChosenThisVisit } from '/js/lite.js';
 import { ServerRail } from '/js/rail.js';
 import { DmSidebar, ChannelSidebar } from '/js/sidebar.js';
 import { UserBar } from '/js/userbar.js';
 import { FriendsView, ActiveNow } from '/js/friends.js';
 import { ChatView, RightPanel } from '/js/chat.js';
 import { QuickSwitcher, Lightbox } from '/js/overlays.js';
-import { SettingsHost } from '/js/settings.js';
-import { ServerSettingsHost } from '/js/server-settings.js';
 import { VoiceChannelView } from '/js/voiceview.js';
 import { StageChannelView } from '/js/stageview.js';
 import { CallOverlay } from '/js/callui.js';
@@ -90,15 +91,51 @@ function cycle(dir, unreadOnly) {
   n?.go();
 }
 
+/** A screen whose code loads only once it's first needed (and then stays). */
+function later(load, name, needed) {
+  let C = null; let p = null;
+  return function Later() {
+    const want = useSel(needed); const [, bump] = useState(0);
+    if (C) return html`<${C} />`;
+    if (want) (p ||= load().then((m) => { C = m[name]; })).then(() => bump((n) => n + 1));
+    return null;
+  };
+}
+const SettingsHost = later(() => import('/js/settings.js'), 'SettingsHost', (s) => !!s.settingsPage);
+const ServerSettingsHost = later(() => import('/js/server-settings.js'), 'ServerSettingsHost', (s) => !!s.serverSettings);
+
+/** The launch screen: Normal or Lite mode (lite.js), every time Orata opens, until "Don't show again" makes the pick the mode it opens in.
+ *  Only orata_dev sees it, for now. */
+function ModeChooser() {
+  const mine = useSel((s) => s.me?.username === MODE_OWNER);
+  const [open, setOpen] = useState(() => preferredMode() === 'ask' && !modeChosenThisVisit());
+  const [keep, setKeep] = useState(false); const [picked, setPicked] = useState(null);
+  if (!mine || !open) return null;
+  const pick = (mode) => { if (keep) setPicked(mode); else { setOpen(false); setMode(mode); } };
+  const card = (mode, icon, title, desc) => html`<button type="button" class=${cx('mode-card', (mode === 'lite') === LITE && 'current')} onClick=${() => pick(mode)}>
+    <${Icon} name=${icon} size=${28} /><b>${title}</b><span>${desc}</span>${(mode === 'lite') === LITE ? html`<small>${t('Running now')}</small>` : null}</button>`;
+  return html`<div class="mode-screen" role="dialog" aria-label=${t('Choose a mode')}><div class="mode-box">
+    ${picked ? html`<h2>${t('Got it')}</h2>
+        <p>${t('Orata will open in')} <b>${picked === 'lite' ? t('Lite mode') : t('Normal mode')}</b> ${t('from now on. You can switch modes, and change the mode Orata opens in, any time in Settings → Advanced.')}</p>
+        <${Btn} variant="primary" onClick=${() => { setOpen(false); setMode(picked, picked); }}>${t('OK')}<//>`
+      : html`<h2>${t('How should Orata run?')}</h2>
+        <div class="mode-cards">${card('normal', 'sparkles', t('Normal mode'), t('The full Orata: rain, glass, wallpapers and every effect.'))}${card('lite', 'bolt', t('Lite mode'), t('Made for Chromebooks and low-end laptops. Faster and lighter, with fewer effects.'))}</div>
+        <label class="check-row mode-keep"><input type="checkbox" checked=${keep} onChange=${(e) => setKeep(e.target.checked)} /><span class="box"><${Icon} name="check" size=${13} sw=${3.5} /></span><span>${t('Don’t show this again')}</span></label>`}
+  </div></div>`;
+}
+
 export function App() {
   const phase = useSel((s) => s.phase);
-  const lang = useSel((s) => s.settings.lang);
+  const lang = useSel((s) => s.settings.lang); const i18nVer = useSel((s) => s.i18nVer || 0);
+  // Normal mode fetches the settings screens quietly once it's up, so they still open at once; Lite mode waits until they're opened
+  useEffect(() => { if (phase !== 'ready' || LITE) return undefined; const id = setTimeout(() => { import('/js/settings.js'); import('/js/server-settings.js'); }, 4000); return () => clearTimeout(id); }, [phase]);
   const gated = useSel((s) => s.gated);
   const verifying = useSel((s) => s.route.view === 'verify');
   useEffect(() => { if (phase !== 'ready') document.title = 'Orata'; }, [phase]);
-  return html`<div class="app-root" key=${lang}>
+  return html`<div class="app-root" key=${`${lang}:${i18nVer}`}>
     ${verifying ? html`<${VerifyScreen} />` : phase === 'auth' ? html`<${AuthScreen} />` : phase === 'ready' ? (gated ? html`<${VerifyGate} />` : html`<${Shell} />`) : html`<${Splash} />`}
     ${phase === 'ready' && !gated && !verifying ? html`<${CallOverlay} /><${QuickSwitcher} /><${SettingsHost} /><${ServerSettingsHost} /><${SaveBarHost} /><${VerifyBanner} />` : null}
+    ${phase === 'ready' && !gated && !verifying ? html`<${ModeChooser} />` : null}
     <${Lightbox} /><${ModalHost} /><${ContextMenu} /><${PopoverHost} /><${ToastHost} />
   </div>`;
 }

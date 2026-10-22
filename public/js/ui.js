@@ -1,5 +1,6 @@
 // Orata — shared UI primitives: avatars, buttons, form controls, modals, menus, popovers, toasts, tooltips.
 import { html, cx, useState, useEffect, useRef, useLayoutEffect, useCallback, memo, clamp, hexToHsv, hsvToHex, avatarColor, uid } from '/js/lib.js';
+import { thumb } from '/js/lite.js';
 import { state, set, useSel, closeModal, closeContext, closePopover, dismissToast, openModal, toast } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
 import { STATUS_META } from '/js/defaults.js';
@@ -53,7 +54,7 @@ export function StatusDot({ status = 'offline', size = 10, class: c, ring = true
 }
 export function Avatar({ user, userId, src, name, size = 40, status, class: c, onClick, onContextMenu, speaking, title, square, children }) {
   const u = user || (userId ? state.users[userId] : null);
-  const url = src !== undefined ? src : u?.avatar;
+  const url = thumb(src !== undefined ? src : u?.avatar, size > 64 ? 256 : 96);   // Lite mode: a small still copy
   const id = u?.id || name || '0';
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [url]);
