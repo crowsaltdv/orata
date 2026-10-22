@@ -144,7 +144,8 @@ async function main() {
 
     /* ---------- two instances ---------- */
     console.log('\nTwo instances on one database');
-    const a = await boot(); const b = await boot();
+    const grace0 = { DATABASE_TAKEOVER_GRACE_MS: '0' };   // as if they'd been running a while: the first minutes after starting are a deploy (below)
+    const a = await boot(grace0); const b = await boot(grace0);
     ok(a.exited === null && b.exited === null, 'two servers start against the same database');
     await reg(b, 'carol');
     await until(async () => (await readState())?.db && Object.values((await readState()).db.users).some((u) => u.username === 'carol'));
@@ -154,6 +155,20 @@ async function main() {
     const after = await readState();
     ok(Object.values(after.db.users).some((u) => u.username === 'carol') && !Object.values(after.db.users).some((u) => u.username === 'dave'), 'the data written by the other instance is intact');
     b.stop(); await until(() => b.exited !== null);
+    // a deploy: the old version keeps saving while the new one starts; the new one must not quit (the host would never finish the deploy)
+    await resetDb();
+    const hasUser = async (name) => Object.values((await readState())?.db?.users || {}).some((u) => u.username === name);
+    const old = await boot(grace0); await reg(old, 'olive'); await until(() => hasUser('olive'));
+    const fresh = await boot();   // the new deploy starts while the old one is still running
+    await reg(old, 'erin'); await until(() => hasUser('erin')); await sleep(2500);
+    await reg(fresh, 'frank');
+    ok(!!await until(() => hasUser('frank')) && await hasUser('erin') && fresh.exited === null && /keeping up with its data/.test(fresh.out),
+      'a just-started instance (a new deploy) keeps up with the old one’s saves instead of quitting, and its own changes stick', fresh.out.slice(-300));
+    r = await fresh.api('POST', '/auth/check', null, { username: 'erin' }); ok(r.body?.username === false, '… so it knows what the old one saved');
+    old.stop(); await until(() => old.exited !== null);
+    await reg(fresh, 'gina');
+    ok(!!await until(() => hasUser('gina')) && await hasUser('erin') && await hasUser('frank') && fresh.exited === null, '… and once the old one is gone, it saves as normal');
+    fresh.stop(); await until(() => fresh.exited !== null);
 
     /* ---------- import ---------- */
     console.log('\nMoving local files into the database');

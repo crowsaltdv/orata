@@ -113,19 +113,54 @@ export function flush() {
     if (!dirty) return;
     dirty = false; writing = true;
     try { pgVersion = await pg.saveState(JSON.stringify(db), pgVersion); retryMs = 2000; } catch (e) {
-      if (e instanceof ConflictError || e.code === 'CONFLICT') anotherInstance();
+      if (e instanceof ConflictError || e.code === 'CONFLICT') { await anotherInstance(); return; }
       dirty = true; console.error('[orata] could not save to the database, will retry:', e.message);
       if (!timer) { timer = setTimeout(flush, retryMs); retryMs = Math.min(60_000, retryMs * 2); }
     } finally { writing = false; }
   });
   return chain;
 }
-/** Two Orata processes share this database (e.g. an old and a new deploy). Never overwrite; restart so we load the latest data. */
-function anotherInstance() {
+/** Two Orata processes share this database. Never overwrite the other's data. In this process's first minutes that's a deploy: the old
+ *  version keeps saving until the host switches over to this one (and quitting would only make the host retry, never finishing the deploy),
+ *  so load the newer data and carry on, like a restart would but without one. After that it's two instances by mistake: exit, as before.
+ *  Either way, this process's changes since its last save are dropped (they're the other one's to keep). */
+const STARTED_AT = Date.now();
+const TAKEOVER_MS = Number(ENV.DATABASE_TAKEOVER_GRACE_MS ?? 5 * 60_000);
+async function anotherInstance() {
+  if (Date.now() - STARTED_AT < TAKEOVER_MS && await reload()) { console.error('[orata] Another Orata instance (an older deploy still shutting down?) saved to the database: loaded its newer data instead of exiting.'); return; }
   console.error('[orata] The database was changed by another Orata instance. Exiting so this one restarts with the latest data.\n        (Run only one Orata instance per database.)');
   process.exit(1);
 }
+/** Loads the newest save in place of this process's data (dropping anything unsaved). */
+async function reload() {
+  const st = await pg.loadState().catch(() => null); if (!st) return false;
+  adopt(st.json); pgVersion = st.version; dirty = false; clearTimeout(timer); timer = null;
+  for (const uid of [...conns.keys(), ...gatedConns.keys()]) closeConns(uid, 4000, 'reloaded');   // their apps reconnect and load the newer data
+  return true;
+}
+/** Swaps in newer data, keeping this object and its top-level objects (anything holding one keeps seeing current data). */
+function adopt(json) {
+  const fresh = { ...empty(), ...JSON.parse(json) };
+  for (const k of Object.keys(db)) if (!(k in fresh)) delete db[k];
+  for (const [k, v] of Object.entries(fresh)) {
+    const cur = db[k];
+    if (cur && v && typeof cur === 'object' && typeof v === 'object' && !Array.isArray(cur) && !Array.isArray(v)) { for (const x of Object.keys(cur)) delete cur[x]; Object.assign(cur, v); } else db[k] = v;
+  }
+  indexUsers();
+}
 if (pg) {
+  // A new deploy's first minutes: while this process has nothing unsaved, pick up the old version's saves at once, so its own changes
+  // land on current data instead of conflicting (and being dropped) later
+  let said = false;
+  const keepUp = setInterval(async () => {
+    if (Date.now() - STARTED_AT >= TAKEOVER_MS) { clearInterval(keepUp); return; }
+    if (dirty || writing) return;
+    try {
+      const v = await pg.peekVersion();
+      if (v && v !== pgVersion && !dirty && !writing && await reload() && !said) { said = true; console.log('[orata] Another Orata instance (an older deploy?) is still saving to the database: keeping up with its data until it stops.'); }
+    } catch { /* the next check or write will tell */ }
+  }, 1000);
+  keepUp.unref();
   // While people are active, notice quickly when another instance wrote. Stay quiet when idle so a serverless database can suspend.
   setInterval(async () => {
     if (dirty || writing || Date.now() - lastSaveAt > 10 * 60_000) return;
@@ -170,7 +205,11 @@ export const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 /* indexes (rebuilt on load) */
 export const byUsername = new Map();
 export const byEmail = new Map();
-for (const u of Object.values(db.users)) { if (!u.serverBot) byUsername.set(u.username, u.id); if (u.email) byEmail.set(u.email, u.id); delete u.tag; delete u.decoration; }   // personal tags (server tags replaced them) and avatar decorations no longer exist
+function indexUsers() {
+  byUsername.clear(); byEmail.clear();
+  for (const u of Object.values(db.users)) { if (!u.serverBot) byUsername.set(u.username, u.id); if (u.email) byEmail.set(u.email, u.id); delete u.tag; delete u.decoration; }   // personal tags (server tags replaced them) and avatar decorations no longer exist
+}
+indexUsers();
 export const inviteCodes = db.invites;
 
 /* ------------------------------------------------------------- errors */
