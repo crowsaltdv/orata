@@ -16,7 +16,7 @@ import { nameProblem } from './names.js';
 import { mountApplications, publicServerInfo } from './applications.js';
 import { mountStaff, accountBlock, noteNewAccount } from './staff.js';
 import { formatDuration } from '../public/js/orbit-commands.js';
-import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt, messageEdited, messagesDeleted } from './messages.js';
+import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt, messageEdited, messagesDeleted, memberJoined, memberLeft, messageReacted } from './messages.js';
 import { startDiscord, discordOn, noteSite } from './discord.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 import { hasProfanity, censor, cleanBlockedWords } from './profanity.js';   // the same checker the browser uses
@@ -302,6 +302,7 @@ export function createApi() {
       for (const uid of serverAudience(community)) if (uid !== id) emitTo([uid], 'member_add', { serverId: community.id, member: memberView(id, community.members[id]), user: publicUser(user) });
       systemMessage(sys, 'join', id);
     }
+    if (inCommunity && community.ownerId !== id) memberJoined(community, id);
     setTimeout(() => {
       const dm = db.channels[dmId]; if (!dm) return;
       postMessage(dm, bot.id, { content: `**Welcome to Orata, ${displayName}!** 🎉\nI’m Orbit, your built-in helper. Say \`help\` any time to see what you can do.${inCommunity ? `\nA community server called **${community.name}** is already waiting for you on the left.` : ''}` });
@@ -473,7 +474,7 @@ export function createApi() {
     const u = req.user;
     if (!(await checkPassword(u, (req.body || {}).password))) throw bad('Password is incorrect', 'password');
     for (const s of Object.values(db.servers)) if (s.ownerId === u.id) deleteServer(s);
-    for (const s of Object.values(db.servers)) if (s.members[u.id]) { delete s.members[u.id]; emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: u.id }); }
+    for (const s of Object.values(db.servers)) if (s.members[u.id]) { delete s.members[u.id]; emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: u.id }); memberLeft(s, u.id); }
     for (const id of Object.keys(u.rel || {})) { const o = db.users[id]; if (o?.rel) { delete o.rel[u.id]; emitTo([id], 'relationship_update', { id: u.id, type: null }); } }
     await endUserSessions(u.id);
     byUsername.delete(u.username); byEmail.delete(u.email);
@@ -612,6 +613,7 @@ export function createApi() {
     emitTo(serverAudience(s).filter((id) => id !== user.id), 'member_add', { serverId: s.id, member: memberView(user.id, s.members[user.id]), user: publicUser(user) });
     emitTo([user.id], 'server_create', { server: serverView(s, user.id), users: usersFor(Object.keys(s.members)) });
     if (s.systemChannelId) systemMessage(s.systemChannelId, 'join', user.id);
+    memberJoined(s, user.id);   // Orbit's welcome message, role for newcomers, member count (server/orbit-plus.js)
   }
   const apps = mountApplications(r, { h, getServer, findInvite, isBannedFrom: (s, user, req) => isBannedFrom(s, user, req || { headers: {} }), joinServer, pushChannelEvent });
 
@@ -665,6 +667,7 @@ export function createApi() {
     delete s.members[req.user.id]; save();
     emitTo([req.user.id], 'server_delete', { serverId: s.id });
     emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: req.user.id });
+    memberLeft(s, req.user.id);
     res.json({ ok: true });
   }));
   r.post('/servers/:id/transfer', h(async (req, res) => {
@@ -1110,6 +1113,7 @@ export function createApi() {
     save();
     emitTo([uid], 'server_delete', { serverId: s.id });
     emitTo(serverAudience(s), 'member_remove', { serverId: s.id, userId: uid });
+    memberLeft(s, uid);
     for (const set of [...(conns.get(uid) || [])]) if (set.voice && db.channels[set.voice]?.serverId === s.id) set.leaveVoice?.('kicked');
   };
   mountStaff(r, { h, limit, removeMember });   // reports, and the Staff page (server/staff.js)
@@ -1377,6 +1381,7 @@ export function createApi() {
     save();
     emitTo(audienceOf(ch), add ? 'reaction_add' : 'reaction_remove', { channelId: ch.id, messageId: m.id, emoji, userId: req.user.id });
     const rs = reactionRole(ch, m, emoji, req.user.id, add); if (rs) pushServerUpdate(rs);   // a reaction-roles message gives (or takes back) its role
+    messageReacted(ch, m, emoji, req.user.id, add);   // Orbit's starboard
     res.json({ ok: true });
   });
   r.put('/channels/:id/messages/:mid/reactions/:emoji/@me', reaction(true));

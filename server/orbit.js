@@ -4,6 +4,7 @@
 import { db, save, newId, emitTo, publicUser, memberView, messageView, serverAudience, audienceOf, can, needIn, need, isOwner, topRolePos, audit, randomAvatarBg, bad, forbidden, notFound, ApiError } from './core.js';
 import { isStaff } from './names.js';
 import { isDev } from './badges.js';
+import { plusCommand } from './orbit-plus.js';
 import { postMessage, messagesDeleted } from './messages.js';
 import { JOKES, BALL, rollDice } from './bot.js';
 import { ORBIT_COMMANDS, orbitCommand, parseDuration, formatDuration } from '../public/js/orbit-commands.js';
@@ -146,7 +147,7 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
     const text = (v) => { automod(ch, me, v, { host: req.get('host') }); return guardText(ch, me, v); };   // AutoMod and swearing protection apply to what Orbit repeats for you
     const post = (content) => {
       postMessage(ch, s.orbitId, { content, command: { name: cmd.name, by: me } });
-      if (!['kick', 'ban', 'timeout'].includes(cmd.name)) audit(s, me, 'orbit_command', { command: cmd.name, channel: ch.name });   // those write their own entry
+      if (!['kick', 'ban', 'timeout', 'warn'].includes(cmd.name)) audit(s, me, 'orbit_command', { command: cmd.name, channel: ch.name });   // those write their own entry
       return { ok: true };
     };
     const only = (content) => ({ ephemeral: content });
@@ -220,7 +221,11 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
       case 'link-instructions': return res.json(only(linkInstructions(ch, mayUse(s, me, orbitCommand('link')))));   // admins also see the bot's status
       case 'transfer': return res.json(only(transferCode(s, me)));
       case 'unlink': if (!await unlinkChannel(ch.id, { fromOrata: true, actor: me })) throw bad('This channel isn’t linked with Discord.'); return res.json({ ok: true });
-      default: throw new ApiError(400, 'Unknown command');
+      default: {   // counting, welcome, levels, giveaways, tickets… (server/orbit-plus.js)
+        const out = plusCommand(cmd.name, { s, ch, me, args, first, rest, who, text, post, only, member: target });
+        if (out) return res.json(out);
+        throw new ApiError(400, 'Unknown command');
+      }
     }
   }));
 }

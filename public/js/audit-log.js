@@ -11,7 +11,7 @@ import { t } from '/js/i18n.js';
 const KINDS = [['', 'Everything'], ['member_,application_', 'Members'], ['role_', 'Roles'], ['channel_', 'Channels'], ['message_', 'Messages'], ['automod', 'AutoMod'], ['server_,invite_,vanity_,tag_,orbit_,reaction_,discord_,join_', 'Server & Orbit']];
 const ICON = { member_kick: 'log-out', member_ban: 'ban', member_unban: 'user-check', member_timeout: 'clock', member_timeout_remove: 'clock', member_role_add: 'tag', member_role_remove: 'tag', member_nick: 'edit',
   role_create: 'tag', role_update: 'tag', role_delete: 'tag', channel_create: 'hash', channel_update: 'hash', channel_delete: 'hash', server_update: 'settings', server_transfer: 'crown',
-  invite_create: 'link', invite_delete: 'link', vanity_update: 'link', tag_update: 'tag', join_mode: 'link', application_accept: 'user-check', application_reject: 'user-x', discord_link: 'link', discord_unlink: 'link', discord_transfer: 'upload', message_delete: 'trash', message_bulk_delete: 'trash', message_pin: 'pin', message_unpin: 'pin', automod_block: 'shield', orbit_add: 'sparkles', orbit_remove: 'sparkles', orbit_update: 'sparkles', reaction_roles_create: 'smile', orbit_command: 'sparkles' };
+  invite_create: 'link', invite_delete: 'link', vanity_update: 'link', tag_update: 'tag', join_mode: 'link', application_accept: 'user-check', application_reject: 'user-x', discord_link: 'link', discord_unlink: 'link', discord_transfer: 'upload', message_delete: 'trash', message_bulk_delete: 'trash', message_pin: 'pin', message_unpin: 'pin', automod_block: 'shield', orbit_add: 'sparkles', orbit_remove: 'sparkles', orbit_update: 'sparkles', reaction_roles_create: 'smile', orbit_command: 'sparkles', member_warn: 'alert-triangle', member_warnings_clear: 'check', ticket_close: 'x' };
 const FIELD = { name: 'name', description: 'description', icon: 'icon', banner: 'banner', accent: 'color', systemChannelId: 'join messages channel', profanity: 'swearing protection', blockedWords: 'blocked words', automod: 'AutoMod', onboarding: 'onboarding', topic: 'topic', slowmode: 'slowmode', nsfw: 'age limit', parentId: 'category', overwrites: 'permissions', synced: 'permissions', tags: 'tags', requireTag: 'tags', color: 'color', hoist: 'shown separately', position: 'order', permissions: 'permissions', displayName: 'name', bio: 'about', avatar: 'picture', roles: 'command roles' };
 const fields = (list) => (list?.length ? ` (${[...new Set(list.map((f) => FIELD[f] || f))].join(', ')})` : '');
 const BAD = new Set(['member_kick', 'member_ban', 'member_timeout', 'role_delete', 'channel_delete', 'message_delete', 'message_bulk_delete', 'automod_block', 'invite_delete', 'orbit_remove']);
@@ -24,6 +24,9 @@ function said(e, who) {
     case 'member_ban': return html`banned ${T}${d.alts ? ` (and ${d.alts} other account${d.alts === 1 ? '' : 's'} of theirs)` : ''}`;
     case 'member_unban': return html`unbanned ${T}`;
     case 'member_timeout': return html`timed out ${T} for ${formatDuration((d.minutes || 0) * 60_000)}`;
+    case 'member_warn': return html`warned ${T}`;
+    case 'member_warnings_clear': return html`cleared ${d.count} warning${d.count === 1 ? '' : 's'} of ${T}`;
+    case 'ticket_close': return html`closed the ticket ${ch(d.channel)}${e.target ? html` opened by ${T}` : ''}`;
     case 'member_timeout_remove': return html`removed the timeout of ${T}`;
     case 'member_role_add': return html`gave ${T} the role <b>${d.role}</b>`;
     case 'member_role_remove': return html`took the role <b>${d.role}</b> from ${T}`;
