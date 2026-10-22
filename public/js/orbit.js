@@ -13,6 +13,7 @@ import { t } from '/js/i18n.js';
 /** May I use `cmd` in `server`? Owners and admins always; otherwise the command's permission, then the roles picked in /settings. */
 export function mayUseOrbit(server, cmd) {
   const me = state.me?.id; if (!server?.orbitId || !me || !cmd) return false;
+  if (cmd.dev && !state.me.badges?.some((b) => b.id === 'dev')) return false;   // Orata developers only: not even listed for anyone else
   if (server.ownerId === me || server.coOwners?.includes(me) || server.perms.includes('ADMINISTRATOR')) return true;
   if (cmd.perm && !server.perms.includes(cmd.perm)) return false;
   const roles = server.orbitRoles?.[cmd.name]; const mine = server.members.find((m) => m.id === me)?.roles || [];
@@ -45,7 +46,7 @@ MODALS['orbit-settings'] = function OrbitSettings({ id, serverId }) {
     <${Field} label=${t('About')}><textarea class="textarea" rows="2" maxlength="190" value=${bio} onInput=${(e) => setBio(e.target.value)}></textarea><//>
     <div class="orbit-cmds"><h5>${t('Who can use each command')}</h5>
       <p class="field-hint">${t('With no role picked, anyone who has the permission shown can use it. Pick roles to narrow it to them. Owners and admins can always use every command.')}</p>
-      ${ORBIT_COMMANDS.filter((c) => !c.discord || state.discordOk).map((c) => html`<div class="oc-row" key=${c.name}><div class="oc-name"><b>/${c.name}</b><small>${c.perm ? PERM_INFO[c.perm]?.[0] || c.perm : t('Everyone')}</small></div>
+      ${ORBIT_COMMANDS.filter((c) => (!c.discord || state.discordOk) && !c.dev).map((c) => html`<div class="oc-row" key=${c.name}><div class="oc-name"><b>/${c.name}</b><small>${c.perm ? PERM_INFO[c.perm]?.[0] || c.perm : t('Everyone')}</small></div>
         <div class="oc-roles">${list.length ? list.map((r) => html`<button type="button" key=${r.id} class=${cx('oc-role', (roles[c.name] || []).includes(r.id) && 'on')} style=${{ '--rc': r.color || 'var(--text-3)' }} onClick=${() => flip(c.name, r.id)}><i></i>${r.name}</button>`) : html`<small class="text-muted">${t('Make roles in Server Settings to narrow commands.')}</small>`}</div></div>`)}
     </div>
   <//>`;

@@ -1,6 +1,7 @@
 // Orata Discord-bridge self-test (runs with the other suites):  npm test
 // Starts a fake Discord (its API and its gateway WebSocket) and an Orata server pointed at it, then links a channel and sends messages,
-// pictures, edits, deletes and replies both ways, catches up after a restart, and unlinks.
+// pictures, edits, deletes and replies both ways, catches up after a restart, and unlinks. Then moves a Discord server's roles, channels and emoji
+// into Orata with /transfer (Orata developers only).
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import os from 'node:os';
@@ -23,23 +24,38 @@ async function until(fn, ms = 4000) { const end = Date.now() + ms; for (;;) { co
 
 /* ---------------------------------------------------------------- the fake Discord */
 const calls = [];   // every API call Orata made: { method, path, body (parsed JSON or raw text), type }
-let gw = null; let gseq = 0; let identify = null; let backlog = []; let slowDown = false;   // slowDown: answer the next catch-up with Discord's "429, try again shortly\"
+let gw = null; let gseq = 0; let identify = null; let backlog = []; let slowDown = false; let noListForms = false;   // noListForms: refuse a form with lists once, like an old Discord   // slowDown: answer the next catch-up with Discord's "429, try again shortly\"
 let sf = 1300000000000000000n; const snow = () => String(++sf);   // Discord ids grow with time
 const HOOK_TOKEN = 'h'.repeat(68);
+const bit = (...n) => String(n.reduce((a, b) => a | (1n << BigInt(b)), 0n));   // Discord permission bits
+const GUILD = { id: '4001', name: 'Fake Guild', icon: 'abc123', emojis: [{ id: '7001', name: 'blob', animated: false }, { id: '7002', name: 'x', animated: false }],
+  roles: [{ id: '4001', name: '@everyone', position: 0, permissions: bit(6, 10, 11) }, { id: '3001', name: 'Mods', position: 3, color: 0xff0000, hoist: true, permissions: bit(1, 13) },
+    { id: '3002', name: 'Helpers', position: 2, color: 0x00ff00, permissions: bit(13) }, { id: '3003', name: 'VIP', position: 1, color: 0, permissions: '0' }, { id: '3004', name: 'Orata-Link', position: 4, managed: true, permissions: bit(3) }] };
+const GUILD_CHANNELS = [
+  { id: '2100', type: 4, name: 'Main', position: 0 },
+  { id: '2001', type: 0, name: 'general', position: 0, parent_id: '2100', topic: 'say hi' },
+  { id: '2101', type: 0, name: 'staff-chat', position: 1, parent_id: '2100', permission_overwrites: [{ id: '4001', type: 0, allow: '0', deny: bit(10) }, { id: '3002', type: 0, allow: bit(10), deny: '0' }, { id: '3003', type: 0, allow: bit(10), deny: '0' }, { id: '1001', type: 1, allow: bit(10), deny: '0' }] },
+  { id: '2102', type: 2, name: 'Lounge', position: 2, parent_id: '2100' },
+  { id: '2103', type: 0, name: 'off-topic', position: 3 },
+  { id: '2104', type: 11, name: 'a thread', position: 0, parent_id: '2001' },
+];
 const fake = http.createServer((req, res) => {
   const chunks = []; req.on('data', (c) => chunks.push(c));
   req.on('end', () => {
     const raw = Buffer.concat(chunks); const type = req.headers['content-type'] || ''; const u = new URL(req.url, 'http://x');
     let body = null; try { body = type.includes('json') ? JSON.parse(raw) : raw.toString('latin1'); } catch { body = raw.toString(); }
-    if (u.pathname === '/files/cat.png' || /^\/stickers\/\d+\.png$/.test(u.pathname)) { res.writeHead(200, { 'content-type': 'image/png' }); return res.end(PNG); }
+    if (u.pathname === '/files/cat.png' || /^\/stickers\/\d+\.png$/.test(u.pathname) || /^\/emojis\/\d+\.png$/.test(u.pathname) || u.pathname.startsWith('/icons/4001/')) { res.writeHead(200, { 'content-type': 'image/png' }); return res.end(PNG); }
     if (/^\/stickers\/\d+\.json$/.test(u.pathname)) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify(LOTTIE)); }
     calls.push({ method: req.method, path: u.pathname, query: u.search, body, type, auth: req.headers.authorization });
     const json = (v, status = 200) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
     const p = u.pathname.replace(/^\/api/, '');
     if (p === '/applications/900/commands') return json(req.method === 'PUT' ? body : []);
     if (/^\/channels\/\w+\/webhooks$/.test(p)) return json({ id: 'wh1', token: HOOK_TOKEN });
+    if (p === '/guilds/4001') return json(GUILD);
+    if (p === '/guilds/4001/channels') return json(GUILD_CHANNELS);
     if (p === `/webhooks/wh1/${HOOK_TOKEN}` && req.method === 'POST') { const id = snow(); calls[calls.length - 1].id = id; return json({ id }); }
     if (p.startsWith(`/webhooks/wh1/${HOOK_TOKEN}`)) { res.writeHead(204); return res.end(); }
+    if (/^\/interactions\//.test(p) && noListForms && body?.type === 9 && body.data.components.some((c) => c.type === 18)) { noListForms = false; return json({ message: 'Invalid Form Body' }, 400); }
     if (/^\/interactions\//.test(p)) { res.writeHead(204); return res.end(); }
     if (p.startsWith('/webhooks/900/itok/')) return json({});   // filling in a "thinking…" answer
     if (p === '/channels/2003/messages') return json({ message: 'Missing Access' }, 403);   // a channel the bot can't read
@@ -224,6 +240,54 @@ async function main() {
   r = await cmd(A.token, 'unlink'); ok(r.status === 400, '/unlink on a channel that isn’t linked says so');
   const log = (await api('GET', `/servers/${S.id}/audit-log?action=discord_`, A.token)).body.entries;
   ok(log.length === 2 && log.some((e) => e.action === 'discord_link' && e.actorId === A.user.id), 'linking and unlinking are in the audit log');
+
+  console.log('\nMoving a Discord server into Orata (Orata developers only)');
+  r = await cmd(A.token, 'transfer'); ok(r.status === 400 && /doesn’t know/.test(r.body.error), 'for everyone else /transfer doesn’t exist…');
+  r = await cmd(A.token, 'help'); ok(r.status === 200 && !r.body.ephemeral.includes('/transfer'), '… and isn’t in /help');
+  await stopServer();
+  { const j = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8')); j.users[A.user.id].badges = ['dev']; fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(j)); }
+  calls.length = 0; identify = null; startServer(); await ready(); await until(() => identify);
+  const put3 = await until(() => calls.find((c) => c.method === 'PUT' && c.path === '/api/applications/900/commands'));
+  ok(put3?.body.some((c) => c.name === 'transfer' && c.default_member_permissions === '32' && c.options[0].required), 'Discord gets /transfer code:…, shown only to people who can manage the server');
+  const moveCode = async (chId) => /code:([A-Z0-9]{4}-[A-Z0-9]{4})/.exec((await api('POST', `/channels/${chId}/command`, A.token, { name: 'transfer', args: '' })).body?.ephemeral || '')?.[1];
+  const code1 = await moveCode(text.id); ok(!!code1, 'an Orata developer gets a one-time code from Orbit');
+  const openForm = async (c, extra = {}) => { calls.length = 0; dispatch('INTERACTION_CREATE', interaction({ ...extra, data: { name: 'transfer', options: [{ name: 'code', value: c }] } })); await sleep(300); return until(() => [...calls].reverse().find((x) => x.path.startsWith('/api/interactions/') && [4, 9].includes(x.body?.type))); };
+  let form = await openForm(code1, { member: { permissions: '0', user: { id: '1008', username: 'rando' } } });
+  ok(form?.body.type === 4 && /Manage Server/.test(form.body.data.content), 'on Discord it needs Manage Server');
+  form = await openForm('ZZZZ-ZZZZ'); ok(form?.body.type === 4 && /isn’t valid/.test(form.body.data.content), 'a wrong code says so');
+  form = await openForm(code1); const fields = form?.body.data?.components || [];
+  ok(form?.body.type === 9 && fields.some((f) => f.component?.custom_id === 'what' && f.component.options.some((o) => o.value === 'all' && o.label === 'Whole server')) && fields.some((f) => f.component?.type === 6) && fields.some((f) => f.component?.type === 8) && /custom roles/.test(fields[0].content),
+    '/transfer opens a form: the whole server, what to move, lists of roles and channels, and the note about custom roles');
+  const submit = (f, picked) => { calls.length = 0; dispatch('INTERACTION_CREATE', interaction({ type: 5, data: { custom_id: f.body.data.custom_id, components: [{ type: 10, id: 1 }, ...['what', 'roles', 'channels'].map((k, n) => ({ type: 18, component: { type: [3, 6, 8][n], custom_id: k, values: picked[k] || [] } }))] } })); };
+  const summary = (re) => until(() => answers().find((a) => re.test(a.content || '')), 6000);
+  submit(form, { what: ['emojis'], roles: ['3002'], channels: ['2101'] });
+  let done = await summary(/Moved into|Nothing|went wrong/);
+  ok(/1 role, 2 channels, 1 emoji/.test(done?.content) && /permissions for 1 role/.test(done.content) && /single members/.test(done.content), 'it moves what was picked, and says what it couldn’t', done?.content);
+  let sv = (await api('GET', '/ready', A.token)).body.servers.find((x) => x.id === S.id);
+  const helpers = sv.roles.find((x) => x.name === 'Helpers'); const chat = sv.channels.find((c) => c.name === 'staff-chat'); const main = sv.channels.find((c) => c.name === 'Main');
+  ok(helpers?.color === '#00ff00' && helpers.permissions.includes('MANAGE_MESSAGES') && !sv.roles.some((x) => ['VIP', 'Orata-Link'].includes(x.name)), 'a moved role keeps its colour and permissions; the others (and bot roles) stay behind');
+  ok(main?.type === 'category' && chat?.parentId === main.id && chat.overwrites?.length === 2 && chat.overwrites.some((o) => o.id === S.id && o.deny.includes('VIEW_CHANNEL')) && chat.overwrites.some((o) => o.id === helpers.id && o.allow.includes('VIEW_CHANNEL')),
+    'a channel comes with its category and the permissions of the roles that moved', JSON.stringify(chat));
+  ok(sv.emojis.some((e) => e.name === 'blob' && e.url.startsWith('/uploads/')) && sv.name === 'Bridge Town' && !sv.channels.some((c) => c.name === 'off-topic'), 'emoji come across; the name and everything not picked stay as they were');
+  submit(form, { what: ['all'] }); ok(!!await summary(/ran out or was already used/), 'a code works once');
+  // typed answers (the form for Discord apps without lists in forms): names instead of ids
+  noListForms = true; form = await openForm(await moveCode(text.id));
+  ok(form?.body.type === 9 && form.body.data.components.every((c) => c.type === 1 && c.components[0].type === 4), 'when Discord refuses lists in a form, the same questions come as typed answers');
+  calls.length = 0; dispatch('INTERACTION_CREATE', interaction({ type: 5, data: { custom_id: form.body.data.custom_id, components: [['what', ''], ['roles', 'VIP, nobody'], ['channels', '#off-topic']].map(([k, v]) => ({ type: 1, components: [{ type: 4, custom_id: k, value: v }] })) } }));
+  done = await summary(/Moved into|Nothing|went wrong/);
+  sv = (await api('GET', '/ready', A.token)).body.servers.find((x) => x.id === S.id);
+  ok(/1 role, 1 channel\b/.test(done?.content) && sv.roles.some((x) => x.name === 'VIP') && sv.channels.some((c) => c.name === 'off-topic' && !c.parentId), 'typed role and channel names work too', done?.content);
+  // the whole server, into a new Orata server
+  const Fs = (await api('POST', '/servers', A.token, { name: 'Fresh', orbit: true })).body; const before = Fs.channels.length;
+  form = await openForm(await moveCode(Fs.channels.find((c) => c.type === 'text').id)); submit(form, { what: ['all'] });
+  done = await summary(/Moved into|Nothing|went wrong/);
+  sv = (await api('GET', '/ready', A.token)).body.servers.find((x) => x.id === Fs.id); const ev = sv.roles.find((x) => x.id === Fs.id);
+  ok(/Moved into \*\*Fake Guild\*\*/.test(done?.content) && sv.name === 'Fake Guild' && sv.icon?.startsWith('/uploads/') && ['Mods', 'Helpers', 'VIP'].every((n) => sv.roles.some((x) => x.name === n)), 'the whole server brings its name, icon and every role', done?.content);
+  ok(sv.channels.length === before + 5 && sv.channels.some((c) => c.name === 'Lounge' && c.type === 'voice') && !sv.channels.some((c) => c.name === 'a thread') && ['VIEW_CHANNEL', 'SEND_MESSAGES', 'ADD_REACTIONS'].every((p) => ev.permissions.includes(p)),
+    '… every channel (threads stay behind) and @everyone’s permissions', JSON.stringify(sv.channels.map((c) => c.name)));
+  ok(sv.channels.find((c) => c.name === 'staff-chat')?.overwrites?.length === 3, '… with every role’s channel permissions');
+  const tlog = (await api('GET', `/servers/${Fs.id}/audit-log?action=discord_transfer`, A.token)).body.entries;
+  ok(tlog.length === 1 && tlog[0].actorId === A.user.id && tlog[0].details.guild === 'Fake Guild', 'moving is in the audit log');
 
   await stopServer(); fake.close(); wss.close();
   console.log(`\n${pass} passed, ${fail} failed`);

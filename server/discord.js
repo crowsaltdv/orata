@@ -9,8 +9,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import WebSocket from 'ws';
 import sharp from 'sharp';
-import { db, save, ENV, UPLOAD_DIR, newId, emitTo, audienceOf, messageView, storeUpload, restoreUpload, removeUpload, audit, bad } from './core.js';
+import { db, save, ENV, UPLOAD_DIR, newId, emitTo, audienceOf, messageView, storeUpload, restoreUpload, removeUpload, audit, bad, can, serverView, serverAudience, sanitizeOverwrites } from './core.js';
 import { hooks, postMessage } from './messages.js';
+import { isDev } from './badges.js';
 
 const TOKEN = (ENV.DISCORD_BOT_TOKEN || '').trim();
 export const discordOn = !!TOKEN;
@@ -126,6 +127,7 @@ async function dispatch(t, d) {
 const COMMANDS = [
   { name: 'orata-link', description: 'Link this channel with an Orata channel', options: [{ type: 3, name: 'code', description: 'The code Orbit gives you when you type /link in the Orata channel', required: true }] },
   { name: 'orata-unlink', description: 'Stop mirroring this channel with Orata' },
+  { name: 'transfer', description: 'Move roles, channels and emoji from this server into Orata', options: [{ type: 3, name: 'code', description: 'The code Orbit gives an Orata developer for /transfer', required: true }] },
 ].map((c) => ({ ...c, type: 1, default_member_permissions: String(MANAGE_GUILD), contexts: [0] }));   // only people who can manage the server see them, only in servers
 async function registerCommands() {
   const have = await rest('GET', `/applications/${bot.appId}/commands`);
@@ -194,8 +196,10 @@ export async function unlinkChannel(chId, { why = '', fromOrata = false, actor =
   return true;
 }
 
-/** /orata-link and /orata-unlink, typed in Discord. */
+/** /orata-link and /orata-unlink, typed in Discord (and /transfer with its form, further down). */
 async function onCommand(i) {
+  if (i.type === 2 && i.data?.name === 'transfer') return moveForm(i);
+  if (i.type === 5 && String(i.data?.custom_id || '').startsWith('transfer:')) return moveSubmit(i);
   if (i.type !== 2 || !['orata-link', 'orata-unlink'].includes(i.data?.name)) return;
   bot.lastCommand = { at: Date.now(), name: i.data.name };
   const callback = (body) => rest('POST', `/interactions/${i.id}/${i.token}/callback`, body);
@@ -231,6 +235,162 @@ async function onCommand(i) {
   save();
   await reply(`🔗 Linked with **#${ch.name}** in **${s.name}** on Orata.`);
   postMessage(ch, orbitOf(s), { content: `🔗 **#${ch.name}** on Orata and **#${there}** on Discord${g?.name ? ` (${g.name})` : ''} are now linked. Messages show up on both sides.` });   // goes to Discord too
+}
+
+/* ---------------------------------------------------------------- moving a Discord server into Orata
+ * Orata developers only for now. /transfer with Orbit (in the Orata server to move into) gives a one-time code; /transfer code:… in the Discord
+ * server opens a form (whole server, or all / picked roles and channels, emoji, name and icon) and the bot copies what was picked. Channel
+ * permissions only come across for roles that are moved too (or already exist here by the same name). Messages and members don't move. */
+const moves = new Map();   // one-time transfer codes: code -> { serverId, userId, at }
+const MOVE_TTL = 30 * 60_000;
+// Orata permission -> Discord's bit for it (Send GIFs follows Embed Links)
+const PERM_BITS = { ADMINISTRATOR: 3, MANAGE_SERVER: 5, MANAGE_CHANNELS: 4, MANAGE_ROLES: 28, MANAGE_MESSAGES: 13, KICK_MEMBERS: 1, BAN_MEMBERS: 2, CREATE_INVITE: 0, SEND_MESSAGES: 11, ATTACH_FILES: 15,
+  ADD_REACTIONS: 6, MENTION_EVERYONE: 17, CONNECT: 20, SPEAK: 21, CHANGE_NICKNAME: 26, MANAGE_NICKNAMES: 27, VIEW_CHANNEL: 10, MODERATE_MEMBERS: 40, MANAGE_EXPRESSIONS: 30, SEND_GIFS: 14 };
+const permsOfBits = (v) => { const n = BigInt(v || 0); return Object.keys(PERM_BITS).filter((p) => n & (1n << BigInt(PERM_BITS[p]))); };
+const CHANNEL_TYPES = { 0: 'text', 5: 'text', 2: 'voice', 13: 'stage', 4: 'category', 15: 'forum', 16: 'forum' };   // announcement -> text, media -> forum; threads stay behind
+const CDN = ENV.DISCORD_API ? new URL(API).origin : 'https://cdn.discordapp.com';   // the self-test's fake Discord serves the pictures
+const WHAT = [['all', 'Whole server', 'Every role, channel and emoji, plus the name and icon'], ['roles', 'All roles'], ['channels', 'All channels'], ['emojis', 'All emoji'], ['identity', 'Server name and icon']];
+
+/** /transfer with Orbit: a one-time code (30 minutes) for /transfer in the Discord server. Returns what Orbit tells the developer. */
+export function transferCode(s, userId) {
+  if (!TOKEN) throw bad('Moving a Discord server needs the Discord bot: DISCORD_BOT_TOKEN isn’t set on this Orata server.');
+  if (bot.error) throw bad(`The Discord bot can’t log in right now: ${bot.error}.`);
+  for (const [k, v] of moves) if (v.serverId === s.id || Date.now() - v.at > MOVE_TTL) moves.delete(k);
+  const code = Array.from(crypto.randomBytes(8), (b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
+  moves.set(code, { serverId: s.id, userId, at: Date.now() });
+  const invite = inviteUrl();
+  return [`**🚚 Move a Discord server into ${s.name}** (only Orata developers can do this for now)`,
+    `In the Discord server, type \`/transfer code:${code.slice(0, 4)}-${code.slice(4)}\` (it needs the **Manage Server** permission there). A form opens where you pick what to move: the whole server, or roles, channels, emoji and the name and icon.`,
+    'Channel permissions for custom roles only come across if you move those roles too. Messages and members don’t move.',
+    'The code works once, for 30 minutes.', ...(invite ? [`Is the Orata bot not in that Discord server yet? [Add it here](${invite}) first.`] : []), ...(offline() ? [offline()] : [])].join('\n');
+}
+
+/** /transfer code:… on Discord: opens the form (or says why not). A form has to be Discord's first answer, so nothing slow happens before it. */
+async function moveForm(i) {
+  bot.lastCommand = { at: Date.now(), name: 'transfer' };
+  const callback = (body) => rest('POST', `/interactions/${i.id}/${i.token}/callback`, body);
+  const no = (content) => callback({ type: 4, data: { content, flags: 64 } });
+  if (!(BigInt(i.member?.permissions || 0) & (MANAGE_GUILD | ADMINISTRATOR))) return no('You need the **Manage Server** permission to do that.');
+  const code = String(i.data.options?.find((o) => o.name === 'code')?.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const m = moves.get(code); const s = m && db.servers[m.serverId];
+  if (!s || Date.now() - m.at > MOVE_TTL) return no('That code isn’t valid or has run out. An Orata developer gets one by typing **/transfer** with Orbit in the Orata server to move into.');
+  const intro = { type: 10, content: `Moving into **${s.name}** on Orata. Pick **Whole server**, or what to bring and (if not all) which ones.\n-# Channel permissions for custom roles only come across if you move those roles too. Messages and members don’t move.` };
+  try {
+    await callback({ type: 9, data: { custom_id: `transfer:${code}`, title: 'Move this server to Orata', components: [intro,
+      { type: 18, label: 'What to move', component: { type: 3, custom_id: 'what', required: false, min_values: 0, max_values: WHAT.length, options: WHAT.map(([value, label, description]) => ({ value, label, ...(description ? { description } : {}) })) } },
+      { type: 18, label: 'Roles to move (if not all)', component: { type: 6, custom_id: 'roles', required: false, min_values: 0, max_values: 25 } },
+      { type: 18, label: 'Channels to move (if not all)', description: 'A category brings its channels, and a channel brings its category', component: { type: 8, custom_id: 'channels', required: false, min_values: 0, max_values: 25, channel_types: [0, 2, 4, 5, 13, 15, 16] } }] } });
+  } catch (e) {   // a Discord app too old for lists in forms: the same questions as typed answers
+    if (e.status !== 400) throw e;
+    const row = (custom_id, label, placeholder) => ({ type: 1, components: [{ type: 4, custom_id, label, style: 1, required: false, max_length: 1000, placeholder }] });
+    await callback({ type: 9, data: { custom_id: `transfer:${code}`, title: 'Move this server to Orata', components: [
+      row('what', 'What to move', 'whole server, or: roles, channels, emoji, name'), row('roles', 'Roles to move (if not all)', 'Role names, separated by commas'), row('channels', 'Channels to move (if not all)', 'Channel names, separated by commas')] } });
+  }
+}
+
+/** The form was sent: check the code again, then move what was picked and say how it went. */
+async function moveSubmit(i) {
+  const callback = (body) => rest('POST', `/interactions/${i.id}/${i.token}/callback`, body);
+  const thinking = callback({ type: 5, data: { flags: 64 } });
+  const reply = async (content) => { await thinking; return rest('PATCH', `/webhooks/${i.application_id || bot.appId}/${i.token}/messages/@original`, { content, allowed_mentions: { parse: [] } }); };
+  if (!(BigInt(i.member?.permissions || 0) & (MANAGE_GUILD | ADMINISTRATOR))) return reply('You need the **Manage Server** permission to do that.');
+  const code = i.data.custom_id.slice('transfer:'.length); const m = moves.get(code); const s = m && db.servers[m.serverId]; const dev = m && db.users[m.userId];
+  if (!s || Date.now() - m.at > MOVE_TTL) return reply('That code ran out or was already used. Ask for a new one with **/transfer** in Orata.');
+  if (!isDev(dev) || !can(s, dev.id, 'MANAGE_SERVER')) return reply('The Orata developer who made that code can’t manage that Orata server any more.');
+  moves.delete(code);   // one use
+  const picked = {};
+  for (const c of i.data.components || []) { const x = c.component || c.components?.[0]; if (x?.custom_id) picked[x.custom_id] = x.values ?? x.value ?? []; }
+  try { return await reply(await moveIn(i.guild_id, s, picked, dev.id)); }
+  catch (e) { console.error('[discord] transfer:', e); return reply(`Something went wrong part way: ${e.message}. Whatever was already moved stays in Orata.`); }
+}
+
+/** A picture from Discord's CDN, saved as an Orata upload; its address, or null. */
+async function savePicture(url, max) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) }); if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer()); if (!buf.length || buf.length > max) return null;
+    const type = String(res.headers.get('content-type') || 'image/png').split(';')[0]; const ext = type === 'image/gif' ? '.gif' : type === 'image/webp' ? '.webp' : type === 'image/jpeg' ? '.jpg' : '.png';
+    const id = newId(); await storeUpload(id + ext, type, buf); return `/uploads/${id}${ext}`;
+  } catch { return null; }
+}
+const words = (v) => (Array.isArray(v) ? v : String(v || '').split(/[,\n]/)).map((x) => String(x).trim()).filter(Boolean);
+const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+
+/** Copies what was picked from Discord server `gid` into Orata server `s`. Lists come as ids (from the form's lists) or typed names. Returns a summary. */
+async function moveIn(gid, s, picked, actorId) {
+  const [g, chans] = await Promise.all([rest('GET', `/guilds/${gid}`), rest('GET', `/guilds/${gid}/channels`)]);
+  const what = new Set(words(picked.what).map((w) => { w = w.toLowerCase(); return /whole|all|every/.test(w) && !/role|channel|emoji/.test(w) ? 'all' : /role/.test(w) ? 'roles' : /channel/.test(w) ? 'channels' : /emoji/.test(w) ? 'emojis' : /name|icon|identity/.test(w) ? 'identity' : w; }));
+  const all = what.has('all'); const has = (k) => all || what.has(k);
+  const idsOf = (v, list) => words(v).flatMap((x) => (list.some((o) => o.id === x) ? [x] : list.filter((o) => o.name.toLowerCase() === x.replace(/^[#@]/, '').toLowerCase()).map((o) => o.id)));
+  const done = { roles: 0, channels: 0, emojis: 0 }; const left = { roleRules: new Set(), memberRules: 0, emojis: 0, full: 0, existing: 0 };
+
+  // roles (not @everyone, nor bot or booster roles), lowest first so they keep their order; one already here by the same name is used as it is
+  const movable = (g.roles || []).filter((r) => r.id !== gid && !r.managed).sort((a, b) => a.position - b.position);
+  const roleMap = new Map([[gid, s.id]]);
+  for (const r of movable) { const here = s.roles.find((x) => x.id !== s.id && x.name === r.name); if (here) roleMap.set(r.id, here.id); }
+  const wantRoles = has('roles') ? movable : movable.filter((r) => idsOf(picked.roles, movable).includes(r.id));
+  if (has('roles')) { const ev = s.roles.find((r) => r.id === s.id); const er = (g.roles || []).find((r) => r.id === gid); if (ev && er) ev.permissions = permsOfBits(er.permissions); }
+  let pos = Math.max(0, ...s.roles.map((r) => r.position || 0));
+  for (const r of wantRoles) {
+    if (roleMap.has(r.id)) { left.existing++; continue; }
+    if (s.roles.length >= 50) { left.full++; continue; }
+    const role = { id: newId(), name: String(r.name).slice(0, 100), color: r.color ? `#${r.color.toString(16).padStart(6, '0')}` : null, position: ++pos, permissions: permsOfBits(r.permissions), hoist: !!r.hoist };
+    s.roles.push(role); roleMap.set(r.id, role.id); done.roles++;
+  }
+
+  // channels: a picked category brings its channels, a picked channel its category; categories first
+  const kept = (chans || []).filter((c) => CHANNEL_TYPES[c.type]);
+  let want = kept;
+  if (!has('channels')) {
+    const ids = new Set(idsOf(picked.channels, kept));
+    for (const c of kept) if (c.parent_id && ids.has(c.parent_id)) ids.add(c.id);
+    for (const c of kept) if (ids.has(c.id) && c.parent_id) ids.add(c.parent_id);
+    want = kept.filter((c) => ids.has(c.id));
+  }
+  const rules = (c) => sanitizeOverwrites(s, (c.permission_overwrites || []).flatMap((o) => {
+    if (o.type === 1) { left.memberRules++; return []; }   // members don't move
+    const id = roleMap.get(o.id); if (!id) { left.roleRules.add(o.id); return []; }
+    return [{ type: 'role', id, allow: permsOfBits(o.allow), deny: permsOfBits(o.deny) }];
+  }));
+  const norm = (l) => JSON.stringify((l || []).map((o) => [o.type, o.id, [...o.allow].sort(), [...o.deny].sort()]).sort());
+  const catMap = new Map(); let count = Object.values(db.channels).filter((c) => c.serverId === s.id).length;
+  for (const c of [...want].sort((a, b) => (b.type === 4) - (a.type === 4) || (a.position || 0) - (b.position || 0))) {
+    if (count >= 200) { left.full++; continue; }
+    const type = CHANNEL_TYPES[c.type]; const id = newId(); const parentId = type !== 'category' && c.parent_id ? catMap.get(c.parent_id) || null : null;
+    const ch = { id, serverId: s.id, type, name: (type === 'text' || type === 'forum' ? String(c.name).toLowerCase().replace(/\s+/g, '-') : String(c.name)).slice(0, 100) || 'channel',
+      parentId, position: c.position || 0, topic: String(c.topic || '').slice(0, 1024), nsfw: !!c.nsfw, slowmode: Math.min(21600, Math.max(0, c.rate_limit_per_user || 0)), ...(type === 'forum' ? { tags: [], requireTag: false } : {}) };
+    const ows = rules(c);
+    if (!parentId) { if (ows.length) ch.overwrites = ows; }
+    else if (norm(ows) !== norm(db.channels[parentId].overwrites)) { ch.overwrites = ows; ch.synced = false; }   // same rules as its category: it stays synced
+    db.channels[id] = ch; db.messages[id] = []; count++; done.channels++;
+    if (type === 'category') catMap.set(c.id, id);
+  }
+
+  // emoji (at most 50 in a server, 512 KB each) and the server's name and icon
+  if (has('emojis')) {
+    const list = (s.emojis ||= []);
+    for (const e of g.emojis || []) {
+      if (list.length >= 50) { left.full++; continue; }
+      if (!/^[A-Za-z0-9_]{2,32}$/.test(e.name || '') || list.some((x) => x.name.toLowerCase() === e.name.toLowerCase())) { left.emojis++; continue; }
+      const url = await savePicture(`${CDN}/emojis/${e.id}.${e.animated ? 'gif' : 'png'}`, 512 * 1024);
+      if (!url) { left.emojis++; continue; }
+      list.push({ id: newId(), name: e.name, url, animated: !!e.animated, by: actorId, at: Date.now() }); done.emojis++;
+    }
+  }
+  if (has('identity')) {
+    if (String(g.name || '').trim().length >= 2) s.name = String(g.name).trim().slice(0, 100);
+    if (g.icon) { const url = await savePicture(`${CDN}/icons/${gid}/${g.icon}.${g.icon.startsWith('a_') ? 'gif' : 'png'}`, 4 * 1024 * 1024); if (url) s.icon = url; }
+  }
+
+  audit(s, actorId, 'discord_transfer', { guild: g.name || null, roles: done.roles, channels: done.channels, emojis: done.emojis, identity: has('identity') });
+  save();
+  for (const uid of serverAudience(s)) emitTo([uid], 'server_update', { server: serverView(s, uid) });
+  const moved = [done.roles && plural(done.roles, 'role'), done.channels && plural(done.channels, 'channel'), done.emojis && plural(done.emojis, 'emoji', 'emoji'), has('identity') && 'the name and icon'].filter(Boolean);
+  const notMoved = [left.roleRules.size && `channel permissions for ${plural(left.roleRules.size, 'role')} you didn’t move (move those roles too to keep them)`,
+    left.memberRules && `${plural(left.memberRules, 'permission rule')} for single members (members don’t move)`, left.existing && `${plural(left.existing, 'role')} already in Orata by that name (used as they are)`,
+    left.emojis && `${plural(left.emojis, 'emoji', 'emoji')} whose name was taken or couldn’t be read`, left.full && `${plural(left.full, 'thing')} over Orata’s limits (50 roles, 200 channels, 50 emoji)`].filter(Boolean);
+  if (!moved.length) return `Nothing was moved. Pick **Whole server** or an “All …” option, or choose some roles or channels.${notMoved.length ? `\n${notMoved.join('; ')}.` : ''}`;
+  return `✅ Moved into **${s.name}** on Orata: ${moved.join(', ')}.${notMoved.length ? `\n**Not moved:** ${notMoved.join('; ')}.` : ''}`;
 }
 
 /* ---------------------------------------------------------------- message pairs, in order */

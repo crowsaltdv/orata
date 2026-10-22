@@ -3,10 +3,11 @@
 // Who may use a command: its permission by default (see public/js/orbit-commands.js), narrowed to chosen roles in /settings; owners and admins always may.
 import { db, save, newId, emitTo, publicUser, memberView, messageView, serverAudience, audienceOf, can, needIn, need, isOwner, topRolePos, audit, randomAvatarBg, bad, forbidden, notFound, ApiError } from './core.js';
 import { isStaff } from './names.js';
+import { isDev } from './badges.js';
 import { postMessage, messagesDeleted } from './messages.js';
 import { JOKES, BALL, rollDice } from './bot.js';
 import { ORBIT_COMMANDS, orbitCommand, parseDuration, formatDuration } from '../public/js/orbit-commands.js';
-import { discordOn, linkCode, linkInstructions, unlinkChannel } from './discord.js';
+import { discordOn, linkCode, linkInstructions, unlinkChannel, transferCode } from './discord.js';
 import { baseUrl } from './verify.js';
 
 const UPLOAD = /^\/uploads\/[A-Za-z0-9_.-]{1,120}$/;
@@ -28,6 +29,7 @@ export function addOrbit(s) {
 
 /** May `uid` use `cmd` here? */
 export function mayUse(s, uid, cmd) {
+  if (cmd.dev && !isDev(db.users[uid])) return false;   // Orata developers only
   if (isOwner(s, uid) || can(s, uid, 'ADMINISTRATOR')) return true;
   if (cmd.perm && !can(s, uid, cmd.perm)) return false;
   const roles = s.orbit?.roles?.[cmd.name];
@@ -137,7 +139,7 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
     const ch = getChannel(req, req.params.id); const s = ch.serverId && db.servers[ch.serverId];
     if (!s || !hasOrbit(s)) throw bad('Orbit isn’t in this server');
     needIn(req.user.id, ch, 'SEND_MESSAGES');
-    const cmd = orbitCommand(req.body?.name); if (!cmd || cmd.discord && !discordOn) throw bad('Orbit doesn’t know that command. Type /help to see them all.');
+    const cmd = orbitCommand(req.body?.name); if (!cmd || cmd.discord && !discordOn || cmd.dev && !isDev(req.user)) throw bad('Orbit doesn’t know that command. Type /help to see them all.');   // developer commands don't exist for anyone else
     if (!mayUse(s, req.user.id, cmd)) throw forbidden(`You can’t use /${cmd.name} in this server.`);
     const args = String(req.body?.args || '').trim().slice(0, 2000);
     const me = req.user.id; const who = `**${nameIn(s, me)}**`;
@@ -216,6 +218,7 @@ export function mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdat
       case 'reactionroles': return res.json(only('Type /reactionroles in the message box to set up a reaction-roles message.'));
       case 'link': return res.json(only(linkCode(s, ch, me, baseUrl(req))));
       case 'link-instructions': return res.json(only(linkInstructions(ch, mayUse(s, me, orbitCommand('link')))));   // admins also see the bot's status
+      case 'transfer': return res.json(only(transferCode(s, me)));
       case 'unlink': if (!await unlinkChannel(ch.id, { fromOrata: true, actor: me })) throw bad('This channel isn’t linked with Discord.'); return res.json({ ok: true });
       default: throw new ApiError(400, 'Unknown command');
     }

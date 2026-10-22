@@ -22,6 +22,7 @@ export const ORBIT_COMMANDS = [
   { name: 'link', desc: 'Link this channel with a Discord channel', perm: 'MANAGE_SERVER', only: true, discord: true },
   { name: 'link-instructions', desc: 'How linking with Discord works and what comes across', only: true, discord: true },
   { name: 'unlink', desc: 'Stop mirroring this channel with Discord', perm: 'MANAGE_SERVER', discord: true },
+  { name: 'transfer', desc: 'Move roles, channels and emoji from a Discord server into this one', perm: 'MANAGE_SERVER', only: true, discord: true, dev: true },   // dev: Orata developers only, hidden from everyone else
 ];
 export const orbitCommand = (name) => ORBIT_COMMANDS.find((c) => c.name === String(name || '').toLowerCase()) || null;
 
