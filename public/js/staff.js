@@ -27,7 +27,7 @@ MODALS.report = function Report({ id, messageId, channelId, userId, serverId }) 
   <//>`;
 };
 
-const TABS = [['overview', 'bar-chart', 'Overview'], ['accounts', 'users', 'Accounts'], ['servers', 'server', 'Servers'], ['flags', 'flag', 'Flags & reports'], ['log', 'list', 'Staff log']];
+const TABS = [['overview', 'bar-chart', 'Overview'], ['accounts', 'users', 'Accounts'], ['servers', 'server', 'Servers'], ['dms', 'message', 'DMs'], ['flags', 'flag', 'Flags & reports'], ['log', 'list', 'Staff log']];
 export function StaffPage() {
   const [tab, setTab] = useState('overview');
   if (!isStaffMe()) return html`<main class="main panel staff-page"><${Empty} icon="shield" title=${t('Staff only')}>${t('This page is for Orata staff.')}<//></main>`;
@@ -37,7 +37,7 @@ export function StaffPage() {
       <div class="m-title"><${Icon} name="shield" size=${23} /><span class="name">${t('Staff')}</span></div>
       <div class="staff-tabs">${TABS.map(([k, ic, label]) => html`<button type="button" key=${k} class=${cx('staff-tab', tab === k && 'on')} onClick=${() => setTab(k)}><${Icon} name=${ic} size=${16} />${t(label)}</button>`)}</div>
     </header>
-    <div class="staff-scroll">${tab === 'overview' ? html`<${Overview} go=${setTab} />` : tab === 'accounts' ? html`<${Accounts} />` : tab === 'servers' ? html`<${Servers} />` : tab === 'flags' ? html`<${Flags} />` : html`<${Log} />`}</div>
+    <div class="staff-scroll">${tab === 'overview' ? html`<${Overview} go=${setTab} />` : tab === 'accounts' ? html`<${Accounts} />` : tab === 'servers' ? html`<${Servers} />` : tab === 'dms' ? html`<${Dms} />` : tab === 'flags' ? html`<${Flags} />` : html`<${Log} />`}</div>
   </main>`;
 }
 
@@ -124,7 +124,8 @@ function AccountDetail({ d }) {
 }
 
 /** Opens a server you aren't in, read only and invisible (the server writes it in the staff log). Leave from the banner or the server's menu. */
-export async function ghostIn(serverId) {
+export async function ghostIn(serverId, channelId = null) {
+  if (state.servers[serverId] && !state.servers[serverId].ghost) return goChannel(serverId, channelId);   // you're in it anyway
   const r = await act(api.post(`/staff/servers/${serverId}/ghost`)); if (!r) return;
   addUsers(r.users); set({ servers: { ...state.servers, [r.server.id]: { ...r.server, ghost: true } } }); rebuildIndex(); goChannel(r.server.id, null);
 }
@@ -140,10 +141,10 @@ function Servers() {
     <div class="mem-name"><b>${s.name}${s.tag ? html`<${ServerTag} tag=${s.tag} />` : null}</b><small>${s.members} ${t('members')} · ${t('owner')} @${s.owner?.username || '?'} · ${t('made')} ${relTime(s.createdAt)}${s.joinMode === 'apply' ? ` · ${t('apply to join')}` : ''}</small>
       ${s.score ? html`<span class="staff-why">${[s.reports && [`${s.reports} ${s.reports === 1 ? t('report') : t('reports')}`, 'report'], s.flagged && [`${s.flagged} ${s.flagged === 1 ? t('flagged message') : t('flagged messages')}`], s.terminated && [`${s.terminated} ${s.terminated === 1 ? t('terminated member') : t('terminated members')}`, 'report'], s.scamName && [t('Scam-looking name')]]
         .filter(Boolean).map(([w, c]) => html`<span class=${cx('flag-kind', c)} key=${w}>${w}</span>`)}</span>` : null}</div>
-    <span class="staff-acts"><${Btn} size="sm" icon="eye" onClick=${() => ghostIn(s.id)}>${t('Ghost in')}<//></span></div>`;
-  const fishy = (list || []).filter((s) => s.score); const rest = (list || []).filter((s) => !s.score);
+    <span class="staff-acts">${s.canGhost ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(s.id)}>${t('Ghost in')}<//>` : null}</span></div>`;
+  const fishy = (list || []).filter((s) => s.canGhost); const rest = (list || []).filter((s) => !s.canGhost);
   return html`<div class="staff-bar"><div class="input-wrap staff-search"><${Icon} name="search" size=${18} class="in-icon" /><input class="input" placeholder=${t('Search servers by name or ID…')} value=${q} onInput=${(e) => setQ(e.target.value)} /></div></div>
-    <p class="text-muted">${t('Ghosting lets you read a server without joining: nobody there sees you, you can’t post or react, and it goes in the staff log.')}</p>
+    <p class="text-muted">${t('You can only ghost into a server that was reported, has flagged messages or a scam-looking name. Nobody there sees you, you can’t post or react, and it goes in the staff log.')}</p>
     ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : !list.length ? html`<${Empty} icon="server" title=${t('No servers found')} />` : html`
       ${fishy.length ? html`<h3 class="staff-h">${t('Looks fishy')}</h3><div class="mem-table">${fishy.map(row)}</div>` : null}
       ${rest.length ? html`<h3 class="staff-h">${fishy.length ? t('Everything else') : t('All servers')}</h3><div class="mem-table">${rest.map(row)}</div>` : null}`}`;
@@ -155,13 +156,27 @@ MODALS['staff-dm'] = function StaffDm({ id, flagId }) {
   useEffect(() => { api.get(`/staff/flags/${flagId}/conversation`).then((r) => { addUsers(r.users); setD(r); }, (e) => setD({ error: errMsg(e) })); }, []);
   useEffect(() => { if (d?.messages) document.querySelector('.sdm-msg.flagged')?.scrollIntoView({ block: 'center' }); }, [d]);
   return html`<${Modal} title=${d?.group ? t('Flagged group DM') : t('Flagged DM')} subtitle=${t('Read only. Opening this is written in the staff log.')} width=${620} onClose=${() => closeModal(id)}>
-    ${!d ? html`<div class="pk-center"><${Spinner} /></div>` : d.error ? html`<p class="text-danger">${d.error}</p>` : html`<div class="staff-dm">${d.messages.map((m) => { const u = users[m.authorId]; return html`<div class=${cx('sdm-msg', m.id === d.flagged && 'flagged')} key=${m.id}>
+    ${!d ? html`<div class="pk-center"><${Spinner} /></div>` : d.error ? html`<p class="text-danger">${d.error}</p>` : html`<div class="staff-dm">${d.messages.filter((m) => m.type === "default").map((m) => { const u = users[m.authorId]; return html`<div class=${cx('sdm-msg', m.id === d.flagged && 'flagged')} key=${m.id}>
       <${Avatar} user=${u} size=${32} /><div class="sdm-body"><div class="sdm-head"><b>${u?.displayName || '?'}</b><small>${formatFull(m.createdAt)}</small></div>
         ${m.content ? html`<div class="sdm-text" dangerouslySetInnerHTML=${{ __html: renderMarkdown(m.content, { emojis: m.emojis }) }}></div>` : null}
         ${(m.attachments || []).map((a) => html`<a class="sdm-file" key=${a.url} href=${a.url} target="_blank" rel="noopener">${/^image\//.test(a.type) ? html`<img src=${a.url} alt=${a.name} />` : a.name}</a>`)}
         ${m.gif ? html`<small class="text-muted">[GIF]</small>` : null}${m.sticker ? html`<small class="text-muted">[${t('sticker')}]</small>` : null}</div></div>`; })}</div>`}
   <//>`;
 };
+
+/** Every DM and group DM with a flagged or reported message; Read opens the conversation around the latest one. */
+function Dms() {
+  const [list, setList] = useState(null);
+  useEffect(() => { api.get('/staff/dms').then((r) => { addUsers(r.flatMap((c) => c.recipients)); setList(r); }, () => setList([])); }, []);
+  if (!list) return html`<div class="pk-center"><${Spinner} /></div>`;
+  return html`<p class="text-muted">${t('DMs and group DMs are private. They show up here only when a message in them was reported or flagged, and you can only read around that message. Each look goes in the staff log.')}</p>
+    ${!list.length ? html`<${Empty} icon="message" title=${t('No flagged DMs')} />` : html`<div class="mem-table">${list.map((c) => html`<div class="mem-row staff-row" key=${c.id}>
+      <span class="sdm-avs">${c.recipients.slice(0, 3).map((u) => html`<${Avatar} key=${u.id} user=${u} size=${28} />`)}</span>
+      <div class="mem-name"><b>${c.group ? c.name || t('Group DM') : c.recipients.map((u) => u.displayName).join(' & ')} <span class="state-chip">${c.group ? `${t('Group DM')} · ${c.recipients.length}` : t('DM')}</span></b>
+        <small>${c.group ? `${c.recipients.map((u) => '@' + u.username).join(', ')} · ` : ''}${c.open} ${t('open')} / ${c.total} ${c.total === 1 ? t('flag') : t('flags')} · ${t('latest')} ${relTime(c.last.at)}</small>
+        <span class="staff-why"><span class=${cx('flag-kind', c.last.reportedBy && 'report')}>${c.last.label}</span>${c.last.excerpt ? html`<small class="sdm-excerpt">“${c.last.excerpt}”</small>` : null}</span></div>
+      <span class="staff-acts"><${Btn} size="sm" icon="message" onClick=${() => openModal('staff-dm', { flagId: c.last.id })}>${t('Read')}<//></span></div>`)}</div>`}`;
+}
 
 function Flags() {
   const [all, setAll] = useState(false); const [d, setD] = useState(null);
@@ -184,7 +199,7 @@ function Flags() {
         ${by ? html`<div class="flag-detail">${t('Reported by')} ${by.displayName}${f.note ? `: “${f.note}”` : ''}</div>` : null}
         <div class="flag-acts">${f.status === 'open' ? html`
           ${f.messageId && !f.gone ? html`<${Btn} size="sm" variant="danger" icon="trash" onClick=${() => handle(f, 'delete')}>${t('Delete message')}<//>` : null}
-          ${f.kind === 'server' ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(f.serverId)}>${t('Ghost in')}<//>` : null}
+          ${f.serverId ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(f.serverId, f.channelId)}>${t('Ghost in')}<//>` : null}
           ${f.channelId && !f.serverId ? html`<${Btn} size="sm" icon="message" onClick=${() => openModal('staff-dm', { flagId: f.id })}>${t('Read the DM')}<//>` : null}
           <${Btn} size="sm" icon="lock" onClick=${() => userAct(f.userId, 'lock')}>${t('Lock account')}<//>
           <${Btn} size="sm" variant="danger" icon="ban" onClick=${() => userAct(f.userId, 'terminate')}>${t('Terminate')}<//>

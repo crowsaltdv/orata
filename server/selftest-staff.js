@@ -183,6 +183,14 @@ async function main() {
   r = await api('GET', `/staff/flags/${dmFlag?.id}/conversation`, Y.token);
   ok(r.status === 200 && r.body.flagged === bait.id && r.body.messages.some((m) => m.content === 'hey erin'), 'staff can read the DM around a flagged message');
   r = await api('GET', '/staff/log', Y.token); ok(r.body.log.some((e) => e.action === 'view_dm' && e.target === B.user.id), '… and that goes in the staff log');
+  const group = (await api('POST', '/dms', B.token, { recipientIds: [E.user.id, D.user.id] })).body;
+  await api('POST', `/channels/${group.id}/messages`, B.token, { content: 'claim your prize now at grabify.link/abc' });
+  r = await api('GET', '/staff/dms', B.token); ok(r.status === 403, 'only staff see flagged DMs');
+  r = await api('GET', '/staff/dms', Y.token); const dmRow = r.body.find?.((c) => c.id === flaggedDm.id); const groupRow = r.body.find?.((c) => c.id === group.id);
+  ok(dmRow && !dmRow.group && dmRow.open >= 1 && groupRow?.group && groupRow.recipients.length === 3 && groupRow.last.where === 'a group DM', 'the DMs tab lists flagged DMs and group DMs', JSON.stringify(r.body));
+  ok(!r.body.some((c) => c.id === dm?.id), '… and no DM without a flag');
+  const quiet = (await api('POST', '/servers', A.token, { name: 'Quiet Corner' })).body;
+  r = await api('POST', `/staff/servers/${quiet.id}/ghost`, Y.token); ok(r.status === 403, 'staff can’t ghost into a server nobody reported or flagged');
   r = await api('POST', '/auth/register', null, { username: 'nodeal', displayName: 'No', password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, { 'x-forwarded-for': '198.51.100.250' });
   ok(r.status === 400 && r.body.code === 'agree', 'signing up needs agreeing to the Terms, Privacy Policy and Community Guidelines');
   for (const p of ['terms', 'privacy', 'guidelines']) { const res = await fetch(`${base}/${p}`); const body = await res.text(); ok(res.ok && /<h1>/.test(body) && !/id="app"/.test(body), `/${p} is its own page`); }

@@ -5,8 +5,9 @@
 // like) are each server's business, not this. A DM can only be read from a flag or report about a message in it (and each look goes in the
 // staff log); Orata checks DMs for scam links, and for the "messaging lots of people" check only who and how many are counted, never what.
 // Every staff action goes in the staff log.
-// Servers: every server, fishy ones first (reported, flagged messages, terminated members, a scam-looking name), and "ghosting" into one to read
-// it without joining (core.js ghosts: read only and invisible; each time goes in the staff log).
+// Servers: every server, fishy ones first (reported, flagged messages, terminated members, a scam-looking name), and "ghosting" into a reported or
+// flagged one to read it without joining (core.js ghosts: read only and invisible; each time goes in the staff log). DMs: every DM and group DM
+// with a flagged or reported message, to read around that message.
 import { db, save, newId, emitTo, audienceOf, effectiveStatus, publicUser, messageView, deviceHashesOf, canView, closeConns, serverView, ghosts, bad, forbidden, notFound } from './core.js';
 import { hooks, messagesDeleted } from './messages.js';
 import { endUserSessions } from './sessions.js';
@@ -161,24 +162,29 @@ export function mountStaff(r, { h, limit, removeMember }) {
     log(req.user.id, 'unlock', u.id); save(); res.json(row(u));
   }));
 
-  /** Every server (or those matching ?q), fishiest first: reports about it, flagged messages in it, terminated members, a scam-looking name. */
+  /** What makes a server look fishy: open reports about it, open flags on messages in it, a scam-looking name (these three let staff ghost in),
+   * and terminated members (only for sorting). */
+  const fishy = (s, open = (db.flags || []).filter((f) => f.status === 'open' && f.serverId === s.id)) => {
+    const reports = open.filter((f) => f.kind === 'server' && f.serverId === s.id).length;
+    const flagged = open.filter((f) => f.kind === 'message' && f.serverId === s.id).length;
+    const terminated = Object.keys(s.members).filter((id) => db.users[id]?.terminated).length;
+    const scamName = SCAM.test(`${s.name} ${s.description || ''}`);
+    return { reports, flagged, terminated, scamName, canGhost: reports + flagged > 0 || scamName, score: reports * 3 + flagged + terminated * 2 + (scamName ? 3 : 0) };
+  };
+  /** Every server (or those matching ?q), fishiest first. */
   r.get('/staff/servers', h(async (req, res) => {
     staff(req); const q = String(req.query.q || '').trim().toLowerCase();
     const open = (db.flags || []).filter((f) => f.status === 'open' && f.serverId);
-    const list = Object.values(db.servers).filter((s) => !q || s.id === q || s.name.toLowerCase().includes(q)).map((s) => {
-      const ids = Object.keys(s.members).filter((id) => !db.users[id]?.bot);
-      const reports = open.filter((f) => f.kind === 'server' && f.serverId === s.id).length;
-      const flagged = open.filter((f) => f.kind === 'message' && f.serverId === s.id).length;
-      const terminated = ids.filter((id) => db.users[id]?.terminated).length;
-      const scamName = SCAM.test(`${s.name} ${s.description || ''}`);
-      return { id: s.id, name: s.name, icon: s.icon || null, tag: s.tag || null, joinMode: s.joinMode || 'invite', createdAt: s.createdAt, members: ids.length,
-        owner: publicUser(db.users[s.ownerId]), reports, flagged, terminated, scamName, score: reports * 3 + flagged + terminated * 2 + (scamName ? 3 : 0) };
-    });
+    const list = Object.values(db.servers).filter((s) => !q || s.id === q || s.name.toLowerCase().includes(q)).map((s) => ({
+      id: s.id, name: s.name, icon: s.icon || null, tag: s.tag || null, joinMode: s.joinMode || 'invite', createdAt: s.createdAt,
+      members: Object.keys(s.members).filter((id) => !db.users[id]?.bot).length, owner: publicUser(db.users[s.ownerId]), ...fishy(s, open),
+    }));
     res.json(list.sort((a, b) => b.score - a.score || b.members - a.members).slice(0, 100));
   }));
   r.post('/staff/servers/:id/ghost', h(async (req, res) => {
     staff(req); const s = db.servers[String(req.params.id)]; if (!s) throw notFound('Unknown server');
     if (s.members[req.user.id]) throw bad('You’re in this server already');
+    if (!fishy(s).canGhost) throw forbidden('You can only look inside a server that was reported or flagged');
     ghosts.set(req.user.id, { serverId: s.id, at: Date.now() });
     log(req.user.id, 'ghost', s.ownerId, '', { server: s.id, serverName: s.name }); save();
     res.json({ server: serverView(s, req.user.id), users: Object.keys(s.members).map((id) => publicUser(db.users[id])).filter(Boolean) });
@@ -192,7 +198,7 @@ export function mountStaff(r, { h, limit, removeMember }) {
   const flagView = (f) => {
     const ch = f.channelId && db.channels[f.channelId]; const s = f.serverId && db.servers[f.serverId];
     return { ...f, label: f.kind === 'server' ? `Server reported: ${f.reason}` : f.reportedBy ? `Reported: ${f.reason}` : LABEL[f.reason] || f.reason,
-      where: f.kind === 'server' ? `the server ${s?.name || '(deleted)'}` : s ? `#${ch?.name || '?'} in ${s.name}` : f.channelId ? 'a DM' : null,
+      where: f.kind === 'server' ? `the server ${s?.name || '(deleted)'}` : s ? `#${ch?.name || '?'} in ${s.name}` : ch?.type === 'group' ? 'a group DM' : f.channelId ? 'a DM' : null,
       gone: f.messageId ? !(db.messages[f.channelId] || []).some((m) => m.id === f.messageId) : false };
   };
   r.get('/staff/flags', h(async (req, res) => {
@@ -215,6 +221,17 @@ export function mountStaff(r, { h, limit, removeMember }) {
     else throw bad('Unknown action');
     f.handledBy = req.user.id; f.handledAt = Date.now(); save();
     res.json(flagView(f));
+  }));
+  /** Every DM and group DM with a flagged or reported message: who is in it, how many flags are open, and the latest one (to read around it). */
+  r.get('/staff/dms', h(async (req, res) => {
+    staff(req); const by = new Map();
+    for (const f of db.flags || []) { const ch = f.channelId && db.channels[f.channelId]; if (ch && !ch.serverId) by.set(ch.id, [...(by.get(ch.id) || []), f]); }
+    const list = [...by].map(([id, flags]) => {
+      const ch = db.channels[id]; const last = flags[flags.length - 1];
+      return { id, group: ch.type === 'group', name: ch.type === 'group' ? ch.name || null : null, recipients: (ch.recipients || []).map((u) => publicUser(db.users[u])).filter(Boolean),
+        open: flags.filter((f) => f.status === 'open').length, total: flags.length, last: { ...flagView(last), excerpt: (last.excerpt || '').slice(0, 160) } };
+    });
+    res.json(list.sort((a, b) => (b.open > 0) - (a.open > 0) || b.last.at - a.last.at).slice(0, 100));
   }));
   // the DM a flagged or reported message is in, read only: the 50 messages before it and the 50 after. Only reachable from a flag; each look is logged
   r.get('/staff/flags/:id/conversation', h(async (req, res) => {
