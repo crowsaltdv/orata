@@ -6,6 +6,8 @@
   "type": "module",
   "main": "server/index.js",
   "scripts": {
+    "postinstall": "node music-service/install.mjs",
+    "music:update": "node music-service/install.mjs --upgrade",
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node server/selftest.js && node server/selftest-features.js && node server/selftest-community.js && node server/selftest-discord.js && node server/selftest-staff.js && node server/selftest-email.js && node server/selftest-pg.js",

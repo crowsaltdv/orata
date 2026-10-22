@@ -147,28 +147,30 @@ Orata asks the provider for credentials on the server (never from the browser), 
 
 The note icon above Home opens the **Music page** (`/music`): search YouTube Music or browse **categories** — Top Songs, Trending, the popular genres (Pop, Hip-hop, Rock, R&B & soul, Dance & electronic, Latin, K-Pop, Country, Jazz, Classical, Metal …, with the other ~30 behind *More*) and moods (Chill, Focus, Workout, Party, Sleep …) — press play, and what you're listening to shows on your profile (and in friends' *Active Now*) while it plays. A big *Now playing* card with the song's video, a mini player above your user bar and your recently played songs are always at hand. It plays **full songs** and needs **no account and no API key**.
 
-Orata finds songs with [ytmusicapi](https://github.com/sigma67/ytmusicapi) (MIT), an unofficial Python library for YouTube Music's public search and charts, and plays them in YouTube's own embedded player. So the **server needs Python 3.10 or newer and that one library** — everything else in Orata works without them:
+Orata finds songs with [ytmusicapi](https://github.com/sigma67/ytmusicapi) (MIT), an unofficial Python library for YouTube Music's public search and charts, and plays them in YouTube's own embedded player. So the **server needs Python 3.10 or newer** — but there is nothing to install by hand: **`npm install` sets it up** (it runs `music-service/install.mjs`, which puts the library into `music-service/vendor`, about 10 seconds). If the machine's own Python is missing or too old, the installer downloads a private Python 3.12 with [uv](https://github.com/astral-sh/uv) (about a minute, ~70 MB, kept in `music-service/python`); if there is no Python with pip at all it skips music and says so. The install never fails over music, and everything else in Orata works without it.
 
 ```bash
-pip install -r music-service/requirements.txt
-python music-service/service.py --check      # optional: searches once, to show everything is installed
+npm install                                  # also sets up music
+python music-service/service.py --check      # optional: searches once, to show everything works
+npm run music:update                         # update ytmusicapi later — worth doing if search stops working
 ```
 
-To keep it apart from your other Python projects use a virtual environment: `python -m venv music-service/.venv`, then `music-service/.venv/bin/pip install -r music-service/requirements.txt` (`music-service\.venv\Scripts\pip` on Windows). Orata uses `music-service/.venv` by itself when it exists. Without Python or the library the server log says `Music: OFF — …` and the Music page tells people what is missing; once you have installed it, music turns on within a minute (no restart).
+**On Render, a Droplet or any host that runs `npm install` there is nothing to change** — the build command `npm install` is enough (the build log shows `music: …` lines, and the service log says `Music: YouTube Music through ytmusicapi` once it runs). Without Python the log says `Music: OFF — …` and the Music page tells people what is missing.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `MUSIC` | on | `MUSIC=off` turns the music player off for everybody |
 | `MUSIC_COUNTRY` | `US` | Which country's charts and catalogue YouTube Music shows (two letters, e.g. `GB`) |
 | `MUSIC_API_PER_MIN` | `40` | The most requests Orata sends to YouTube per minute, however many people search |
-| `MUSIC_PYTHON` | – | Path to the Python that has ytmusicapi, when it isn't the `music-service/.venv` one or `python3` |
+| `MUSIC_PYTHON` | – | Path to the Python to use, when you don't want the one the installer picked |
+| `MUSIC_INSTALL` | on | `MUSIC_INSTALL=off` stops `npm install` from setting up music (`MUSIC_INSTALL_MANAGED=1` always uses the private Python) |
 
 **How it works:** the server starts `music-service/service.py` once and talks to it over stdin/stdout (a line of JSON per request); if it ever dies, the next request starts it again. Searches are cached for 10 minutes and charts for 30. ytmusicapi only returns *information* about songs (YouTube hands out its audio links in a form only its own player can decode), so the browser plays each song in YouTube's embedded player — a track id is a YouTube video id — which is kept on the page so the music goes on while you move around: on the Music page you see the video, elsewhere it is parked out of sight.
 
 **Good to know:**
 * YouTube only plays embedded videos on pages with a real address: **`localhost` or a domain name**, not a bare IP number like `http://192.168.1.5:3000` — there the Music page says so. (Your domain with HTTPS, as in the Droplet setup, is fine.)
 * Playback is YouTube's: it may show an ad now and then, and a few songs can't be embedded (the player skips them). It is subject to YouTube's Terms of Service.
-* ytmusicapi is unofficial and YouTube Music changes now and then. If search stops working, update it: `pip install -U ytmusicapi`.
+* ytmusicapi is unofficial and YouTube Music changes now and then. If search stops working, update it: `npm run music:update`.
 
 **What others see:** the title, artist, artwork and a progress bar, only while it plays. They always come from YouTube Music via the server — a client can't make up a "listening to" status — and disappear when you pause, stop, close the last tab or the song ends. Nothing is shown when **Settings → Privacy → Show my status to everyone** is off or you are *Invisible* (the switch is also on the Music page). The player links every song back to YouTube Music.
 
@@ -325,6 +327,7 @@ server/
   orbit.js      a server's own Orbit: its slash commands (shared list: public/js/orbit-commands.js), /settings and reminders
 music-service/
   service.py    the music helper: ytmusicapi behind a line-of-JSON-per-request pipe (requirements.txt: the one pip package)
+  install.mjs   what `npm install` runs to set it up (the library into vendor/, or a private Python when the system one is too old)
 public/
   js/           Preact + htm (vendored, no build step), ES modules (rain.js, fx.js: rain, button particles; voice.js / stageview.js: calls and stages; music.js / youtube-player.js: the Music page and YouTube's embedded player)
   css/          base · layout · chat · ui · features · settings · auth · extras

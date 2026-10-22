@@ -1,3 +1,9 @@
 node_modules/
 /data/
 .env
+# the Music page's Python side, set up by `npm install` (music-service/install.mjs)
+/music-service/vendor/
+/music-service/tools/
+/music-service/python/
+/music-service/.python
+/music-service/.venv/

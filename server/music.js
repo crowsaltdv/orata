@@ -30,17 +30,18 @@ const ART_HOST = /(^|\.)(googleusercontent\.com|ggpht\.com|ytimg\.com)$/i;
 const artUrl = (v) => { try { const u = new URL(String(v)); return u.protocol === 'https:' && ART_HOST.test(u.hostname) && !net.isIP(u.hostname) ? u.href : null; } catch { return null; } };
 
 /* ------------------------------------------------------------ the helper process */
-/** What to start: MUSIC_HELPER (a JSON array or a command, for tests), else the first Python that works: MUSIC_PYTHON, music-service/.venv, then the system's. */
+/** What to start: MUSIC_HELPER (a JSON array or a command, for tests), else the first Python that works: the one `npm install` set up (music-service/.python), MUSIC_PYTHON, music-service/.venv, then the system's. */
 function candidates() {
   if (ENV.MUSIC_HELPER) {
     let cmd; try { cmd = JSON.parse(ENV.MUSIC_HELPER); } catch { cmd = String(ENV.MUSIC_HELPER).split(/\s+/); }
     return [cmd];
   }
   const dir = path.join(ROOT, 'music-service'); const script = path.join(dir, 'service.py'); const pys = [];
-  if (ENV.MUSIC_PYTHON) pys.push(ENV.MUSIC_PYTHON);
-  for (const rel of ['.venv/bin/python', '.venv/Scripts/python.exe']) if (fs.existsSync(path.join(dir, rel))) pys.push(path.join(dir, rel));
-  pys.push(...(process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python']));
-  return pys.map((py) => [py, script]);
+  try { const marked = JSON.parse(fs.readFileSync(path.join(dir, '.python'), 'utf8')); if (Array.isArray(marked) && marked.length) pys.push(marked); } catch { /* not installed by npm install */ }
+  if (ENV.MUSIC_PYTHON) pys.push([ENV.MUSIC_PYTHON]);
+  for (const rel of ['.venv/bin/python', '.venv/Scripts/python.exe']) if (fs.existsSync(path.join(dir, rel))) pys.push([path.join(dir, rel)]);
+  pys.push(...(process.platform === 'win32' ? [['python'], ['py']] : [['python3'], ['python']]));
+  return pys.map((py) => [...py, script]);
 }
 
 let helper = null;   // { child, version } while it runs
@@ -90,7 +91,7 @@ async function ensure() {
       try { helper = await launch(cmd); problem = null; return helper; } catch (e) { const msg = `${cmd[0]}: ${e.message}`; first ||= msg; if (/ytmusicapi/.test(e.message)) library ||= e.message; }
     }
     problemAt = Date.now();
-    problem = library ? `Music needs the ytmusicapi Python library on the server. Run: pip install -r music-service/requirements.txt` : `Music needs Python 3.10 or newer on the server (${first || 'none found'}). Install Python, then run: pip install -r music-service/requirements.txt`;
+    problem = library ? `Music needs the ytmusicapi Python library on the server. Run: npm install` : `Music needs Python 3.10 or newer on the server (${first || 'none found'}). Install Python, then run: npm install`;
     throw new ApiError(503, problem, 'music_not_configured');
   })().finally(() => { starting = null; });
   return starting;

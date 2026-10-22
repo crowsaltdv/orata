@@ -6,7 +6,7 @@ services:
     name: orate
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install   # also sets up the Music page's Python library (music-service/install.mjs; README → Music) — nothing more to add
     startCommand: npm start
     healthCheckPath: /api/config
     envVars:

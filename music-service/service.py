@@ -34,13 +34,17 @@ def out(obj):
         sys.stdout.flush()
 
 
+VENDOR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")  # where install.mjs (run by `npm install`) puts ytmusicapi
+if os.path.isdir(VENDOR):
+    sys.path.insert(0, VENDOR)
+
 try:
     import ytmusicapi
     from ytmusicapi import YTMusic
     from ytmusicapi.constants import SUPPORTED_LOCATIONS
     from ytmusicapi.parsers.browsing import parse_song_flat
 except Exception as e:  # noqa: BLE001
-    out({"ready": False, "error": f"ytmusicapi is not installed ({type(e).__name__}: {e}). Run: pip install -r music-service/requirements.txt"})
+    out({"ready": False, "error": f"ytmusicapi is not installed ({type(e).__name__}: {e}). Run: npm install   (or: pip install -r music-service/requirements.txt)"})
     sys.exit(2)
 
 COUNTRY = (os.environ.get("MUSIC_COUNTRY") or "US").strip().upper()
