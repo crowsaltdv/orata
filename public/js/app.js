@@ -118,14 +118,14 @@ function ModeChooser() {
   const [keep, setKeep] = useState(false); const [picked, setPicked] = useState(null);
   if (!mine || !open) return null;
   const pick = (mode) => { if (keep) setPicked(mode); else { setOpen(false); setMode(mode); } };
-  const card = (mode, icon, title, desc) => html`<button type="button" class=${cx('mode-card', (mode === 'lite') === LITE && 'current')} onClick=${() => pick(mode)}>
-    <${Icon} name=${icon} size=${28} /><b>${title}</b><span>${desc}</span>${(mode === 'lite') === LITE ? html`<small>${t('Running now')}</small>` : null}</button>`;
+  const card = (mode, icon, title, desc, boost) => html`<button type="button" class=${cx('mode-card', (mode === 'lite') === LITE && 'current')} onClick=${() => pick(mode)}>
+    <${Icon} name=${icon} size=${28} /><b>${title}</b>${boost ? html`<em class="mode-boost">${boost}</em>` : null}<span>${desc}</span>${(mode === 'lite') === LITE ? html`<small>${t('Running now')}</small>` : null}</button>`;
   return html`<div class="mode-screen" role="dialog" aria-label=${t('Choose a mode')}><div class="mode-box">
     ${picked ? html`<h2>${t('Got it')}</h2>
         <p>${t('Orata will open in')} <b>${picked === 'lite' ? t('Lite mode') : t('Normal mode')}</b> ${t('from now on. You can switch modes, and change the mode Orata opens in, any time in Settings → Advanced.')}</p>
         <${Btn} variant="primary" onClick=${() => { setOpen(false); setMode(picked, picked); }}>${t('OK')}<//>`
       : html`<h2>${t('How should Orata run?')}</h2>
-        <div class="mode-cards">${card('lite', 'bolt', t('Lite mode'), t('Runs smoothly on older and low-power computers. The same chats, servers and calls, without the heavy effects.'))}${card('normal', 'sparkles', t('Normal mode'), t('Everything Orata has: rain, glass, wallpapers and every effect.'))}</div>
+        <div class="mode-cards">${card('lite', 'bolt', t('Lite mode'), t('Runs smoothly on older and low-power computers. The same chats, servers and calls, without the heavy effects.'), t('2× the speed and performance of Normal'))}${card('normal', 'sparkles', t('Normal mode'), t('Everything Orata has: rain, glass, wallpapers and every effect.'))}</div>
         <div class="mode-features">${MODE_FEATURES.map(([name, normal, lite]) => html`<${Mark} v=${lite} /><span class="mf-name">${t(name)}</span><${Mark} v=${normal} />`)}</div>
         <label class="check-row mode-keep"><input type="checkbox" checked=${keep} onChange=${(e) => setKeep(e.target.checked)} /><span class="box"><${Icon} name="check" size=${13} sw=${3.5} /></span><span>${t('Don’t show this again')}</span></label>`}
   </div></div>`;
