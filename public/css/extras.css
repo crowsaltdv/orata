@@ -143,15 +143,12 @@
 .mpg-hero:not(.empty)::before { content: ""; position: absolute; inset: -40%; background: var(--cover, none) center / cover; filter: blur(60px) saturate(1.4); opacity: .28; z-index: -1; }
 .mpg-hero.empty { align-items: center; } .mpg-hero.empty h1 { margin: 0 0 6px; font-size: 28px; } .mpg-hero.empty p { margin: 0; color: var(--text-2); max-width: 460px; line-height: 1.5; }
 .mpg-hero-ico { width: 72px; height: 72px; border-radius: 22px; background: var(--accent-grad); color: var(--on-accent); display: flex; align-items: center; justify-content: center; flex: none; }
-.mpg-hero-art { width: 300px; flex: none; }
+.mpg-hero-art { width: 190px; flex: none; }
 .m-art.cover { width: 100%; height: auto; aspect-ratio: 1; border-radius: 16px; box-shadow: 0 16px 40px -18px rgb(0 0 0 / .7); }
 .m-art.cover .eq { height: 32px; }
-/* the song's video: YouTube's player (an iframe kept on <body>, see youtube-player.js) is laid over this slot; the cover shows until it starts */
-.mpg-video { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: #000; box-shadow: 0 16px 40px -18px rgb(0 0 0 / .7); }
-.mpg-video .m-art.cover { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; box-shadow: none; }
-.yt-host { position: fixed; z-index: 20; overflow: hidden; border-radius: 16px; background: #000; }
+/* the song's player (an iframe kept on <body>, see youtube-player.js): parked in a corner, on screen so the music keeps playing, but invisible and click-through */
+.yt-host { position: fixed; right: 12px; bottom: 12px; z-index: 0; width: 200px; height: 112px; overflow: hidden; opacity: .001; pointer-events: none; }
 .yt-host iframe { display: block; width: 100%; height: 100%; border: 0; }
-.yt-host.docked { right: 12px; bottom: 12px; width: 200px; height: 112px; opacity: .001; pointer-events: none; z-index: 0; }   /* parked: on screen so the music keeps playing, but invisible and click-through */
 .mpg-now { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
 .mpg-now h2 { margin: 0; font-size: 26px; line-height: 1.15; overflow-wrap: anywhere; }
 .mpg-artist { color: var(--text-2); font-size: 16px; } .mpg-artist:hover { text-decoration: underline; } .mpg-album { color: var(--text-3); }
@@ -169,7 +166,7 @@
 .mpg-play { position: absolute; right: 8px; bottom: 8px; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--accent-grad); color: var(--on-accent); box-shadow: 0 8px 18px -6px rgb(0 0 0 / .6); opacity: 0; transform: translateY(6px); transition: opacity .15s, transform .15s; z-index: 3; }
 .mpg-card:hover .mpg-play, .mpg-card.cur .mpg-play, .mpg-card:focus-visible .mpg-play { opacity: 1; transform: none; }
 .mpg-card b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .mpg-card small { color: var(--text-3); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 760px) { .mpg-scroll { padding: 6px 14px 30px; } .mpg-hero { flex-direction: column; gap: 16px; padding: 16px; } .mpg-hero-art { width: 100%; max-width: 380px; } .mpg-now h2 { font-size: 21px; } .mpg-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); } }
+@media (max-width: 760px) { .mpg-scroll { padding: 6px 14px 30px; } .mpg-hero { flex-direction: column; gap: 16px; padding: 16px; } .mpg-hero-art { width: 150px; } .mpg-now h2 { font-size: 21px; } .mpg-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); } }
 
 /* ------------------------------------------------ mini player (above the user bar) */
 .mini-player { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 8px; margin: 0 0 6px; border-radius: 14px; background: rgb(var(--surface-rgb) / .08); min-width: 0; max-width: 100%; overflow: hidden; }

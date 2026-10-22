@@ -56,7 +56,7 @@ function onReply(m) {
   p.reject(m.code === 'bad_request' ? new ApiError(400, m.error, 'bad_request')
     : m.code === 'not_found' ? new ApiError(404, m.error, 'not_found')
       : m.code === 'unavailable' ? new ApiError(404, m.error, 'music_unavailable')
-        : new ApiError(502, 'YouTube Music could not be reached, or answered something unexpected. Try again in a moment.', 'music_upstream'));
+        : new ApiError(502, 'Music couldn’t be loaded right now. Try again in a moment.', 'music_upstream'));
 }
 function onExit(child) {
   if (helper?.child === child) helper = null;
@@ -106,14 +106,14 @@ export async function musicReady() {
 /** Starts the helper now (the server does this at launch) and says how it went. */
 export async function musicStatus() {
   if (!enabled()) return 'off (MUSIC=off)';
-  try { const h = await ensure(); return `YouTube Music through ytmusicapi ${h.version && h.version !== '?' ? h.version : ''}`.trim() + ' — MUSIC=off in .env turns it off'; } catch { return `OFF — ${problem}`; }
+  try { const h = await ensure(); return `ready (ytmusicapi ${h.version && h.version !== '?' ? h.version : ''})`.replace(' )', ')') + ' — MUSIC=off in .env turns it off'; } catch { return `OFF — ${problem}`; }
 }
 
 async function ask(op, params = {}, timeoutMs = 25_000) {
   const h = await ensure();
   return new Promise((resolve, reject) => {
     const id = ++seq;
-    const timer = setTimeout(() => { pending.delete(id); reject(new ApiError(504, 'YouTube Music took too long to answer. Try again.', 'music_upstream')); }, timeoutMs);
+    const timer = setTimeout(() => { pending.delete(id); reject(new ApiError(504, 'Music took too long to load. Try again.', 'music_upstream')); }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
     try { h.child.stdin.write(`${JSON.stringify({ ...params, id, op })}\n`); } catch { pending.delete(id); clearTimeout(timer); reject(new ApiError(502, 'The music helper stopped. Try again.', 'music_upstream')); }
   });
@@ -159,7 +159,7 @@ async function chart(key) {
 async function trackInfo(id) {
   if (known.has(id)) return known.get(id);
   const t = songView(await upstream('song', { videoId: id }));
-  if (!t) throw new ApiError(404, 'YouTube Music has no such track.', 'music_unavailable');
+  if (!t) throw new ApiError(404, 'That song isn’t available.', 'music_unavailable');
   return remember(t);
 }
 

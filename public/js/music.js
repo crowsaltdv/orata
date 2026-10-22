@@ -1,5 +1,5 @@
-// Orata — music: the Music page (/music, opened from the note icon above Home) with YouTube Music search, categories and a full-song player, a mini player, and the "Listening to" card shown on profiles.
-// The server finds songs through YouTube Music (see server/music.js); the browser plays them in YouTube's embedded player (see youtube-player.js).
+// Orata — music: the Music page (/music, opened from the note icon above Home) with search, categories and a full-song player, a mini player, and the "Listening to" card shown on profiles.
+// The server finds the songs (see server/music.js); the browser plays them in an embedded player that is kept out of sight (see youtube-player.js).
 import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
 import { state, set, useSel, toast, setSetting, go } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -18,7 +18,7 @@ function pushRecent(track) {
 
 /* ------------------------------------------------------------------ player */
 let player = null; let reqId = 0; let lastSync = 0; let idle = true; let watchdog = 0; let failedFor = 0; let skipRun = 0;   // skipRun: songs in a row that could not be played   // idle: nothing is loaded in the player (never started, stopped, or the queue ended)
-// The server fills in the title, artist and artwork itself (from what YouTube Music told it); the player only says which track, how long and where it is.
+// The server fills in the title, artist and artwork itself (from what the catalogue told it); the player only says which track, how long and where it is.
 /** YouTube refuses to play inside pages whose address is a bare IP number (http://192.168.1.5:3000, 127.0.0.1): it needs localhost or a domain name. */
 const numericHost = /^(\d{1,3}\.){3}\d{1,3}$|^\[[0-9a-f:]+\]$/i.test(location.hostname);
 const listeningBody = (m) => ({ track: { id: m.track.id }, duration: Math.round(Math.max(1, m.duration || 180) * 1000), position: Math.round((m.position || 0) * 1000) });
@@ -49,8 +49,8 @@ function yt() {
     onError(code) {   // 100 removed or private, 101 / 150 / 153: the uploader does not allow it to be played outside YouTube
       if (!state.music.track || idle || failedFor === reqId) return;   // YouTube repeats an error with every update: once per song is enough
       const id = failedFor = reqId; const blocked = code === 100 || code === 101 || code === 150 || code === 153;
-      if (blocked && numericHost) return fail(t('YouTube won’t play music on a page whose address is just numbers. Open Orata at localhost or a domain name instead.'), 12_000);
-      if (blocked && ++skipRun > 3) return fail(t('Several songs in a row couldn’t be played here, so YouTube may be blocking embedded players on this connection.'), 9000);
+      if (blocked && numericHost) return fail(t('Music can’t play on a page whose address is just numbers. Open Orata at localhost or a domain name instead.'), 12_000);
+      if (blocked && ++skipRun > 3) return fail(t('Several songs in a row couldn’t be played here, so playback may be blocked on this connection.'), 9000);
       fail(blocked ? t('This song can’t be played here.') : t('Couldn’t play this track.'));
       if (blocked) setTimeout(() => id === reqId && next(true), 1500);   // a song that can't be played is skipped; other problems are not retried down the list
     },
@@ -69,7 +69,7 @@ function load(track, queue, index) {
   pushRecent(track);
   yt().load(track.id);
   clearTimeout(watchdog);
-  watchdog = setTimeout(() => { if (id === reqId && !state.music.playing) fail(t('YouTube didn’t respond. Check your connection or ad blocker.')); }, 15_000);
+  watchdog = setTimeout(() => { if (id === reqId && !state.music.playing) fail(t('The player didn’t respond. Check your connection or ad blocker.')); }, 15_000);
 }
 export const music = {
   play(track, queue) { const q = queue || [track]; load(track, q, Math.max(0, q.findIndex((x) => x.id === track.id))); },
@@ -110,18 +110,6 @@ function next(auto) {
   else if (auto) { idle = true; setMusic({ playing: false, loading: false, position: 0 }); clearListening(); } else music.seek(0);
 }
 export const stopMusic = (opts) => music.stop(opts);
-
-/** The Music page's video slot: while it is on screen the player's video sits over it (and follows it as the page scrolls or resizes); otherwise the player is parked. */
-let slotOff = null;
-function bindVideoSlot(el) {
-  slotOff?.(); slotOff = null;
-  if (!el) { player?.dock(); return; }
-  const fit = () => { if (el.isConnected && player) player.place(el.getBoundingClientRect(), el.closest('.mpg-scroll')?.getBoundingClientRect()); };
-  const ro = new ResizeObserver(fit); ro.observe(el); window.addEventListener('scroll', fit, true); window.addEventListener('resize', fit);
-  const until = Date.now() + 900; let raf = requestAnimationFrame(function tick() { fit(); if (Date.now() < until) raf = requestAnimationFrame(tick); });   // the page slides in: follow it for a moment
-  slotOff = () => { ro.disconnect(); window.removeEventListener('scroll', fit, true); window.removeEventListener('resize', fit); cancelAnimationFrame(raf); };
-  fit();
-}
 // a track that finished while the tab was asleep, or Activity Status switched back on mid-song
 setInterval(() => { if (state.music?.playing) syncListening(); }, 20_000);
 
@@ -159,14 +147,13 @@ function Cover({ src, playing }) {
 
 /** What is playing, big, with the controls. Shown above everything else on the page. */
 function Hero() {
-  const track = useSel((s) => s.music.track); const volume = useSel((s) => s.music.volume);
+  const track = useSel((s) => s.music.track); const playing = useSel((s) => s.music.playing); const volume = useSel((s) => s.music.volume);
   const show = useSel((s) => s.settings.privacy?.showActivity !== false);
   if (!track) return html`<section class="mpg-hero empty"><span class="mpg-hero-ico"><${Icon} name="music" size=${34} sw=${1.6} /></span>
-    <div><h1>${t('Music')}</h1><p>${t('Search YouTube Music or pick a category below and play full songs. What you play can show on your profile.')}</p></div></section>`;
+    <div><h1>${t('Music')}</h1><p>${t('Search for songs or pick a category below and play them in full. What you play can show on your profile.')}</p></div></section>`;
   return html`<section class="mpg-hero" style=${track.artwork ? { '--cover': `url("${track.artwork}")` } : null}>
-    <div class="mpg-hero-art"><div class="mpg-video" ref=${bindVideoSlot}><${Cover} src=${track.artwork} /></div></div>
+    <div class="mpg-hero-art"><${Cover} src=${track.artwork} playing=${playing} /></div>
     <div class="mpg-now">
-      <span class="m-chip">${t('YouTube Music')}</span>
       <h2 title=${track.title}>${track.title}</h2>
       <a class="mpg-artist" href=${track.artistUrl || track.url} target="_blank" rel="noopener noreferrer">${track.artist}</a>
       ${track.album ? html`<small class="mpg-album">${track.album}</small>` : null}
@@ -177,7 +164,6 @@ function Hero() {
           <input type="range" min="0" max="1" step="0.01" value=${volume} style=${{ '--p': `${volume * 100}%` }} aria-label=${t('Volume')} onInput=${(e) => music.volume(Number(e.target.value))} /></label>
         <label class="m-share" data-tip=${t('Show what you’re listening to on your profile')}><span>${t('Show on my profile')}</span><${Toggle} checked=${show} onChange=${(v) => { setSetting('privacy.showActivity', v); if (v) setTimeout(() => syncListening(true), 50); }} /></label>
       </div>
-      ${track.url ? html`<div class="m-credit"><a href=${track.url} target="_blank" rel="noopener noreferrer">${t('Open in')} YouTube Music <${Icon} name="external" size=${12} /></a></div>` : null}
     </div>
   </section>`;
 }
@@ -194,7 +180,7 @@ function Categories() {
   const genres = useSel((s) => s.music.genres); const cat = useSel((s) => s.music.category);
   const [all, setAll] = useState(false);
   const list = genres || [{ key: 'top', name: 'Top Songs' }];
-  const FIRST = 14;   // YouTube Music has about 40 genres and moods: the popular ones show, the rest are behind "More" (the open one always shows)
+  const FIRST = 14;   // there are about 40 genres and moods: the popular ones show, the rest are behind "More" (the open one always shows)
   const long = list.length > FIRST + 2;
   const shown = all || !long ? list : [...list.slice(0, FIRST), ...list.slice(FIRST).filter((g) => g.key === cat)];
   return html`<div class="mpg-chips" role="tablist" aria-label=${t('Categories')}>${shown.map((g) => html`<button type="button" role="tab" key=${g.key} aria-selected=${cat === g.key} class=${cx('mpg-chip', cat === g.key && 'on')} onClick=${() => music.openChart(g.key)}>${g.name}</button>`)}
@@ -237,7 +223,6 @@ export function MusicPage() {
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
       <div class="m-title"><${Icon} name="music" size=${23} /><span class="name">${t('Music')}</span></div>
-      <div class="m-topic">${t('via')} <a href="https://music.youtube.com" target="_blank" rel="noopener noreferrer">YouTube Music</a></div>
     </header>
     <div class="mpg-scroll">
       ${ok === false ? html`<div class="m-empty setup"><${Icon} name="music" size=${34} sw=${1.5} /><b>${why ? t('Music isn’t set up on this server yet') : t('Music is turned off on this server')}</b><p>${why || t('The server admin switched the music player off.')}</p></div>` : html`
@@ -261,14 +246,14 @@ export function MiniPlayer() {
   </div>`;
 }
 
-/** "Listening on YouTube Music" on a profile. `listening` = { title, artist, artwork, url, duration, startedAt, endsAt } (milliseconds). */
+/** "Listening to music" on a profile. `listening` = { title, artist, artwork, url, duration, startedAt, endsAt } (milliseconds). */
 export function ListeningCard({ listening: l }) {
   const [, tick] = useState(0);
   useEffect(() => { const id = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(id); }, []);
   if (!l || l.endsAt < Date.now()) return null;
   const pos = Math.min(l.duration, Math.max(0, Date.now() - l.startedAt));
   return html`<div class="listening-card">
-    <h5><${Icon} name="music" size=${13} /> ${t('Listening on YouTube Music')}</h5>
+    <h5><${Icon} name="music" size=${13} /> ${t('Listening to music')}</h5>
     <div class="lc-row"><${Art} src=${l.artwork} size=${60} playing=${true} />
       <div class="lc-text">${l.url ? html`<a class="lc-title" href=${l.url} target="_blank" rel="noopener noreferrer" title=${l.title}>${l.title}</a>` : html`<b class="lc-title">${l.title}</b>`}<small>${l.artist}</small>
         <div class="lc-bar"><span>${clock(pos / 1000)}</span><i><b style=${{ width: `${(pos / l.duration) * 100}%` }}></b></i><span>${clock(l.duration / 1000)}</span></div></div></div>

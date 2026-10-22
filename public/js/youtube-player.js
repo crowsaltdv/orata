@@ -1,8 +1,8 @@
 // Orata — plays one song at a time in YouTube's embedded player: the engine behind the Music page.
 // YouTube Music's audio can't be fetched by Orata (see server/music.js), so a song is a YouTube video id played in an <iframe>, controlled over the
 // same postMessage protocol YouTube's own iframe API uses. No script from YouTube is loaded (Orata's content security policy only allows its own).
-// The iframe has to outlive the Music page, because the mini player keeps playing while you move around: it lives in its own element on <body>.
-// The Music page puts it over its video slot with place(); dock() parks it in a corner, still on screen but invisible and click-through.
+// The iframe has to outlive the Music page, because the mini player keeps playing while you move around: it lives in its own element on <body>, parked in
+// a corner of the window — on screen so the browser keeps the sound going, but invisible and click-through (see .yt-host in extras.css).
 const ORIGIN = 'https://www.youtube-nocookie.com';
 // player states YouTube reports: -1 not started, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
 
@@ -35,12 +35,12 @@ export function createPlayer(on = {}) {
   const changed = (code) => { if (code === last) return; last = code; on.onState?.(code); };
   function open(id) {
     if (!host) {
-      host = document.createElement('div'); host.className = 'yt-host docked'; document.body.appendChild(host);
+      host = document.createElement('div'); host.className = 'yt-host'; document.body.appendChild(host);
       window.addEventListener('message', onMessage);
     }
     ready = false; last = -1;
     frame = document.createElement('iframe');
-    frame.title = 'YouTube Music player'; frame.allow = 'autoplay; encrypted-media; picture-in-picture';
+    frame.title = 'Music player'; frame.allow = 'autoplay; encrypted-media; picture-in-picture';
     frame.referrerPolicy = 'strict-origin-when-cross-origin';   // YouTube refuses to play embeds that arrive without a referrer, and Orata's own policy sends none
     frame.src = `${ORIGIN}/embed/${encodeURIComponent(id)}?enablejsapi=1&widgetid=1&autoplay=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&rel=0&playsinline=1&origin=${encodeURIComponent(location.origin)}`;
     frame.addEventListener('load', () => {   // say hello until the player answers (the iframe API does the same)
@@ -57,16 +57,7 @@ export function createPlayer(on = {}) {
     pause: () => send('pauseVideo'),
     seek: (sec) => send('seekTo', [Math.max(0, sec), true]),
     volume(v) { vol = v; send('setVolume', [Math.round(v * 100)]); },
-    stop() { send('stopVideo'); this.dock(); },
+    stop: () => send('stopVideo'),
     state: () => last,
-    /** Puts the video over `rect` (a DOMRect), cut off at `bounds` (the scrolling area it sits in), so it scrolls away with the page. */
-    place(rect, bounds) {
-      if (!host) return;
-      const cut = bounds ? [Math.max(0, bounds.top - rect.top), Math.max(0, rect.right - bounds.right), Math.max(0, rect.bottom - bounds.bottom), Math.max(0, bounds.left - rect.left)] : [0, 0, 0, 0];
-      if (cut[0] + cut[2] >= rect.height || cut[1] + cut[3] >= rect.width) return this.dock();   // scrolled right out of view
-      host.className = 'yt-host';
-      Object.assign(host.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, clipPath: `inset(${cut.map((n) => `${Math.round(n)}px`).join(' ')})` });
-    },
-    dock() { if (host) { host.className = 'yt-host docked'; host.removeAttribute('style'); } },
   };
 }

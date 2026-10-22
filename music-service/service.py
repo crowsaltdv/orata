@@ -18,7 +18,7 @@ import os
 import re
 import sys
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 
 for stream in (sys.stdout, sys.stdin):
     try:
@@ -90,6 +90,10 @@ def artwork(thumbs):
     url = best["url"]
     if "googleusercontent.com" in url or "ggpht.com" in url:
         url = re.sub(r"=w\d+-h\d+.*$", "=w400-h400-l90-rj", url)
+    elif "ytimg.com" in url:  # a still from the video: the plain 16:9 one (the usual one has black bars above and below)
+        m = re.search(r"/vi/([A-Za-z0-9_-]{11})/", url)
+        if m:
+            url = f"https://i.ytimg.com/vi/{m.group(1)}/mqdefault.jpg"
     return url
 
 
@@ -139,6 +143,58 @@ def tracks_of(items, limit=50):
     return result
 
 
+_covers = {}  # (title, artist) -> the song's album cover (or None), so every song is looked up once
+
+
+def plain(text):
+    """'Sunflower (Spider-Man: Into the Spider-Verse)' -> 'sunflower': just the words that identify a song"""
+    text = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", str(text).lower())
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def find_cover(t):
+    """The album cover of the song version of `t` (found by searching its title and artist), or None."""
+    key = (t["title"].lower(), t["artist"].lower())
+    if key in _covers:
+        return _covers[key]
+    url = None
+    try:
+        names = {n.strip().lower() for n in t["artist"].split(",") if n.strip()}
+        want = plain(t["title"])
+        for r in yt.search(f"{t['title']} {t['artist'].split(',')[0]}", filter="songs", limit=5):
+            have = {a["name"].lower() for a in (r.get("artists") or []) if isinstance(a, dict) and a.get("name")}
+            got = plain(r.get("title") or "")
+            if want and got and have & names and (got.startswith(want) or want.startswith(got)):
+                url = artwork(r.get("thumbnails"))
+                break
+    except Exception:  # noqa: BLE001 - no cover found: the video still stays
+        url = None
+    _covers[key] = url
+    return url
+
+
+def with_covers(tracks, budget=6.0):
+    """Charts and music videos only come with a still from the video. Swap in the song's real album cover, looking them up side by side for a few seconds at most
+    (the ones not done in time finish in the background and are used the next time)."""
+    todo = [t for t in tracks if t.get("artwork") and "ytimg.com" in t["artwork"]]
+    pool = ThreadPoolExecutor(max_workers=8)
+    futures = {}
+    for t in todo:
+        key = (t["title"].lower(), t["artist"].lower())
+        if key in _covers:
+            t["artwork"] = _covers[key] or t["artwork"]
+        else:
+            futures[pool.submit(find_cover, t)] = t
+    done, _ = wait(futures, timeout=budget)
+    for f in done:
+        try:
+            futures[f]["artwork"] = f.result() or futures[f]["artwork"]
+        except Exception:  # noqa: BLE001
+            pass
+    pool.shutdown(wait=False)
+    return tracks
+
+
 def slug(text):
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
 
@@ -171,12 +227,12 @@ def top_songs():
     lists = yt.get_charts(COUNTRY).get("videos") or []
     pick = next((p for p in lists if str(p.get("title", "")).lower().startswith("top 100 music videos")), None) or (lists[0] if lists else None)
     if not pick or not pick.get("playlistId"):
-        raise Problem("YouTube Music has no chart for this country right now.", "unavailable")
-    return tracks_of(yt.get_playlist(pick["playlistId"], limit=60).get("tracks") or [], 40)
+        raise Problem("There is no chart for this country right now.", "unavailable")
+    return with_covers(tracks_of(yt.get_playlist(pick["playlistId"], limit=60).get("tracks") or [], 40))
 
 
 def trending():
-    return tracks_of((yt.get_explore().get("trending") or {}).get("items") or [], 40)
+    return with_covers(tracks_of((yt.get_explore().get("trending") or {}).get("items") or [], 40))
 
 
 def songs_shelf(raw):
@@ -206,7 +262,7 @@ def category_tracks(entry):
     found = tracks_of(songs_shelf(raw), 40)
     if len(found) < 5:  # the page changed shape: a plain search for the category still gives something to play
         found = tracks_of(yt.search(f"{entry['name']} songs", filter="songs", limit=40), 40)
-    return found
+    return with_covers(found)
 
 
 def op_search(p):
@@ -221,7 +277,7 @@ def op_search(p):
             found = tracks_of([*songs, *yt.search(q, filter="videos", limit=limit)], limit)
         except Exception:  # noqa: BLE001
             pass
-    return found
+    return with_covers(found)
 
 
 def op_categories(_):
@@ -255,8 +311,8 @@ def op_song(p):
     except Exception:  # noqa: BLE001 - an id that doesn't exist makes YouTube answer with an error page
         found = None
     if not found or found["id"] != vid:
-        raise Problem("YouTube Music has no such track.", "unavailable")
-    return found
+        raise Problem("That song isn’t available.", "unavailable")
+    return with_covers([found])[0]
 
 
 OPS = {"search": op_search, "categories": op_categories, "category": op_category, "song": op_song, "ping": lambda p: "pong"}
