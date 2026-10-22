@@ -20,13 +20,18 @@ const LOCKS = [1, 6, 24, 72, 168, 720];   // hours
 const REASONS = { hate: 'Hate speech', threats: 'Threats or violent extremism', 'self-harm': 'Self-harm or suicide', 'child-safety': 'Sexualizing minors', nonconsensual: 'Intimate images shared without consent',
   nsfw: 'Adult or gory content where it isn’t allowed', privacy: 'Sharing someone’s private info', scam: 'Scam, phishing or malware', impersonation: 'Pretending to be someone or Orata staff',
   'ban-evasion': 'Dodging a ban with another account', illegal: 'Illegal goods, services or piracy', misinformation: 'Harmful misinformation' };
-const URGENT = new Set(['self-harm', 'child-safety', 'threats']);   // never hidden as a joke: someone may be in danger
+const URGENT = new Set(['self-harm', 'child-safety', 'threats']);   // never hidden as a joke (someone may be in danger): one that looks like a joke is tagged and sorted last
+// words a message reported for one of those would likely have; a short text message with none of them doesn't look like it's about that
+const RELATED = {
+  'child-safety': /\b(?:kids?|child(?:ren)?|minors?|under ?age|young|little|teens?|school|grade|\d{1,2} ?(?:yo|y\/o|years? old)|age|how old|nudes?|naked|pics?|photos?|send|sex\w*|hot|body|touch|private|snap|meet|cp|loli|baby|babe)\b/i,
+  'self-harm': /\b(?:kill|die|dying|dead|suicid\w*|cut(?:ting)?|end it|kms|kys|hurt|harm|pills|overdose|jump|goodbye|no point|hate myself|worthless)\b/i,
+  threats: /\b(?:kill|shoot|shot|gun|knife|stab|bomb|hurt|beat|attack|find you|address|swat|dox\w*|die|dead|murder|threat\w*)\b/i,
+};
 const JOKE = /^(?:(?:jk|j\/k|lol+|lmf?ao+|rofl|(?:ha)+h?|(?:he)+h?|xd+|test(?:ing)?|just kidding|kidding|for fun|bruh+|idk|nothing|no reason|cuz|bc|because|random|joke|trolling|troll|meme|sus)\s*)+$/i;
 const HARMLESS = new Set('hi hello hey heya hiya yo sup gm gn ok okay k kk yes yeah yep ya no nope nah lol lmao haha thanks thank you ty thx np bye cya cool nice good great morning night what why how who when where wow same true facts bruh hmm oh ah ye'.split(' '));
 /** Why a report is obviously a joke or fake, so staff aren't shown it (they can still look), or null. Only the plain cases:
  *  a note that just says it's a joke (or is keyboard mashing), a report of an everyday message ("hi"), or a third report of the same person in a day. */
 function fakeWhy({ reason, note, reporter, userId, m }) {
-  if (URGENT.has(reason)) return null;
   const words = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}/\s]/gu, ' ').split(/\s+/).filter(Boolean);
   const said = words(note); const flat = said.join('');
   if (said.length && JOKE.test(said.join(' '))) return 'the note says it’s a joke';
@@ -35,6 +40,7 @@ function fakeWhy({ reason, note, reporter, userId, m }) {
   if (m && !m.attachments?.length && !m.gif && !m.sticker && !m.forward && !m.poll) {
     const w = words(m.content);
     if (w.length && w.length <= 4 && w.every((x) => HARMLESS.has(x) || /^\d+$/.test(x)) && !hasProfanity(m.content)) return `it’s an everyday message (“${String(m.content).trim().slice(0, 30)}”)`;
+    if (RELATED[reason] && w.length <= 8 && !m.embeds?.length && !/https?:\/\//i.test(m.content || '') && !RELATED[reason].test(m.content || '')) return 'the message doesn’t seem to have anything to do with that';
   }
   const today = (db.flags || []).filter((f) => f.reportedBy === reporter && f.userId === userId && f.at > Date.now() - 86400_000).length;
   if (today >= 2) return 'the same person already reported them twice today';
@@ -115,7 +121,11 @@ export function mountStaff(r, { h, limit, removeMember }) {
     }
     // the same report twice is one report; an obvious joke is kept, but out of staff's way
     const same = (db.flags || []).some((x) => x.status === 'open' && x.reportedBy === req.user.id && x.kind === f.kind && x.userId === f.userId && (x.messageId || null) === (f.messageId || null) && (x.serverId || null) === (f.serverId || null) && x.reason === f.reason);
-    if (!same) { const why = fakeWhy({ reason, note, reporter: req.user.id, userId: f.userId, m }); if (why) f.hidden = why; flag(f); }
+    if (!same) {
+      const why = fakeWhy({ reason, note, reporter: req.user.id, userId: f.userId, m });
+      if (why && URGENT.has(reason)) f.doubt = why; else if (why) f.hidden = why;   // a joke-looking report where someone may be in danger is still shown, just tagged and last
+      flag(f);
+    }
     res.json({ ok: true });
   }));
 
@@ -231,7 +241,8 @@ export function mountStaff(r, { h, limit, removeMember }) {
   };
   r.get('/staff/flags', h(async (req, res) => {
     staff(req); const all = req.query.status === 'all'; const hidden = req.query.hidden === '1';   // hidden=1: only the reports that look like jokes
-    const list = (db.flags || []).filter((f) => (all || f.status === 'open') && !!f.hidden === hidden).slice(-200).reverse().map(flagView);
+    const list = (db.flags || []).filter((f) => (all || f.status === 'open') && !!f.hidden === hidden).slice(-200).reverse().map(flagView)
+      .sort((a, b) => !!a.doubt - !!b.doubt);   // the ones that look like jokes go last
     const ids = new Set(list.flatMap((f) => [f.userId, f.reportedBy, f.handledBy]).filter(Boolean));
     res.json({ flags: list, users: [...ids].map((id) => db.users[id] && { ...publicUser(db.users[id]), state: stateOf(db.users[id]) }).filter(Boolean), hidden: (db.flags || []).filter((f) => f.status === 'open' && f.hidden).length });
   }));
@@ -246,7 +257,7 @@ export function mountStaff(r, { h, limit, removeMember }) {
       }
       f.status = 'done'; log(req.user.id, 'delete_message', f.userId, f.label || f.reason, { flag: f.id });
     } else if (action === 'dismiss') { f.status = 'dismissed'; log(req.user.id, 'dismiss_flag', f.userId, '', { flag: f.id }); } else if (action === 'reopen') f.status = 'open';
-    else if (action === 'unhide') { delete f.hidden; log(req.user.id, 'unhide_flag', f.userId, '', { flag: f.id }); }   // "not a joke": it counts like any other report
+    else if (action === 'unhide') { delete f.hidden; delete f.doubt; log(req.user.id, 'unhide_flag', f.userId, '', { flag: f.id }); }   // "not a joke": it counts like any other report
     else throw bad('Unknown action');
     f.handledBy = req.user.id; f.handledAt = Date.now(); save();
     res.json(flagView(f));

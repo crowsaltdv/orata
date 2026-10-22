@@ -158,7 +158,14 @@ async function main() {
   r = await api('GET', '/staff/flags', Y.token);
   ok(!r.body.flags.some((f) => f.messageId === hi.id) && !r.body.flags.some((f) => f.reason === 'impersonation' && f.reportedBy === D.user.id) && r.body.hidden === 2,
     'reports that are obviously jokes stay out of staff’s way', JSON.stringify(r.body.hidden));
-  ok(r.body.flags.some((f) => f.reason === 'self-harm' && f.reportedBy === D.user.id && f.label === 'Reported: Self-harm or suicide'), '… but never ones where someone may be in danger');
+  const urgent = r.body.flags.find((f) => f.reason === 'self-harm' && f.reportedBy === D.user.id);
+  ok(urgent?.label === 'Reported: Self-harm or suicide' && /joke/.test(urgent.doubt) && r.body.flags.at(-1).id === urgent.id, '… but never ones where someone may be in danger: those are tagged as looking like a joke, and go last');
+  const hum = (await say(E.token, 'mostly hum')).body; const worry = (await say(E.token, 'how old are you? send pics')).body;
+  await api('POST', '/reports', B.token, { messageId: hum.id, channelId: text.id, reason: 'child-safety' });
+  await api('POST', '/reports', B.token, { messageId: worry.id, channelId: text.id, reason: 'child-safety' });
+  r = await api('GET', '/staff/flags', Y.token);
+  ok(/anything to do with that/.test(r.body.flags.find((f) => f.messageId === hum.id)?.doubt) && r.body.flags.some((f) => f.messageId === worry.id && !f.doubt),
+    'a serious report about a message with nothing to do with it is tagged; one that might be real isn’t');
   r = await api('GET', '/staff/flags?hidden=1', Y.token); const joke = r.body.flags.find((f) => f.reason === 'impersonation' && f.reportedBy === D.user.id);
   ok(/joke/.test(joke?.hidden) && /everyday message/.test(r.body.flags.find((f) => f.messageId === hi.id)?.hidden), 'staff can still see them, and why they were hidden');
   await api('POST', `/staff/flags/${joke.id}`, Y.token, { action: 'unhide' });

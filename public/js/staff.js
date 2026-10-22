@@ -202,9 +202,10 @@ function Flags() {
         ${f.excerpt ? html`<blockquote class="flag-excerpt">${f.excerpt}${f.gone ? html` <small>(${t('already deleted')})</small>` : null}</blockquote>` : null}
         ${by ? html`<div class="flag-detail">${t('Reported by')} ${by.displayName}${f.note ? `: “${f.note}”` : ''}</div>` : null}
         ${f.hidden ? html`<div class="flag-detail flag-hidden"><${Icon} name="eye-off" size=${14} />${t('Hidden from staff because')} ${f.hidden}.</div>` : null}
+        ${f.doubt ? html`<div class="flag-detail flag-hidden"><span class="flag-kind">${t('Looks like a joke')}</span>${f.doubt}. ${t('Shown anyway because of what it’s about.')}</div>` : null}
         <div class="flag-acts">${f.status === 'open' ? html`
           ${f.messageId && !f.gone ? html`<${Btn} size="sm" variant="danger" icon="trash" onClick=${() => handle(f, 'delete')}>${t('Delete message')}<//>` : null}
-          ${f.hidden ? html`<${Btn} size="sm" icon="check" onClick=${() => handle(f, 'unhide')}>${t('Not a joke')}<//>` : null}
+          ${f.hidden || f.doubt ? html`<${Btn} size="sm" icon="check" onClick=${() => handle(f, 'unhide')}>${t('Not a joke')}<//>` : null}
           ${f.serverId && !f.hidden ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(f.serverId, f.channelId)}>${t('Ghost in')}<//>` : null}
           ${f.channelId && !f.serverId && !f.hidden ? html`<${Btn} size="sm" icon="message" onClick=${() => openModal('staff-dm', { flagId: f.id })}>${t('Read the DM')}<//>` : null}
           <${Btn} size="sm" icon="lock" onClick=${() => userAct(f.userId, 'lock')}>${t('Lock account')}<//>

@@ -590,3 +590,4 @@ button.stat-tile { text-align: left; font: inherit; } button.stat-tile:disabled 
 .check-row a { color: var(--accent); }
 .sdm-avs { display: flex; flex: none; } .sdm-avs > * + * { margin-left: -10px; } .sdm-excerpt { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; }
 .flag-hidden { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-style: italic; }
+.flag-hidden .flag-kind { white-space: nowrap; flex: none; font-style: normal; }
