@@ -5,7 +5,8 @@ import readline from 'node:readline';
 
 const log = (o) => { if (process.env.FAKE_MUSIC_LOG) fs.appendFileSync(process.env.FAKE_MUSIC_LOG, `${JSON.stringify(o)}\n`); };
 const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
-const song = (id, title, extra = {}) => ({ id, title, artist: 'Test Artist', album: 'Test Album', artwork: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, duration: 215000, explicit: false, ...extra });
+const ARTIST = 'UCtestartist000000001'; const ALBUM = 'MPREbtestalbum01';
+const song = (id, title, extra = {}) => ({ id, title, artist: 'Test Artist', artists: [{ name: 'Test Artist', id: ARTIST }], album: 'Test Album', albumId: ALBUM, artwork: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, duration: 215000, explicit: false, ...extra });
 
 const CATEGORIES = [
   { key: 'top', name: 'Top Songs', group: 'chart' }, { key: 'trending', name: 'Trending', group: 'chart' },
@@ -34,6 +35,19 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (req.op === 'categories') return reply(CATEGORIES);
   if (req.op === 'category') return reply(req.key === 'g-pop' ? [song('popsong0001', 'Pop Hit')] : req.key === 'top' ? [song('overallhit0', 'Overall Hit')] : []);
   if (req.op === 'song') return req.videoId === 'deepcut0001' ? reply(song('deepcut0001', 'Deep Cut', { duration: 187000 })) : refuse('YouTube Music has no such track.', 'unavailable');
+  if (req.op === 'artist') {
+    if (req.browseId !== ARTIST) return refuse('That artist isn’t available.', 'unavailable');
+    return reply({ id: ARTIST, name: 'Test Artist', description: 'Makes test songs.', subscribers: '1.2M', listeners: '3M', avatar: 'https://yt3.googleusercontent.com/avatar=w400-h400-l90-rj', banner: 'https://lh3.googleusercontent.com/banner=w1920-h800',
+      songs: [song('nightdrive1', 'Night Drive'), song('rainsounds2', 'Rain Sounds')],
+      albums: [{ id: ALBUM, title: 'Test Album', year: '2024', type: 'Album', artwork: 'https://yt3.googleusercontent.com/cover=w400-h400-l90-rj' }, { id: 'no', title: 'Unusable id' }],
+      singles: [{ id: 'MPREbtestsingle1', title: 'Lone Single', year: '2025', type: 'Single', artwork: 'https://evil.example/x.png' }] });
+  }
+  if (req.op === 'artists') return reply(req.q === 'empty' ? [] : [{ id: ARTIST, name: 'Test Artist', avatar: 'https://yt3.googleusercontent.com/avatar=w400-h400-l90-rj' }, { id: 'bad', name: 'Unusable id' }]);
+  if (req.op === 'album') {
+    if (req.browseId !== ALBUM) return refuse('That album isn’t available.', 'unavailable');
+    return reply({ id: ALBUM, title: 'Test Album', type: 'Album', year: '2024', artists: [{ name: 'Test Artist', id: ARTIST }], artwork: 'https://yt3.googleusercontent.com/cover=w400-h400-l90-rj', duration: 400000,
+      tracks: [song('nightdrive1', 'Night Drive'), song('albumtrack2', 'Album Track Two')] });
+  }
   if (req.op === 'ping') return reply('pong');
   return refuse('Unknown operation', 'bad_request');
 });

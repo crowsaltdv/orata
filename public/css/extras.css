@@ -166,6 +166,49 @@
 .mpg-play { position: absolute; right: 8px; bottom: 8px; width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--accent-grad); color: var(--on-accent); box-shadow: 0 8px 18px -6px rgb(0 0 0 / .6); opacity: 0; transform: translateY(6px); transition: opacity .15s, transform .15s; z-index: 3; }
 .mpg-card:hover .mpg-play, .mpg-card.cur .mpg-play, .mpg-card:focus-visible .mpg-play { opacity: 1; transform: none; }
 .mpg-card b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .mpg-card small { color: var(--text-3); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* playlists, artist pages and album pages (music-pages.js) */
+.m-link { color: inherit; text-decoration: none; cursor: pointer; } .m-link:hover { text-decoration: underline; color: var(--text); }
+.m-back { margin-right: 4px; }
+.mpg-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; } .mpg-h .link-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 600; }
+.mpg-hint { margin: 0; color: var(--text-3); font-size: 13.5px; }
+.mpg-cell { position: relative; min-width: 0; display: flex; } .mpg-cell .mpg-card { flex: 1; min-width: 0; }
+.mpg-add { position: absolute; top: 14px; right: 14px; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / .55); color: #fff; backdrop-filter: blur(6px); opacity: 0; transform: scale(.85); transition: opacity var(--t-fast), transform var(--t-fast) var(--ease-spring), background var(--t-fast); }
+.mpg-cell:hover .mpg-add, .mpg-add:focus-visible { opacity: 1; transform: none; } .mpg-add:hover { background: var(--accent); }
+@media (hover: none) { .mpg-add, .mpg-ib { opacity: 1; transform: none; } }
+.m-addpl { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; font-size: 13px; font-weight: 600; border: 1px solid var(--border); background: rgb(var(--surface-rgb) / .08); color: var(--text-2); transition: background var(--t-fast), color var(--t-fast); } .m-addpl:hover { background: var(--hover); color: var(--text); }
+.mpg-now .m-extra { flex-wrap: wrap; row-gap: 10px; }
+.pl-mosaic { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: rgb(var(--surface-rgb) / .12); color: var(--text-3); box-shadow: 0 16px 40px -18px rgb(0 0 0 / .7); }
+.pl-mosaic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pl-mosaic.four { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.ar, .al { display: flex; flex-direction: column; gap: 22px; }
+.ar > *, .al > * { flex: none; }
+.ar-head, .al-head { position: relative; display: flex; align-items: flex-end; gap: 24px; padding: 28px 24px 22px; min-height: 200px; border-radius: 22px; border: 1px solid var(--border); background: rgb(var(--surface-rgb) / .07); overflow: hidden; isolation: isolate; }
+.ar-head::before { content: ""; position: absolute; inset: 0; background: var(--banner, none) center / cover; opacity: .55; z-index: -2; }
+.ar-head::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgb(0 0 0 / .08), rgb(var(--panel-rgb) / .88)); z-index: -1; }
+.al-head::before { content: ""; position: absolute; inset: -40%; background: var(--cover, none) center / cover; filter: blur(60px) saturate(1.4); opacity: .3; z-index: -1; }
+.ar-avatar { width: 150px; height: 150px; flex: none; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: rgb(var(--surface-rgb) / .18); color: var(--text-3); border: 3px solid rgb(255 255 255 / .14); box-shadow: 0 16px 40px -14px rgb(0 0 0 / .7); }
+.ar-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.al-cover { width: 200px; flex: none; }
+.ar-info { min-width: 0; display: flex; flex-direction: column; gap: 6px; } .ar-info h1 { margin: 0; font-size: 38px; line-height: 1.1; overflow-wrap: anywhere; }
+.m-kicker { font-size: 11.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); }
+.ar-stats { color: var(--text-2); font-size: 14px; } .ar-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.ar-bio { margin: 0; max-width: 760px; color: var(--text-2); font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; } .ar-bio.open { display: block; }
+.mpg-more { margin-top: 8px; }
+.mpg-rows { display: flex; flex-direction: column; gap: 2px; }
+.mpg-row { display: flex; align-items: center; gap: 12px; padding: 6px 10px 6px 6px; border-radius: 12px; cursor: pointer; transition: background var(--t-fast); } .mpg-row:hover { background: var(--hover); } .mpg-row.cur { background: var(--accent-soft); }
+.mpg-n { flex: none; width: 30px; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 14px; font-variant-numeric: tabular-nums; } .mpg-n .icon { display: none; color: var(--text); }
+.mpg-row:hover .mpg-n .icon, .mpg-row:focus-visible .mpg-n .icon { display: block; } .mpg-row:hover .mpg-n .num, .mpg-row:focus-visible .mpg-n .num { display: none; }
+.mpg-row .m-art { border-radius: 8px; }
+.mpg-rt { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; } .mpg-rt b { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .mpg-rt small { color: var(--text-3); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mpg-e { display: inline-block; margin-right: 5px; padding: 0 4px; border-radius: 3px; background: rgb(var(--surface-rgb) / .22); color: var(--text-2); font-size: 10px; font-style: normal; font-weight: 800; line-height: 14px; }
+.mpg-ra { flex: 0 0 24%; min-width: 0; color: var(--text-3); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mpg-rd { flex: none; width: 46px; text-align: right; color: var(--text-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+.mpg-ib { flex: none; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--text-3); opacity: 0; transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast); } .mpg-row:hover .mpg-ib, .mpg-ib:focus-visible { opacity: 1; } .mpg-ib:hover { background: var(--hover); color: var(--text); }
+.mpg-artists { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.mpg-artist-card { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 128px; padding: 12px 8px; border-radius: 16px; text-align: center; transition: background var(--t-fast); } .mpg-artist-card:hover { background: var(--hover); }
+.mpg-artist-card b { max-width: 100%; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .mpg-artist-card small { color: var(--text-3); font-size: 12px; }
+.ar-mini { width: 84px; height: 84px; margin-bottom: 4px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: rgb(var(--surface-rgb) / .15); color: var(--text-3); } .ar-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+@media (max-width: 760px) { .ar-head, .al-head { flex-direction: column; align-items: flex-start; gap: 16px; padding: 20px 16px; min-height: 0; } .ar-avatar { width: 112px; height: 112px; } .ar-info h1 { font-size: 28px; } .al-cover { width: 150px; } .mpg-ra { display: none; } }
 @media (max-width: 760px) { .mpg-scroll { padding: 6px 14px 30px; } .mpg-hero { flex-direction: column; gap: 16px; padding: 16px; } .mpg-hero-art { width: 150px; } .mpg-now h2 { font-size: 21px; } .mpg-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); } }
 
 /* ------------------------------------------------ mini player (above the user bar) */

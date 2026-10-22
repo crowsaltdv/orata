@@ -208,6 +208,7 @@ async function main() {
   const t0 = r.body.tracks[0];
   ok(t0.title === 'Night Drive' && t0.artist === 'Test Artist' && t0.album === 'Test Album' && t0.artwork === 'https://i.ytimg.com/vi/nightdrive1/hqdefault.jpg' && t0.url === 'https://music.youtube.com/watch?v=nightdrive1' && t0.duration === 215000 && t0.explicit === false && r.body.tracks[1].explicit === true && r.body.tracks[1].artwork.startsWith('https://yt3.googleusercontent.com/'), 'titles, artwork, the YouTube Music link and the song length come through');
   ok(r.body.tracks[2].artwork === null, 'artwork from any other website is dropped');
+  ok(r.body.artists.length === 1 && r.body.artists[0].id === 'UCtestartist000000001' && r.body.artists[0].name === 'Test Artist' && r.body.artists[0].avatar.startsWith('https://yt3.googleusercontent.com/'), 'a search also finds matching artists (with their picture; unusable ones are left out)');
   const s1 = helperCalls('search'); ok(s1.length === 1 && s1[0].q === 'night' && s1[0].limit === 24, 'one search was sent to the helper');
   await api('GET', '/music/search?q=night', A3); ok(helperCalls('search').length === 1, 'repeat searches are served from a cache');
   r = await api('GET', '/music/search?q=empty', A3); ok(r.status === 200 && r.body.tracks.length === 0, 'an empty result is an empty list');
@@ -222,10 +223,58 @@ async function main() {
   r = await api('GET', '/music/charts/nonsense', A3); ok(r.status === 404 && helperCalls('category').every((x) => x.key !== 'nonsense'), 'unknown categories are refused without bothering YouTube');
   r = await api('GET', '/music/tracks/nightdrive1/source', A3); ok(r.status === 404, 'there is no audio relay: the browser plays the song in YouTube’s own player');
 
+  console.log('\nArtist and album pages');
+  const ARTIST = 'UCtestartist000000001'; const ALBUM = 'MPREbtestalbum01';
+  r = await api('GET', `/music/artists/${ARTIST}`, null); ok(r.status === 401, 'artist pages need a login');
+  r = await api('GET', `/music/artists/${ARTIST}`, A3);
+  const ar = r.body.artist;
+  ok(r.status === 200 && ar.name === 'Test Artist' && ar.subscribers === '1.2M' && ar.avatar.startsWith('https://yt3.googleusercontent.com/') && ar.banner.startsWith('https://lh3.googleusercontent.com/') && ar.songs.map((x) => x.id).join() === 'nightdrive1,rainsounds2', 'an artist page has their picture, banner, numbers and songs', JSON.stringify(r.body).slice(0, 240));
+  ok(ar.albums.length === 1 && ar.albums[0].id === ALBUM && ar.albums[0].title === 'Test Album' && ar.albums[0].year === '2024' && ar.albums[0].type === 'Album', 'their albums are listed (entries without a usable id are left out)');
+  ok(ar.singles.length === 1 && ar.singles[0].type === 'Single' && ar.singles[0].artwork === null, 'so are singles — and artwork from another website is dropped');
+  ok(ar.songs[0].artists[0].id === ARTIST && ar.songs[0].albumId === ALBUM, 'every song knows its artist and its album, so the app can link to both');
+  await api('GET', `/music/artists/${ARTIST}`, A3); ok(helperCalls('artist').length === 1, 'artist pages are cached');
+  r = await api('GET', '/music/artists/UCnobodyhomehere00000', A3); ok(r.status === 404 && r.body.code === 'music_unavailable', 'an unknown artist says so');
+  r = await api('GET', '/music/artists/x!', A3); ok(r.status === 400, 'a malformed artist id is refused');
+  r = await api('GET', `/music/albums/${ALBUM}`, A3);
+  const al = r.body.album;
+  ok(r.status === 200 && al.title === 'Test Album' && al.type === 'Album' && al.year === '2024' && al.artists[0].id === ARTIST && al.duration === 400000 && al.tracks.map((x) => x.id).join() === 'nightdrive1,albumtrack2', 'an album page lists its songs in order, with its year, type and artists', JSON.stringify(r.body).slice(0, 240));
+  ok(al.tracks.every((x) => x.album === 'Test Album' && x.albumId === ALBUM), 'the songs are sorted into their album');
+  r = await api('GET', '/music/albums/MPREbnosuchalbum1', A3); ok(r.status === 404, 'an unknown album says so');
+
+  console.log('\nPlaylists');
+  r = await api('GET', '/me/playlists', null); ok(r.status === 401, 'playlists need a login');
+  r = await api('GET', '/me/playlists', A3); ok(r.status === 200 && r.body.playlists.length === 0, 'you start with none');
+  r = await api('POST', '/me/playlists', A3, { name: '   ' }); ok(r.status === 400, 'a playlist needs a name');
+  const songsBefore = helperCalls('song').length;
+  r = await api('POST', '/me/playlists', A3, { name: '  Road   trip  ', trackId: 'nightdrive1' });
+  const pl = r.body.playlist;
+  ok(r.status === 200 && pl.name === 'Road trip' && pl.count === 1 && pl.covers.length === 1, 'create one (tidied name), starting with a song');
+  ok(helperCalls('song').length === songsBefore, '… songs the server has already shown need no new lookup');
+  r = await api('POST', `/me/playlists/${pl.id}/tracks`, A3, { trackId: 'rainsounds2' }); ok(r.status === 200 && r.body.added === true && r.body.playlist.count === 2, 'add a song');
+  r = await api('POST', `/me/playlists/${pl.id}/tracks`, A3, { trackId: 'rainsounds2' }); ok(r.body.added === false && r.body.playlist.count === 2, 'adding it again changes nothing');
+  r = await api('POST', `/me/playlists/${pl.id}/tracks`, A3, { trackId: 'deepcut0001' }); ok(r.status === 200 && r.body.playlist.count === 3, 'a song the server hasn’t listed is looked up first');
+  r = await api('POST', `/me/playlists/${pl.id}/tracks`, A3, { trackId: 'nosuchtrack' }); ok(r.status === 404 && r.body.code === 'music_unavailable', 'an unknown song is refused');
+  r = await api('POST', `/me/playlists/${pl.id}/tracks`, A3, { trackId: 'x1' }); ok(r.status === 400, 'so is a malformed id');
+  r = await api('GET', `/me/playlists/${pl.id}`, A3);
+  ok(r.status === 200 && r.body.playlist.tracks.map((x) => x.id).join() === 'nightdrive1,rainsounds2,deepcut0001' && r.body.playlist.tracks[0].title === 'Night Drive' && r.body.playlist.tracks[0].url === 'https://music.youtube.com/watch?v=nightdrive1' && r.body.playlist.tracks[0].artists[0].id === ARTIST && r.body.playlist.tracks[0].albumId === ALBUM, 'it lists its songs in the order added, with artist and album links');
+  r = await api('GET', '/me/playlists', D.token); ok(r.status === 200 && r.body.playlists.length === 0, 'other people never see your playlists');
+  r = await api('GET', `/me/playlists/${pl.id}`, D.token); ok(r.status === 404, '… or open them');
+  r = await api('POST', `/me/playlists/${pl.id}/tracks`, D.token, { trackId: 'nightdrive1' }); ok(r.status === 404, '… or add to them');
+  r = await api('DELETE', `/me/playlists/${pl.id}`, D.token); ok(r.status === 404, '… or delete them');
+  r = await api('PATCH', `/me/playlists/${pl.id}`, A3, { name: 'Summer' }); ok(r.status === 200 && r.body.playlist.name === 'Summer', 'rename it');
+  r = await api('PATCH', `/me/playlists/${pl.id}`, A3, { name: '' }); ok(r.status === 400, '… but not to nothing');
+  r = await api('DELETE', `/me/playlists/${pl.id}/tracks/rainsounds2`, A3); ok(r.status === 200 && r.body.playlist.count === 2, 'remove a song');
+  r = await api('GET', '/me/playlists', A3); ok(r.body.playlists.length === 1 && r.body.playlists[0].name === 'Summer' && r.body.playlists[0].count === 2, 'the list shows it with its new name and size');
+  const filler = []; for (let i = 0; i < 29; i++) filler.push((await api('POST', '/me/playlists', A3, { name: `Filler ${i}` })).status);
+  ok(filler.every((c) => c === 200), 'you can have 30 playlists');
+  r = await api('POST', '/me/playlists', A3, { name: 'One too many' }); ok(r.status === 400, '… and no more');
+  for (const x of (await api('GET', '/me/playlists', A3)).body.playlists.filter((x) => x.name.startsWith('Filler'))) await api('DELETE', `/me/playlists/${x.id}`, A3);
+  r = await api('GET', '/me/playlists', A3); ok(r.body.playlists.length === 1, 'deleting playlists frees the room again');
+
   console.log('\nListening status');
   const w1 = await connect(A3); const w2 = await connect(D.token);
   r = await api('PUT', '/me/listening', A3, { track: { id: 'nightdrive1', title: 'Night Drive' }, duration: 30000, position: 5000 });
-  ok(r.status === 200 && r.body.listening?.title === 'Night Drive' && r.body.listening.artist === 'Test Artist' && r.body.listening.artwork === 'https://i.ytimg.com/vi/nightdrive1/hqdefault.jpg' && r.body.listening.url === 'https://music.youtube.com/watch?v=nightdrive1' && r.body.listening.duration === 30000, 'set what you are listening to');
+  ok(r.status === 200 && r.body.listening?.title === 'Night Drive' && r.body.listening.artist === 'Test Artist' && r.body.listening.artwork === 'https://i.ytimg.com/vi/nightdrive1/hqdefault.jpg' && r.body.listening.url === 'https://music.youtube.com/watch?v=nightdrive1' && r.body.listening.duration === 30000 && r.body.listening.artistId === ARTIST && r.body.listening.albumId === ALBUM, 'set what you are listening to (with the artist and album, so a profile can link to them)');
   const upd = await w2.wait('user_update', (d) => d.user.listening?.title === 'Night Drive', 2000).catch(() => null);
   ok(!!upd && upd.user.listening.artist === 'Test Artist' && upd.user.listening.endsAt > Date.now(), 'people who share a server see it live, with an end time');
   r = await api('GET', `/users/${(await api('GET', '/me', A3)).body.id}`, D.token); ok(r.body.user.listening?.title === 'Night Drive', 'it is on the profile too');
@@ -249,14 +298,15 @@ async function main() {
   w2.ws.close();
 
   console.log('\nRequest budget');
-  await stopServer(); startServer({ MUSIC_API_PER_MIN: '2' }); await ready();
+  await stopServer(); startServer({ MUSIC_API_PER_MIN: '4' }); await ready();
   const before = helperCalls().length;
   r = await api('GET', '/music/search?q=one', A3); const r2 = await api('GET', '/music/search?q=two', A3); r = await api('GET', '/music/search?q=three', A3);
-  ok(r2.status === 200 && r.status === 429 && r.body.code === 'rate_limited' && helperCalls().length === before + 2, 'Orata never sends YouTube more than MUSIC_API_PER_MIN requests a minute, however many people search');
+  ok(r2.status === 200 && r.status === 429 && r.body.code === 'rate_limited' && helperCalls().length === before + 4, 'Orata never sends YouTube more than MUSIC_API_PER_MIN requests a minute, however many people search (a search asks for songs and for artists)');
   r = await api('GET', '/music/search?q=one', A3); ok(r.status === 200, '… and cached searches still work when the budget is used up');
 
   console.log('\nMusic helper trouble');
   await stopServer(); startServer(); await ready();
+  r = await api('GET', '/me/playlists', A3); ok(r.body.playlists.length === 1 && r.body.playlists[0].name === 'Summer' && r.body.playlists[0].count === 2, 'playlists survive a restart');
   r = await api('GET', '/music/search?q=crash', A3); ok(r.status === 502 && r.body.code === 'music_upstream', 'if the helper dies in the middle of a request the person gets an error, not a hang');
   r = await api('GET', '/music/search?q=afterwards', A3); ok(r.status === 200 && r.body.tracks.length === 3, '… and the next search starts it again');
   await stopServer(); startServer({ MUSIC_HELPER: JSON.stringify(['no-such-program-for-orata-tests']) }); await ready();

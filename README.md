@@ -147,6 +147,10 @@ Orata asks the provider for credentials on the server (never from the browser), 
 
 The note icon above Home opens the **Music page** (`/music`): search YouTube Music or browse **categories** — Top Songs, Trending, the popular genres (Pop, Hip-hop, Rock, R&B & soul, Dance & electronic, Latin, K-Pop, Country, Jazz, Classical, Metal …, with the other ~30 behind *More*) and moods (Chill, Focus, Workout, Party, Sleep …) — press play, and what you're listening to shows on your profile (and in friends' *Active Now*) while it plays. A big *Now playing* card with the song's album cover, a mini player above your user bar and your recently played songs are always at hand. It plays **full songs** and needs **no account and no API key**.
 
+**Artists, albums and playlists.** Click an artist's name anywhere on the Music page — or in someone's *Listening to* card on their profile — and their page opens right here in Orata (`/music/artist/<id>`): their picture and banner, listener numbers, their songs, and their **albums, singles and EPs**. Every album opens as its own page (`/music/album/<id>`) with its songs in the album's order, so songs are sorted into their albums wherever you meet them (the album name under a song links to it). A search also finds matching artists. Nothing opens a page on another website.
+
+Make your own **playlists**: the **+** on any song (on a cover, in a list, or on the *Now playing* card) adds it to one of your playlists or starts a new one with it. *Your playlists* on the Music page lists them; each opens (`/music/playlist/<id>`) to play, rename, delete or take songs out of. Playlists belong to your account — **only you can see them** — and the server keeps them (up to 30 playlists of 300 songs each).
+
 Orata finds songs with [ytmusicapi](https://github.com/sigma67/ytmusicapi) (MIT), an unofficial Python library for YouTube Music's public search and charts, and plays them in YouTube's own embedded player. So the **server needs Python 3.10 or newer** — but there is nothing to install by hand: **`npm install` sets it up** (it runs `music-service/install.mjs`, which puts the library into `music-service/vendor`, about 10 seconds). If the machine's own Python is missing or too old, the installer downloads a private Python 3.12 with [uv](https://github.com/astral-sh/uv) (about a minute, ~70 MB, kept in `music-service/python`); if there is no Python with pip at all it skips music and says so. The install never fails over music, and everything else in Orata works without it.
 
 ```bash
@@ -320,7 +324,7 @@ server/
   env.js        .env parsing   db-tool.js  db:import / db:export / db:info
   verify.js     email verification tokens, modes and gating
   sessions.js   sign-in sessions (never expire; in their own Postgres table when DATABASE_URL is set)
-  music.js      YouTube Music search, charts and the "listening to" status, through the Python helper below
+  music.js      YouTube Music search, charts, artist and album pages, your playlists and the "listening to" status, through the Python helper below
   discord.js    the Discord bridge: gateway connection, /link codes, mirroring both ways
   badges.js     profile badges: the catalog, developers (the "dev" badge) and their routes
   automod.js    AutoMod's rules (links, invites, mentions, spam)
@@ -329,7 +333,7 @@ music-service/
   service.py    the music helper: ytmusicapi behind a line-of-JSON-per-request pipe (requirements.txt: the one pip package)
   install.mjs   what `npm install` runs to set it up (the library into vendor/, or a private Python when the system one is too old)
 public/
-  js/           Preact + htm (vendored, no build step), ES modules (rain.js, fx.js: rain, button particles; voice.js / stageview.js: calls and stages; music.js / youtube-player.js: the Music page and YouTube's embedded player)
+  js/           Preact + htm (vendored, no build step), ES modules (rain.js, fx.js: rain, button particles; voice.js / stageview.js: calls and stages; music.js / music-pages.js / youtube-player.js: the Music page, its artist, album and playlist pages, and YouTube's embedded player)
   css/          base · layout · chat · ui · features · settings · auth · extras
   img/rain/     drop textures for the rain effect
   data/         emoji dataset (generated from Emojibase)

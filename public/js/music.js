@@ -1,12 +1,13 @@
 // Orata — music: the Music page (/music, opened from the note icon above Home) with search, categories and a full-song player, a mini player, and the "Listening to" card shown on profiles.
 // The server finds the songs (see server/music.js); the browser plays them in an embedded player that is kept out of sight (see youtube-player.js).
 import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
-import { state, set, useSel, toast, setSetting, go } from '/js/store.js';
+import { state, set, useSel, toast, setSetting, go, closePopover } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Spinner, IconBtn, Toggle } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
 import { createPlayer } from '/js/youtube-player.js';
+import { ArtistLinks, AlbumLink, ArtistView, AlbumView, PlaylistView, PlaylistsSection, openAddMenu, openArtist, back } from '/js/music-pages.js';
 
 const setMusic = (patch) => set({ music: { ...state.music, ...patch } });
 export const openMusic = () => go('/music');
@@ -99,9 +100,9 @@ export const music = {
   },
   async search(q) {
     const query = q.trim(); setMusic({ query });
-    if (!query) { setMusic({ results: null, error: null }); return; }
+    if (!query) { setMusic({ results: null, artists: [], error: null }); return; }
     setMusic({ searching: true, error: null });
-    try { const r = await api.get(`/music/search?q=${encodeURIComponent(query)}`); if (state.music.query === query) setMusic({ results: r.tracks, searching: false }); } catch (e) { if (state.music.query === query) setMusic({ results: [], searching: false, error: e.message }); }
+    try { const r = await api.get(`/music/search?q=${encodeURIComponent(query)}`); if (state.music.query === query) setMusic({ results: r.tracks, artists: r.artists || [], searching: false }); } catch (e) { if (state.music.query === query) setMusic({ results: [], searching: false, error: e.message }); }
   },
 };
 function next(auto) {
@@ -114,8 +115,8 @@ export const stopMusic = (opts) => music.stop(opts);
 setInterval(() => { if (state.music?.playing) syncListening(); }, 20_000);
 
 /* ------------------------------------------------------------------ pieces */
-const clock = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-function Art({ src, size = 44, playing }) {
+export const clock = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+export function Art({ src, size = 44, playing }) {
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [src]);
   return html`<span class=${cx('m-art', playing && 'on')} style=${{ width: size + 'px', height: size + 'px' }}>${src && !broken ? html`<img src=${size <= 64 ? src.replace('=w400-h400', '=w120-h120') : src} alt="" decoding="async" referrerpolicy="no-referrer" draggable=${false} onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${Math.round(size * 0.45)} />`}${playing ? html`<span class="eq sm"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
@@ -139,7 +140,7 @@ function Controls({ big }) {
 }
 
 /** A square cover that scales with its grid cell. */
-function Cover({ src, playing }) {
+export function Cover({ src, playing }) {
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [src]);
   return html`<span class=${cx('m-art cover', playing && 'on')}>${src && !broken ? html`<img src=${src} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable=${false} onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${34} />`}${playing ? html`<span class="eq"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
@@ -155,14 +156,15 @@ function Hero() {
     <div class="mpg-hero-art"><${Cover} src=${track.artwork} playing=${playing} /></div>
     <div class="mpg-now">
       <h2 title=${track.title}>${track.title}</h2>
-      <a class="mpg-artist" href=${track.artistUrl || track.url} target="_blank" rel="noopener noreferrer">${track.artist}</a>
-      ${track.album ? html`<small class="mpg-album">${track.album}</small>` : null}
+      <div class="mpg-artist"><${ArtistLinks} track=${track} /></div>
+      ${track.album ? html`<small class="mpg-album"><${AlbumLink} track=${track} /></small>` : null}
       <${Progress} />
       <${Controls} big=${true} />
       <div class="m-extra">
         <label class="m-vol"><${Icon} name=${volume === 0 ? 'volume-x' : volume < 0.5 ? 'volume-1' : 'volume'} size=${18} />
           <input type="range" min="0" max="1" step="0.01" value=${volume} style=${{ '--p': `${volume * 100}%` }} aria-label=${t('Volume')} onInput=${(e) => music.volume(Number(e.target.value))} /></label>
         <label class="m-share" data-tip=${t('Show what you’re listening to on your profile')}><span>${t('Show on my profile')}</span><${Toggle} checked=${show} onChange=${(v) => { setSetting('privacy.showActivity', v); if (v) setTimeout(() => syncListening(true), 50); }} /></label>
+        <button type="button" class="m-addpl" onClick=${(e) => openAddMenu(e, track)}><${Icon} name="plus" size=${16} sw=${2.4} /> ${t('Add to playlist')}</button>
       </div>
     </div>
   </section>`;
@@ -171,9 +173,12 @@ function Hero() {
 /** Songs as a grid of covers; clicking one plays it (and queues the rest of the grid after it). */
 function TrackGrid({ tracks }) {
   const cur = useSel((s) => s.music.track?.id); const playing = useSel((s) => s.music.playing);
-  return html`<div class="mpg-grid">${tracks.map((tr) => html`<button type="button" key=${tr.id} class=${cx('mpg-card', cur === tr.id && 'cur')} onClick=${() => (cur === tr.id ? music.toggle() : music.play(tr, tracks))} title=${`${tr.title} — ${tr.artist}`}>
-    <span class="mpg-cover"><${Cover} src=${tr.artwork} playing=${cur === tr.id && playing} /><span class="mpg-play"><${Icon} name=${cur === tr.id && playing ? 'pause' : 'play'} size=${20} fill=${true} sw=${1} /></span></span>
-    <b>${tr.title}</b><small>${tr.artist}</small></button>`)}</div>`;
+  return html`<div class="mpg-grid">${tracks.map((tr) => html`<div class="mpg-cell" key=${tr.id}>
+    <button type="button" class=${cx('mpg-card', cur === tr.id && 'cur')} onClick=${() => (cur === tr.id ? music.toggle() : music.play(tr, tracks))} title=${`${tr.title} — ${tr.artist}`}>
+      <span class="mpg-cover"><${Cover} src=${tr.artwork} playing=${cur === tr.id && playing} /><span class="mpg-play"><${Icon} name=${cur === tr.id && playing ? 'pause' : 'play'} size=${20} fill=${true} sw=${1} /></span></span>
+      <b>${tr.title}</b><small>${tr.artist}</small></button>
+    <button type="button" class="mpg-add" data-tip=${t('Add to playlist')} aria-label=${t('Add to playlist')} onClick=${(e) => openAddMenu(e, tr)}><${Icon} name="plus" size=${16} sw=${2.6} /></button>
+  </div>`)}</div>`;
 }
 
 function Categories() {
@@ -203,8 +208,10 @@ function Recent() {
 }
 
 function SearchResults() {
-  const results = useSel((s) => s.music.results); const searching = useSel((s) => s.music.searching); const error = useSel((s) => s.music.error); const query = useSel((s) => s.music.query);
+  const results = useSel((s) => s.music.results); const artists = useSel((s) => s.music.artists); const searching = useSel((s) => s.music.searching); const error = useSel((s) => s.music.error); const query = useSel((s) => s.music.query);
   return html`<section class="mpg-section"><h3>${t('Results for')} “${query}”</h3>
+    ${artists?.length ? html`<div class="mpg-artists">${artists.map((a) => html`<button type="button" key=${a.id} class="mpg-artist-card" onClick=${() => openArtist(a.id)} title=${a.name}>
+      <span class="ar-mini">${a.avatar ? html`<img src=${a.avatar} alt="" loading="lazy" referrerpolicy="no-referrer" draggable=${false} />` : html`<${Icon} name="user" size=${26} />`}</span><b>${a.name}</b><small>${t('Artist')}</small></button>`)}</div>` : null}
     ${searching && !results ? html`<div class="pk-center"><${Spinner} /></div>`
       : error && !results?.length ? html`<div class="m-empty"><${Icon} name="alert-circle" size=${28} /><p>${error}</p></div>`
         : !results?.length ? html`<div class="m-empty"><p>${t('Nothing found. Try another search.')}</p></div>`
@@ -212,24 +219,28 @@ function SearchResults() {
   </section>`;
 }
 
-/** The Music page (`/music`): search, what is playing, categories of top songs and what you played recently. */
+/** The Music page (`/music`): search, what is playing, your playlists, categories of top songs and what you played recently — or, deeper in, an artist's, an album's or a playlist's page. */
 export function MusicPage() {
   const ok = useSel((s) => s.musicOk); const why = useSel((s) => s.musicWhy); const query = useSel((s) => s.music.query);
-  const [q, setQ] = useState(query); const timer = useRef(null);
+  const view = useSel((s) => s.route.musicView); const vid = useSel((s) => s.route.musicId);
+  const [q, setQ] = useState(query); const timer = useRef(null); const scroller = useRef(null);
   useEffect(() => { if (ok !== false) { music.loadGenres(); music.openChart(state.music.category || 'top'); } }, [ok]);
+  useEffect(() => { if (scroller.current) scroller.current.scrollTop = 0; }, [view, vid]);
   const typing = (v) => { setQ(v); clearTimeout(timer.current); timer.current = setTimeout(() => music.search(v), 450); };
-  const searching = !!query.trim();
+  const searching = !!query.trim(); const sub = ok !== false && !!view && !!vid;
   return html`<main class="main panel music-page view-anim">
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
+      ${sub ? html`<button type="button" class="icon-btn m-back" onClick=${back} aria-label=${t('Back')} data-tip=${t('Back')}><${Icon} name="arrow-left" size=${20} /></button>` : null}
       <div class="m-title"><${Icon} name="music" size=${23} /><span class="name">${t('Music')}</span></div>
     </header>
-    <div class="mpg-scroll">
-      ${ok === false ? html`<div class="m-empty setup"><${Icon} name="music" size=${34} sw=${1.5} /><b>${why ? t('Music isn’t set up on this server yet') : t('Music is turned off on this server')}</b><p>${why || t('The server admin switched the music player off.')}</p></div>` : html`
+    <div class="mpg-scroll" ref=${scroller}>
+      ${ok === false ? html`<div class="m-empty setup"><${Icon} name="music" size=${34} sw=${1.5} /><b>${why ? t('Music isn’t set up on this server yet') : t('Music is turned off on this server')}</b><p>${why || t('The server admin switched the music player off.')}</p></div>`
+        : sub ? (view === 'artist' ? html`<${ArtistView} key=${vid} id=${vid} />` : view === 'album' ? html`<${AlbumView} key=${vid} id=${vid} />` : html`<${PlaylistView} key=${vid} id=${vid} />`) : html`
         <div class="mpg-search"><div class="input-wrap"><${Icon} name="search" size=${18} /><input class="input" placeholder=${t('Search songs and artists…')} value=${q} onInput=${(e) => typing(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter') { clearTimeout(timer.current); music.search(q); } }} />
           ${q ? html`<button type="button" class="mpg-clear" aria-label=${t('Clear')} onClick=${() => { setQ(''); clearTimeout(timer.current); music.search(''); }}><${Icon} name="x" size=${16} /></button>` : null}</div></div>
         <${Hero} />
-        ${searching ? html`<${SearchResults} />` : html`<${Categories} /><${Chart} /><${Recent} />`}`}
+        ${searching ? html`<${SearchResults} />` : html`<${PlaylistsSection} /><${Categories} /><${Chart} /><${Recent} />`}`}
     </div>
   </main>`;
 }
@@ -249,13 +260,14 @@ export function MiniPlayer() {
 /** "Listening to music" on a profile. `listening` = { title, artist, artwork, url, duration, startedAt, endsAt } (milliseconds). */
 export function ListeningCard({ listening: l }) {
   const [, tick] = useState(0);
+  const toArtist = (e) => { e.preventDefault(); closePopover(); if (state.modals.length) set({ modals: [] }); openArtist(l.artistId); };
   useEffect(() => { const id = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(id); }, []);
   if (!l || l.endsAt < Date.now()) return null;
   const pos = Math.min(l.duration, Math.max(0, Date.now() - l.startedAt));
   return html`<div class="listening-card">
     <h5><${Icon} name="music" size=${13} /> ${t('Listening to music')}</h5>
     <div class="lc-row"><${Art} src=${l.artwork} size=${60} playing=${true} />
-      <div class="lc-text">${l.url ? html`<a class="lc-title" href=${l.url} target="_blank" rel="noopener noreferrer" title=${l.title}>${l.title}</a>` : html`<b class="lc-title">${l.title}</b>`}<small>${l.artist}</small>
+      <div class="lc-text"><b class="lc-title" title=${l.title}>${l.title}</b><small>${l.artistId ? html`<a class="m-link" href=${`/music/artist/${l.artistId}`} onClick=${toArtist}>${l.artist}</a>` : l.artist}</small>
         <div class="lc-bar"><span>${clock(pos / 1000)}</span><i><b style=${{ width: `${(pos / l.duration) * 100}%` }}></b></i><span>${clock(l.duration / 1000)}</span></div></div></div>
   </div>`;
 }
@@ -263,5 +275,5 @@ export function ListeningCard({ listening: l }) {
 export function myListening() {
   const m = state.music; if (!m?.playing || !m.track) return null;
   const now = Date.now(); const pos = m.position * 1000; const dur = Math.max(1, m.duration || 180) * 1000;
-  return { id: m.track.id, title: m.track.title, artist: m.track.artist, artwork: m.track.artwork, url: m.track.url, duration: dur, startedAt: now - pos, endsAt: now + (dur - pos) };
+  return { id: m.track.id, title: m.track.title, artist: m.track.artist, artistId: m.track.artists?.[0]?.id || null, artwork: m.track.artwork, url: m.track.url, duration: dur, startedAt: now - pos, endsAt: now + (dur - pos) };
 }

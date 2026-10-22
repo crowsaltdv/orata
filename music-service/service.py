@@ -53,6 +53,7 @@ if COUNTRY not in SUPPORTED_LOCATIONS:
 yt = YTMusic(language="en", location=COUNTRY)
 
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+BROWSE_ID = re.compile(r"^[A-Za-z0-9_-]{8,40}$")  # an artist (UC...) or an album (MPREb_...) id
 
 
 class Problem(Exception):
@@ -97,6 +98,16 @@ def artwork(thumbs):
     return url
 
 
+def artist_refs(d):
+    """[{name, id}] — the id is what opens the artist's page (None when YouTube Music has none, e.g. "Various Artists")."""
+    refs = []
+    for a in d.get("artists") or []:
+        if isinstance(a, dict) and a.get("name"):
+            aid = a.get("id")
+            refs.append({"name": str(a["name"])[:60], "id": aid if isinstance(aid, str) and BROWSE_ID.match(aid) else None})
+    return refs[:6]
+
+
 def track(d):
     """One ytmusicapi result (search, playlist, chart or watch-playlist shape) -> what Orata shows, or None when it can't be played."""
     if not isinstance(d, dict):
@@ -108,6 +119,7 @@ def track(d):
     if not names and isinstance(d.get("artist"), str):
         names = [d["artist"]]
     album = d.get("album")
+    album_id = album.get("id") if isinstance(album, dict) and isinstance(album.get("id"), str) and BROWSE_ID.match(album["id"]) else None
     album = album.get("name") if isinstance(album, dict) else album
     secs = d.get("duration_seconds") or seconds(d.get("duration") or d.get("length"))
     return {
@@ -115,6 +127,8 @@ def track(d):
         "title": str(d.get("title") or "Untitled")[:200],
         "artist": ", ".join(names)[:100] or "Unknown artist",
         "album": str(album)[:120] if album else None,
+        "albumId": album_id,
+        "artists": artist_refs(d) or ([{"name": names[0], "id": None}] if names else []),
         "artwork": artwork(d.get("thumbnails") or d.get("thumbnail")),
         "url": f"https://music.youtube.com/watch?v={vid}",
         "duration": int(secs * 1000) if secs else 0,
@@ -315,7 +329,120 @@ def op_song(p):
     return with_covers([found])[0]
 
 
-OPS = {"search": op_search, "categories": op_categories, "category": op_category, "song": op_song, "ping": lambda p: "pong"}
+def album_cards(items, kind):
+    """Albums, EPs and singles of an artist as small cards."""
+    cards = []
+    for it in items or []:
+        bid = it.get("browseId") if isinstance(it, dict) else None
+        if not isinstance(bid, str) or not BROWSE_ID.match(bid):
+            continue
+        cards.append({
+            "id": bid,
+            "title": str(it.get("title") or "Untitled")[:120],
+            "year": (str(it.get("year") or "")[:4] or None),
+            "type": str(it.get("type") or kind)[:20],
+            "artwork": artwork(it.get("thumbnails")),
+        })
+    return cards
+
+
+def artist_albums(a, cid, section):
+    sec = a.get(section) or {}
+    items = list(sec.get("results") or [])
+    if sec.get("params"):  # the artist has more than the few shown on their page
+        try:
+            items = yt.get_artist_albums(cid, sec["params"], limit=40) or items
+        except Exception:  # noqa: BLE001 - the few on the page are still good
+            pass
+    return items
+
+
+def op_artist(p):
+    cid = str(p.get("browseId") or "")
+    if not BROWSE_ID.match(cid):
+        raise Problem("Unknown artist", "bad_request")
+    try:
+        a = yt.get_artist(cid)
+    except Exception:  # noqa: BLE001 - an id that isn't an artist makes YouTube answer with an error page
+        raise Problem("That artist isn’t available.", "unavailable")
+    sec = a.get("songs") or {}
+    songs = []
+    try:
+        if sec.get("browseId"):  # every song of theirs, not just the few on the page
+            songs = tracks_of(yt.get_playlist(sec["browseId"], limit=40).get("tracks") or [], 40)
+    except Exception:  # noqa: BLE001
+        songs = []
+    if not songs:
+        songs = tracks_of(sec.get("results") or [], 40)
+    avatar = None  # the page itself only has a wide banner: the square picture is on their search card
+    try:
+        for r in yt.search(str(a.get("name") or ""), filter="artists", limit=6):
+            if r.get("browseId") == cid:
+                avatar = artwork(r.get("thumbnails"))
+                break
+    except Exception:  # noqa: BLE001
+        pass
+    wide = [t for t in (a.get("thumbnails") or []) if isinstance(t, dict) and t.get("url")]
+    banner = max(wide, key=lambda t: t.get("width") or 0)["url"] if wide else None
+    return {
+        "id": cid,
+        "name": str(a.get("name") or "Unknown artist")[:100],
+        "description": str(a.get("description") or "")[:700],
+        "subscribers": str(a.get("subscribers") or "")[:20] or None,
+        "listeners": str(a.get("monthlyListeners") or "")[:30] or None,
+        "avatar": avatar,
+        "banner": banner,
+        "songs": with_covers(songs),
+        "albums": album_cards(artist_albums(a, cid, "albums"), "Album"),
+        "singles": album_cards(artist_albums(a, cid, "singles"), "Single"),
+    }
+
+
+def op_album(p):
+    bid = str(p.get("browseId") or "")
+    if not BROWSE_ID.match(bid):
+        raise Problem("Unknown album", "bad_request")
+    try:
+        al = yt.get_album(bid)
+    except Exception:  # noqa: BLE001
+        raise Problem("That album isn’t available.", "unavailable")
+    cover = artwork(al.get("thumbnails"))
+    title = str(al.get("title") or "Album")[:120]
+    songs = []
+    for it in al.get("tracks") or []:
+        if not isinstance(it, dict):
+            continue
+        t = track({**it, "album": {"name": title, "id": bid}, "artists": it.get("artists") or al.get("artists"), "thumbnails": al.get("thumbnails")})
+        if t:  # the songs sorted into this album, in its order
+            t["artwork"] = cover or t["artwork"]
+            songs.append(t)
+    secs = al.get("duration_seconds")
+    return {
+        "id": bid,
+        "title": title,
+        "type": str(al.get("type") or "Album")[:20],
+        "year": (str(al.get("year") or "")[:4] or None),
+        "artists": artist_refs(al),
+        "artwork": cover,
+        "duration": int(secs * 1000) if secs else sum(t["duration"] for t in songs),
+        "tracks": songs,
+    }
+
+
+def op_artists(p):
+    """Artists matching a search, as small cards (a picture and a name) that open their page."""
+    q = str(p.get("q") or "").strip()[:100]
+    if not q:
+        raise Problem("Type something to search for", "bad_request")
+    cards = []
+    for r in yt.search(q, filter="artists", limit=6):
+        aid = r.get("browseId")
+        if isinstance(aid, str) and BROWSE_ID.match(aid) and r.get("artist"):
+            cards.append({"id": aid, "name": str(r["artist"])[:100], "avatar": artwork(r.get("thumbnails"))})
+    return cards[:5]
+
+
+OPS = {"search": op_search, "categories": op_categories, "category": op_category, "song": op_song, "artist": op_artist, "artists": op_artists, "album": op_album, "ping": lambda p: "pong"}
 
 
 def handle(line):

@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { ENV, ROOT, db, save, emitTo, relatedUserIds, publicUser, selfUser, ApiError, bad, notFound } from './core.js';
+import { ENV, ROOT, db, save, emitTo, relatedUserIds, publicUser, selfUser, ApiError, bad, notFound, newId } from './core.js';
 
 const COUNTRY = (String(ENV.MUSIC_COUNTRY || 'US').trim().toUpperCase().match(/^[A-Z]{2}$/) || ['US'])[0];
 const PER_MIN = Math.max(1, Number(ENV.MUSIC_API_PER_MIN) || 40);
@@ -27,6 +27,8 @@ const needEnabled = () => {
 
 const TRACK_ID = /^[A-Za-z0-9_-]{11}$/;   // a YouTube video id
 const ART_HOST = /(^|\.)(googleusercontent\.com|ggpht\.com|ytimg\.com)$/i;
+const REF_ID = /^[A-Za-z0-9_-]{8,40}$/;   // an artist or album id
+const artistRefs = (list) => (Array.isArray(list) ? list : []).filter((a) => a && typeof a.name === 'string' && a.name).slice(0, 6).map((a) => ({ name: a.name.slice(0, 60), id: typeof a.id === 'string' && REF_ID.test(a.id) ? a.id : null }));
 const artUrl = (v) => { try { const u = new URL(String(v)); return u.protocol === 'https:' && ART_HOST.test(u.hostname) && !net.isIP(u.hostname) ? u.href : null; } catch { return null; } };
 
 /* ------------------------------------------------------------ the helper process */
@@ -133,6 +135,8 @@ const songView = (d) => {
   const id = String(d.id ?? ''); if (!TRACK_ID.test(id)) return null;
   return {
     id, title: String(d.title || 'Untitled').slice(0, 200), artist: String(d.artist || 'Unknown artist').slice(0, 100), album: String(d.album || '').slice(0, 120) || null,
+    albumId: typeof d.albumId === 'string' && REF_ID.test(d.albumId) ? d.albumId : null,   // what links to the artist's and the album's page in Orata
+    artists: artistRefs(d.artists).length ? artistRefs(d.artists) : [{ name: String(d.artist || 'Unknown artist').slice(0, 60), id: null }],
     artwork: artUrl(d.artwork), url: `https://music.youtube.com/watch?v=${id}`,
     duration: Math.max(0, Math.round(Number(d.duration) || 0)), explicit: d.explicit === true,
   };
@@ -150,6 +154,7 @@ async function memo(key, ttl, load) {
   return value;
 }
 const search = (q) => memo(`s:${q.toLowerCase()}`, 10 * 60_000, async () => views(await upstream('search', { q, limit: 24 })));
+const searchArtists = (q) => memo(`sa:${q.toLowerCase()}`, 10 * 60_000, async () => (await upstream('artists', { q })).filter((a) => a && REF_ID.test(String(a.id))).slice(0, 5).map((a) => ({ id: String(a.id), name: String(a.name || '').slice(0, 100), avatar: artUrl(a.avatar) })));
 const KEY = /^[a-z0-9-]{1,60}$/;
 const categories = () => memo('categories', 6 * 3600_000, async () => (await upstream('categories')).filter((c) => c && KEY.test(c.key)).map((c) => ({ key: c.key, name: String(c.name || c.key).slice(0, 40), group: c.group === 'genre' || c.group === 'mood' ? c.group : 'chart' })));
 async function chart(key) {
@@ -163,6 +168,42 @@ async function trackInfo(id) {
   return remember(t);
 }
 
+/* ------------------------------------------------------------ artist and album pages */
+const text = (v, max) => String(v ?? '').slice(0, max);
+const albumCard = (c) => (c && REF_ID.test(String(c.id)) ? { id: String(c.id), title: text(c.title || 'Untitled', 120), year: /^\d{4}$/.test(String(c.year)) ? String(c.year) : null, type: text(c.type || 'Album', 20), artwork: artUrl(c.artwork) } : null);
+/** The helper's artist page → what the app shows. The songs are remembered like any other list, so adding one to a playlist later needs no lookup. */
+const artistView = (d) => (!d || !REF_ID.test(String(d.id)) ? null : {
+  id: String(d.id), name: text(d.name || 'Unknown artist', 100), description: text(d.description, 700), subscribers: text(d.subscribers, 20) || null, listeners: text(d.listeners, 30) || null,
+  avatar: artUrl(d.avatar), banner: artUrl(d.banner), songs: views(d.songs),
+  albums: (Array.isArray(d.albums) ? d.albums : []).map(albumCard).filter(Boolean), singles: (Array.isArray(d.singles) ? d.singles : []).map(albumCard).filter(Boolean),
+});
+const albumView = (d) => (!d || !REF_ID.test(String(d.id)) ? null : {
+  id: String(d.id), title: text(d.title || 'Album', 120), type: text(d.type || 'Album', 20), year: /^\d{4}$/.test(String(d.year)) ? String(d.year) : null,
+  artists: artistRefs(d.artists), artwork: artUrl(d.artwork), duration: Math.max(0, Math.round(Number(d.duration) || 0)), tracks: views(d.tracks),
+});
+const artist = (id) => memo(`artist:${id}`, 30 * 60_000, async () => {
+  const v = artistView(await upstream('artist', { browseId: id })); if (!v) throw new ApiError(404, 'That artist isn’t available.', 'music_unavailable'); return v;
+});
+const album = (id) => memo(`album:${id}`, 30 * 60_000, async () => {
+  const v = albumView(await upstream('album', { browseId: id })); if (!v) throw new ApiError(404, 'That album isn’t available.', 'music_unavailable'); return v;
+});
+
+/* ------------------------------------------------------------ playlists (private to their owner, kept with the account) */
+const MAX_PLAYLISTS = 30; const MAX_PLAYLIST_TRACKS = 300;
+const playlistsOf = (u) => (u.playlists ||= []);
+const playlistName = (v) => { const n = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 60); if (!n) throw bad('Give the playlist a name'); return n; };
+const findPlaylist = (u, id) => { const p = playlistsOf(u).find((x) => x.id === String(id)); if (!p) throw notFound('That playlist doesn’t exist'); return p; };
+const playlistSummary = (p) => ({ id: p.id, name: p.name, count: p.tracks.length, covers: p.tracks.map((t) => t.artwork).filter(Boolean).slice(0, 4), updatedAt: p.updatedAt });
+/** A playlist keeps its own copy of each song's details (from the server's own lookup, never from the client), so it shows without asking YouTube again. */
+const keep = ({ id, title, artist, artists, album, albumId, artwork, duration, explicit }) => ({ id, title, artist, artists, album, albumId, artwork, duration, explicit });
+async function addToPlaylist(p, trackId) {
+  const id = String(trackId ?? ''); if (!TRACK_ID.test(id)) throw bad('Unknown track');
+  if (p.tracks.some((t) => t.id === id)) return false;
+  if (p.tracks.length >= MAX_PLAYLIST_TRACKS) throw bad(`A playlist holds up to ${MAX_PLAYLIST_TRACKS} songs`);
+  p.tracks.push(keep(await trackInfo(id))); p.updatedAt = Date.now();
+  return true;
+}
+
 /* ------------------------------------------------------------ "Listening to" */
 const clamp = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : d; };
 /** The player reports which track, how long it is and where it is; title, artist, artwork and link are YouTube Music's, via the server. */
@@ -173,7 +214,7 @@ async function cleanListening(body) {
   const duration = clamp(body.duration, 1000, 6 * 3600_000, t.duration || 180_000);
   const position = clamp(body.position, 0, duration, 0);
   const now = Date.now();
-  return { id, title: t.title, artist: t.artist, artwork: t.artwork, url: t.url, duration, startedAt: now - position, endsAt: now + (duration - position) };
+  return { id, title: t.title, artist: t.artist, artistId: t.artists?.[0]?.id || null, albumId: t.albumId || null, artwork: t.artwork, url: t.url, duration, startedAt: now - position, endsAt: now + (duration - position) };
 }
 export function setListening(u, value) {
   u.listening = value || null; save();
@@ -187,7 +228,8 @@ export function mountMusic(r, { h, limit }) {
     needEnabled();
     const q = String(req.query.q || '').trim().slice(0, 100);
     if (!q) throw bad('Type something to search for');
-    res.json({ tracks: await search(q) });
+    const [tracks, artists] = await Promise.all([search(q), searchArtists(q).catch(() => [])]);   // artists are a bonus: a hiccup there never hides the songs
+    res.json({ tracks, artists });
   }));
   r.get('/music/charts', h(async (req, res) => { needEnabled(); res.json({ genres: await categories() }); }));
   r.get('/music/charts/:key', limit('musicchart', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
@@ -195,6 +237,51 @@ export function mountMusic(r, { h, limit }) {
     const key = String(req.params.key);
     if (key !== 'top' && key !== 'trending' && !(await categories()).some((c) => c.key === key)) throw notFound('Unknown category');
     res.json({ key, tracks: await chart(key) });
+  }));
+  r.get('/music/artists/:id', limit('musicpage', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
+    needEnabled();
+    const id = String(req.params.id); if (!REF_ID.test(id)) throw bad('Unknown artist');
+    res.json({ artist: await artist(id) });
+  }));
+  r.get('/music/albums/:id', limit('musicpage', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
+    needEnabled();
+    const id = String(req.params.id); if (!REF_ID.test(id)) throw bad('Unknown album');
+    res.json({ album: await album(id) });
+  }));
+
+  /* ---- your playlists */
+  const lim = limit('playlists', 120, 60_000, (req) => req.user.id);
+  r.get('/me/playlists', h(async (req, res) => { res.json({ playlists: playlistsOf(req.user).map(playlistSummary) }); }));
+  r.post('/me/playlists', lim, h(async (req, res) => {
+    const list = playlistsOf(req.user); if (list.length >= MAX_PLAYLISTS) throw bad(`You can have up to ${MAX_PLAYLISTS} playlists`);
+    const p = { id: newId(), name: playlistName(req.body?.name), tracks: [], createdAt: Date.now(), updatedAt: Date.now() };
+    if (req.body?.trackId !== undefined) await addToPlaylist(p, req.body.trackId);   // "New playlist" from a song's + button starts with that song
+    list.push(p); save();
+    res.json({ playlist: playlistSummary(p) });
+  }));
+  r.get('/me/playlists/:id', h(async (req, res) => {
+    const p = findPlaylist(req.user, req.params.id);
+    res.json({ playlist: { ...playlistSummary(p), tracks: p.tracks.map(songView).filter(Boolean) } });
+  }));
+  r.patch('/me/playlists/:id', lim, h(async (req, res) => {
+    const p = findPlaylist(req.user, req.params.id); p.name = playlistName(req.body?.name); p.updatedAt = Date.now(); save();
+    res.json({ playlist: playlistSummary(p) });
+  }));
+  r.delete('/me/playlists/:id', lim, h(async (req, res) => {
+    const list = playlistsOf(req.user); const p = findPlaylist(req.user, req.params.id);
+    list.splice(list.indexOf(p), 1); save();
+    res.json({ ok: true });
+  }));
+  r.post('/me/playlists/:id/tracks', lim, h(async (req, res) => {
+    const p = findPlaylist(req.user, req.params.id);
+    const added = await addToPlaylist(p, req.body?.trackId); if (added) save();
+    res.json({ added, playlist: playlistSummary(p) });
+  }));
+  r.delete('/me/playlists/:id/tracks/:trackId', lim, h(async (req, res) => {
+    const p = findPlaylist(req.user, req.params.id); const before = p.tracks.length;
+    p.tracks = p.tracks.filter((t) => t.id !== String(req.params.trackId));
+    if (p.tracks.length !== before) { p.updatedAt = Date.now(); save(); }
+    res.json({ playlist: playlistSummary(p) });
   }));
   r.put('/me/listening', limit('listening', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
     const value = await cleanListening(req.body);

@@ -18,7 +18,7 @@ export const state = {
   settings: deepMerge(DEFAULT_SETTINGS, migrateSettings(ls('settings', {}))),
   local: deepMerge(DEFAULT_LOCAL, ls('local', {})),
   focused: document.hasFocus(), idle: false, width: window.innerWidth, mobileNav: false,
-  music: { genres: null, category: 'top', charts: {}, chartLoading: false, chartError: null, recent: ls('musicRecentYT', []) || [], query: '', results: null, searching: false, error: null, queue: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7 }, musicOk: null, postIndex: {}, postLists: {},
+  music: { genres: null, category: 'top', charts: {}, chartLoading: false, chartError: null, recent: ls('musicRecentYT', []) || [], playlists: null, artists: [], query: '', results: null, searching: false, error: null, queue: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7 }, musicOk: null, postIndex: {}, postLists: {},
   gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, replyTo: null, editing: null, searchQuery: '', speaking: {},
 };
 state.panel = state.local.panel;
@@ -178,7 +178,8 @@ export function parseRoute(path) {
   if ((m = p.match(/^\/channels\/(\d+)\/(\d+)$/))) return { view: 'channel', serverId: m[1], channelId: m[2] };
   if ((m = p.match(/^\/channels\/(\d+)$/))) return { view: 'channel', serverId: m[1], channelId: null };
   if ((m = p.match(/^\/invite\/([\w-]+)$/))) return { view: 'invite', serverId: '@me', channelId: null, param: m[1] };
-  if (p === '/music') return { view: 'music', serverId: '@me', channelId: null };
+  if ((m = p.match(/^\/music\/(artist|album|playlist)\/([\w-]+)$/))) return { view: 'music', serverId: '@me', channelId: null, musicView: m[1], musicId: m[2] };   // an artist's, an album's or one of your playlists' page
+  if (p === '/music') return { view: 'music', serverId: '@me', channelId: null, musicView: null, musicId: null };
   if (p === '/staff') return { view: 'staff', serverId: '@me', channelId: null };   // Orata staff tools (staff.js)
   if (p === '/login' || p === '/register') return { view: p.slice(1), serverId: '@me', channelId: null };
   if (p === '/verify') return { view: 'verify', serverId: '@me', channelId: null };   // the link in the verification email (the token is read from the query string)
@@ -188,7 +189,7 @@ export function routePath(r) {
   switch (r.view) {
     case 'dm': return `/channels/@me/${r.channelId}`;
     case 'friends': return '/channels/@me';
-    case 'music': return '/music';
+    case 'music': return r.musicView && r.musicId ? `/music/${r.musicView}/${r.musicId}` : '/music';
     case 'staff': return '/staff';
     case 'channel': return r.channelId ? `/channels/${r.serverId}/${r.channelId}` : `/channels/${r.serverId}`;
     default: return '/channels/@me';
