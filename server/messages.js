@@ -1,11 +1,15 @@
 // Orata — message creation shared by the REST API and the built-in bot.
 import { db, newId, save, emitTo, audienceOf, messageView, publicUser, canIn, channelView, customEmojisIn, postView, removeUpload } from './core.js';
 
-export const hooks = { onMessage: [], onEdit: [], onDelete: [] };   // onDelete gets (channel, ids)
+export const hooks = { onMessage: [], onEdit: [], onDelete: [], onJoin: [], onLeave: [], onReact: [] };   // onDelete gets (channel, ids); onJoin / onLeave (server, user id); onReact (channel, message, emoji, user id, added)
 const run = (list, ...args) => { for (const fn of list) { try { fn(...args); } catch (e) { console.error('[hook]', e); } } };
 /** Tells the hooks (the Discord bridge) that a message was edited, or that messages were deleted. */
 export const messageEdited = (ch, m) => run(hooks.onEdit, ch, m);
 export const messagesDeleted = (ch, ids) => { if (ids.length) run(hooks.onDelete, ch, ids); };
+/** Tells the hooks (Orbit's welcome messages, member count…) that someone joined or left a server, or reacted to a message. */
+export const memberJoined = (s, uid) => run(hooks.onJoin, s, uid);
+export const memberLeft = (s, uid) => run(hooks.onLeave, s, uid);
+export const messageReacted = (ch, m, emoji, uid, add) => run(hooks.onReact, ch, m, emoji, uid, add);
 /** Audio messages (recorded, or an audio file dropped in) are at most 3 minutes long and delete themselves a day after they are sent. */
 export const VOICE_MAX_SECONDS = 180;
 export const VOICE_TTL = 86400_000;

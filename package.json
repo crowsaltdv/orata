@@ -10,7 +10,7 @@
     "music:update": "node music-service/install.mjs --upgrade",
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node server/selftest.js && node server/selftest-features.js && node server/selftest-community.js && node server/selftest-discord.js && node server/selftest-staff.js && node server/selftest-email.js && node server/selftest-pg.js",
+    "test": "node server/selftest.js && node server/selftest-features.js && node server/selftest-community.js && node server/selftest-discord.js && node server/selftest-staff.js && node server/selftest-orbit.js && node server/selftest-email.js && node server/selftest-pg.js",
     "reset-password": "node server/reset-password.js",
     "verify-email": "node server/verify-user.js",
     "test-mail": "node server/test-mail.js",

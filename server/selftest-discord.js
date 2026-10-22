@@ -1,7 +1,7 @@
 // Orata Discord-bridge self-test (runs with the other suites):  npm test
 // Starts a fake Discord (its API and its gateway WebSocket) and an Orata server pointed at it, then links a channel and sends messages,
 // pictures, edits, deletes and replies both ways, catches up after a restart, and unlinks. Then moves a Discord server's roles, channels and emoji
-// into Orata with /transfer (Orata developers only).
+// into Orata with /transfer.
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import os from 'node:os';
@@ -241,16 +241,14 @@ async function main() {
   const log = (await api('GET', `/servers/${S.id}/audit-log?action=discord_`, A.token)).body.entries;
   ok(log.length === 2 && log.some((e) => e.action === 'discord_link' && e.actorId === A.user.id), 'linking and unlinking are in the audit log');
 
-  console.log('\nMoving a Discord server into Orata (Orata developers only)');
-  r = await cmd(A.token, 'transfer'); ok(r.status === 400 && /doesn’t know/.test(r.body.error), 'for everyone else /transfer doesn’t exist…');
-  r = await cmd(A.token, 'help'); ok(r.status === 200 && !r.body.ephemeral.includes('/transfer'), '… and isn’t in /help');
-  await stopServer();
-  { const j = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8')); j.users[A.user.id].badges = ['dev']; fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(j)); }
-  calls.length = 0; identify = null; startServer(); await ready(); await until(() => identify);
+  console.log('\nMoving a Discord server into Orata');
+  r = await cmd(B.token, 'transfer'); ok(r.status === 403, 'a member without Manage Server can’t /transfer');
+  r = await cmd(A.token, 'help'); ok(r.status === 200 && r.body.ephemeral.includes('/transfer'), 'admins see /transfer in /help');
+  calls.length = 0; identify = null; await stopServer(); startServer(); await ready(); await until(() => identify);   // a restart, to see the commands Discord gets
   const put3 = await until(() => calls.find((c) => c.method === 'PUT' && c.path === '/api/applications/900/commands'));
   ok(put3?.body.some((c) => c.name === 'transfer' && c.default_member_permissions === '32' && c.options[0].required), 'Discord gets /transfer code:…, shown only to people who can manage the server');
   const moveCode = async (chId) => /code:([A-Z0-9]{4}-[A-Z0-9]{4})/.exec((await api('POST', `/channels/${chId}/command`, A.token, { name: 'transfer', args: '' })).body?.ephemeral || '')?.[1];
-  const code1 = await moveCode(text.id); ok(!!code1, 'an Orata developer gets a one-time code from Orbit');
+  const code1 = await moveCode(text.id); ok(!!code1, 'an admin gets a one-time code from Orbit');
   const openForm = async (c, extra = {}) => { calls.length = 0; dispatch('INTERACTION_CREATE', interaction({ ...extra, data: { name: 'transfer', options: [{ name: 'code', value: c }] } })); await sleep(300); return until(() => [...calls].reverse().find((x) => x.path.startsWith('/api/interactions/') && [4, 9].includes(x.body?.type))); };
   let form = await openForm(code1, { member: { permissions: '0', user: { id: '1008', username: 'rando' } } });
   ok(form?.body.type === 4 && /Manage Server/.test(form.body.data.content), 'on Discord it needs Manage Server');

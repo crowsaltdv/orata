@@ -22,7 +22,27 @@ export const ORBIT_COMMANDS = [
   { name: 'link', desc: 'Link this channel with a Discord channel', perm: 'MANAGE_SERVER', only: true, discord: true },
   { name: 'link-instructions', desc: 'How linking with Discord works and what comes across', only: true, discord: true },
   { name: 'unlink', desc: 'Stop mirroring this channel with Discord', perm: 'MANAGE_SERVER', discord: true },
-  { name: 'transfer', desc: 'Move roles, channels and emoji from a Discord server into this one', perm: 'MANAGE_SERVER', only: true, discord: true, dev: true },   // dev: Orata developers only, hidden from everyone else
+  { name: 'transfer', desc: 'Move roles, channels and emoji from a Discord server into this one', perm: 'MANAGE_SERVER', only: true, discord: true },
+  // what Discord servers add other bots for (server/orbit-plus.js)
+  { name: 'counting', desc: 'Make a counting channel (or turn it off)', arg: '[#channel | off]', perm: 'MANAGE_CHANNELS', only: true },
+  { name: 'welcome', desc: 'Greet people who join', arg: '[#channel] message with {user} | off', perm: 'MANAGE_SERVER', only: true },
+  { name: 'goodbye', desc: 'Say something when people leave', arg: '[#channel] message with {name} | off', perm: 'MANAGE_SERVER', only: true },
+  { name: 'autorole', desc: 'Give everyone who joins a role', arg: '@role | off', perm: 'MANAGE_ROLES', only: true },
+  { name: 'levels', desc: 'XP and levels for chatting, and roles for reaching them', arg: 'on | off | channel #channel | reward 5 @role', perm: 'MANAGE_SERVER', only: true },
+  { name: 'rank', desc: 'Your level and XP (or someone else’s)', arg: '[@member]', only: true },
+  { name: 'leaderboard', desc: 'Who has the most XP here' },
+  { name: 'giveaway', desc: 'Start a giveaway people enter with 🎉 (or end one now)', arg: '1h [winners] prize | end', perm: 'MANAGE_MESSAGES' },
+  { name: 'starboard', desc: 'Repost messages that get enough ⭐ reactions', arg: '[#channel] [stars] | off', perm: 'MANAGE_SERVER', only: true },
+  { name: 'ticket', desc: 'Open a private channel with the server’s staff', arg: '[what it’s about]', only: true },
+  { name: 'close', desc: 'Close this ticket', only: true },
+  { name: 'warn', desc: 'Warn a member', arg: '@member [reason]', perm: 'MODERATE_MEMBERS' },
+  { name: 'warnings', desc: 'See a member’s warnings', arg: '@member', perm: 'MODERATE_MEMBERS', only: true },
+  { name: 'clearwarnings', desc: 'Clear a member’s warnings', arg: '@member', perm: 'MODERATE_MEMBERS', only: true },
+  { name: 'tag', desc: 'Post a saved reply (or add / remove one)', arg: 'name | add name text | remove name' },
+  { name: 'suggest', desc: 'Suggest an idea for people to vote on', arg: 'idea' },
+  { name: 'suggestions', desc: 'Pick the channel suggestions go to', arg: '#channel | off', perm: 'MANAGE_SERVER', only: true },
+  { name: 'membercount', desc: 'A channel that shows how many members there are', arg: '[off]', perm: 'MANAGE_CHANNELS', only: true },
+  { name: 'slowmode', desc: 'Slow this channel down', arg: '10s | off', perm: 'MANAGE_CHANNELS', only: true },
 ];
 export const orbitCommand = (name) => ORBIT_COMMANDS.find((c) => c.name === String(name || '').toLowerCase()) || null;
 

@@ -11,7 +11,6 @@ import WebSocket from 'ws';
 import sharp from 'sharp';
 import { db, save, ENV, UPLOAD_DIR, newId, emitTo, audienceOf, messageView, storeUpload, restoreUpload, removeUpload, audit, bad, can, serverView, serverAudience, sanitizeOverwrites } from './core.js';
 import { hooks, postMessage } from './messages.js';
-import { isDev } from './badges.js';
 
 const TOKEN = (ENV.DISCORD_BOT_TOKEN || '').trim();
 export const discordOn = !!TOKEN;
@@ -127,11 +126,12 @@ async function dispatch(t, d) {
 const COMMANDS = [
   { name: 'orata-link', description: 'Link this channel with an Orata channel', options: [{ type: 3, name: 'code', description: 'The code Orbit gives you when you type /link in the Orata channel', required: true }] },
   { name: 'orata-unlink', description: 'Stop mirroring this channel with Orata' },
-  { name: 'transfer', description: 'Move roles, channels and emoji from this server into Orata', options: [{ type: 3, name: 'code', description: 'The code Orbit gives an Orata developer for /transfer', required: true }] },
+  { name: 'transfer', description: 'Move roles, channels and emoji from this server into Orata', options: [{ type: 3, name: 'code', description: 'The code Orbit gives you when you type /transfer in the Orata server', required: true }] },
 ].map((c) => ({ ...c, type: 1, default_member_permissions: String(MANAGE_GUILD), contexts: [0] }));   // only people who can manage the server see them, only in servers
 async function registerCommands() {
   const have = await rest('GET', `/applications/${bot.appId}/commands`);
-  const same = have.length === COMMANDS.length && COMMANDS.every((c) => have.some((x) => x.name === c.name && x.description === c.description && x.default_member_permissions === c.default_member_permissions && (x.options || []).length === (c.options || []).length));
+  const same = have.length === COMMANDS.length && COMMANDS.every((c) => have.some((x) => x.name === c.name && x.description === c.description && x.default_member_permissions === c.default_member_permissions
+    && JSON.stringify((x.options || []).map((o) => [o.name, o.description])) === JSON.stringify((c.options || []).map((o) => [o.name, o.description]))));
   if (!same) await rest('PUT', `/applications/${bot.appId}/commands`, COMMANDS);
 }
 
@@ -238,7 +238,7 @@ async function onCommand(i) {
 }
 
 /* ---------------------------------------------------------------- moving a Discord server into Orata
- * Orata developers only for now. /transfer with Orbit (in the Orata server to move into) gives a one-time code; /transfer code:… in the Discord
+ * /transfer with Orbit (in the Orata server to move into) gives a one-time code; /transfer code:… in the Discord
  * server opens a form (whole server, or all / picked roles and channels, emoji, name and icon) and the bot copies what was picked. Channel
  * permissions only come across for roles that are moved too (or already exist here by the same name). Messages and members don't move. */
 const moves = new Map();   // one-time transfer codes: code -> { serverId, userId, at }
@@ -251,7 +251,7 @@ const CHANNEL_TYPES = { 0: 'text', 5: 'text', 2: 'voice', 13: 'stage', 4: 'categ
 const CDN = ENV.DISCORD_API ? new URL(API).origin : 'https://cdn.discordapp.com';   // the self-test's fake Discord serves the pictures
 const WHAT = [['all', 'Whole server', 'Every role, channel and emoji, plus the name and icon'], ['roles', 'All roles'], ['channels', 'All channels'], ['emojis', 'All emoji'], ['identity', 'Server name and icon']];
 
-/** /transfer with Orbit: a one-time code (30 minutes) for /transfer in the Discord server. Returns what Orbit tells the developer. */
+/** /transfer with Orbit: a one-time code (30 minutes) for /transfer in the Discord server. Returns what Orbit tells whoever asked. */
 export function transferCode(s, userId) {
   if (!TOKEN) throw bad('Moving a Discord server needs the Discord bot: DISCORD_BOT_TOKEN isn’t set on this Orata server.');
   if (bot.error) throw bad(`The Discord bot can’t log in right now: ${bot.error}.`);
@@ -259,7 +259,7 @@ export function transferCode(s, userId) {
   const code = Array.from(crypto.randomBytes(8), (b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
   moves.set(code, { serverId: s.id, userId, at: Date.now() });
   const invite = inviteUrl();
-  return [`**🚚 Move a Discord server into ${s.name}** (only Orata developers can do this for now)`,
+  return [`**🚚 Move a Discord server into ${s.name}**`,
     `In the Discord server, type \`/transfer code:${code.slice(0, 4)}-${code.slice(4)}\` (it needs the **Manage Server** permission there). A form opens where you pick what to move: the whole server, or roles, channels, emoji and the name and icon.`,
     'Channel permissions for custom roles only come across if you move those roles too. Messages and members don’t move.',
     'The code works once, for 30 minutes.', ...(invite ? [`Is the Orata bot not in that Discord server yet? [Add it here](${invite}) first.`] : []), ...(offline() ? [offline()] : [])].join('\n');
@@ -273,7 +273,7 @@ async function moveForm(i) {
   if (!(BigInt(i.member?.permissions || 0) & (MANAGE_GUILD | ADMINISTRATOR))) return no('You need the **Manage Server** permission to do that.');
   const code = String(i.data.options?.find((o) => o.name === 'code')?.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const m = moves.get(code); const s = m && db.servers[m.serverId];
-  if (!s || Date.now() - m.at > MOVE_TTL) return no('That code isn’t valid or has run out. An Orata developer gets one by typing **/transfer** with Orbit in the Orata server to move into.');
+  if (!s || Date.now() - m.at > MOVE_TTL) return no('That code isn’t valid or has run out. Get one by typing **/transfer** with Orbit in the Orata server to move into.');
   const intro = { type: 10, content: `Moving into **${s.name}** on Orata. Pick **Whole server**, or what to bring and (if not all) which ones.\n-# Channel permissions for custom roles only come across if you move those roles too. Messages and members don’t move.` };
   try {
     await callback({ type: 9, data: { custom_id: `transfer:${code}`, title: 'Move this server to Orata', components: [intro,
@@ -296,7 +296,7 @@ async function moveSubmit(i) {
   if (!(BigInt(i.member?.permissions || 0) & (MANAGE_GUILD | ADMINISTRATOR))) return reply('You need the **Manage Server** permission to do that.');
   const code = i.data.custom_id.slice('transfer:'.length); const m = moves.get(code); const s = m && db.servers[m.serverId]; const dev = m && db.users[m.userId];
   if (!s || Date.now() - m.at > MOVE_TTL) return reply('That code ran out or was already used. Ask for a new one with **/transfer** in Orata.');
-  if (!isDev(dev) || !can(s, dev.id, 'MANAGE_SERVER')) return reply('The Orata developer who made that code can’t manage that Orata server any more.');
+  if (!dev || !can(s, dev.id, 'MANAGE_SERVER')) return reply('Whoever made that code can’t manage that Orata server any more.');
   moves.delete(code);   // one use
   const picked = {};
   for (const c of i.data.components || []) { const x = c.component || c.components?.[0]; if (x?.custom_id) picked[x.custom_id] = x.values ?? x.value ?? []; }
