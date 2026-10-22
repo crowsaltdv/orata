@@ -104,11 +104,10 @@ function later(load, name, needed) {
 const SettingsHost = later(() => import('/js/settings.js'), 'SettingsHost', (s) => !!s.settingsPage);
 const ServerSettingsHost = later(() => import('/js/server-settings.js'), 'ServerSettingsHost', (s) => !!s.serverSettings);
 
-// what each mode has, under the two choices: true = yes, false = no, a string = only partly (says how)
-const MODE_FEATURES = [['Chats, servers, DMs, voice and video', true, true], ['Themes, colors and animations', true, true], ['Rain and liquid glass', true, false], ['Wallpaper pictures and blur', true, false],
-  ['Custom fonts', true, false], ['Link previews', true, false], ['Profile effects', true, true], ['Full-quality GIFs and pictures', true, 'Smaller copies']];
-const Mark = ({ v }) => (v === true ? html`<span class="mf-yes" aria-label="yes"><${Icon} name="check" size=${16} sw=${3} /></span>`
-  : v ? html`<span class="mf-part">${t(v)}</span>` : html`<span class="mf-no" aria-label="no"><${Icon} name="x" size=${15} sw=${3} /></span>`);
+// what each mode has, listed on its card: [feature, what Lite mode says instead, in red with an ✕ (none: Lite has it too)]
+const MODE_FEATURES = [['Chats, servers, DMs, voice and video'], ['Themes, colors and animations'], ['Profile effects'], ['Rain and liquid glass', 'No rain or liquid glass'],
+  ['Wallpaper pictures and blur', 'No wallpaper pictures or blur'], ['Custom fonts', 'No custom fonts'], ['Link previews', 'No link previews'], ['Full-quality GIFs and pictures', 'Smaller GIFs and pictures']];
+const Feature = ({ name, no }) => html`<span class=${cx('mf', no && 'no')}><${Icon} name=${no ? 'x' : 'check'} size=${15} sw=${3} />${t(no || name)}</span>`;
 
 /** The launch screen: Normal or Lite mode (lite.js), every time Orata opens, until "Don't show again" makes the pick the mode it opens in.
  *  Only orata_dev sees it, for now. */
@@ -119,15 +118,14 @@ function ModeChooser() {
   if (!mine || !open) return null;
   const pick = (mode) => { if (keep) setPicked(mode); else { setOpen(false); setMode(mode); } };
   const card = (mode, icon, title, desc, boost) => html`<button type="button" class=${cx('mode-card', (mode === 'lite') === LITE && 'current')} onClick=${() => pick(mode)}>
-    <${Icon} name=${icon} size=${28} /><b>${title}</b>${boost ? html`<em class="mode-boost">${boost}</em>` : null}<span>${desc}</span>${(mode === 'lite') === LITE ? html`<small>${t('Running now')}</small>` : null}</button>`;
+    <${Icon} name=${icon} size=${28} /><b>${title}</b>${boost ? html`<em class="mode-boost">${boost}</em>` : null}<span>${desc}</span>${(mode === 'lite') === LITE ? html`<small>${t('Running now')}</small>` : null}
+    <span class="mode-list">${MODE_FEATURES.map(([name, lite]) => html`<${Feature} name=${name} no=${mode === 'lite' ? lite : null} />`)}</span></button>`;
   return html`<div class="mode-screen" role="dialog" aria-label=${t('Choose a mode')}><div class="mode-box">
     ${picked ? html`<h2>${t('Got it')}</h2>
         <p>${t('Orata will open in')} <b>${picked === 'lite' ? t('Lite mode') : t('Normal mode')}</b> ${t('from now on. You can switch modes, and change the mode Orata opens in, any time in Settings → Advanced.')}</p>
         <${Btn} variant="primary" onClick=${() => { setOpen(false); setMode(picked, picked); }}>${t('OK')}<//>`
       : html`<h2>${t('How should Orata run?')}</h2>
-        <div class="mode-cards">${card('lite', 'bolt', t('Lite mode'), t('Runs smoothly on older and low-power computers. The same chats, servers and calls, without the heavy effects.'), t('2× the speed and performance of Normal'))}${card('normal', 'sparkles', t('Normal mode'), t('Everything Orata has: rain, glass, wallpapers and every effect.'))}</div>
-        <div class="mode-features">${MODE_FEATURES.map(([name, normal, lite]) => html`<${Mark} v=${lite} /><span class="mf-name">${t(name)}</span><${Mark} v=${normal} />`)}</div>
-        <label class="check-row mode-keep"><input type="checkbox" checked=${keep} onChange=${(e) => setKeep(e.target.checked)} /><span class="box"><${Icon} name="check" size=${13} sw=${3.5} /></span><span>${t('Don’t show this again')}</span></label>`}
+        <div class="mode-cards">${card('lite', 'bolt', t('Lite mode'), t('Runs smoothly on older and low-power computers. The same chats, servers and calls, without the heavy effects.'), t('2× the speed and performance of Normal'))}${card('normal', 'sparkles', t('Normal mode'), t('Everything Orata has: rain, glass, wallpapers and every effect.'))}</div>        <label class="check-row mode-keep"><input type="checkbox" checked=${keep} onChange=${(e) => setKeep(e.target.checked)} /><span class="box"><${Icon} name="check" size=${13} sw=${3.5} /></span><span>${t('Don’t show this again')}</span></label>`}
   </div></div>`;
 }
 
