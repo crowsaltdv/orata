@@ -114,6 +114,7 @@ function bootstrap(d) {
     me: d.user, users, servers, dms, relationships: rel, reads: d.readStates, lastMsg, voice: { ...state.voice, states: voiceStates }, botId: d.botId, settings,
     sessionId: d.connId, phase: 'ready', typing: {}, gated: !!d.gated,
   });
+  if (!reconnect) performance.mark?.('orata-ready');   // how long Orata takes to be usable (speed tests: performance.getEntriesByName('orata-ready'))
   ls('settings', null, settings);
   if (!Object.keys(remote).length) updateSettings({}, { sync: true });
   rebuildIndex();

@@ -104,6 +104,12 @@ function later(load, name, needed) {
 const SettingsHost = later(() => import('/js/settings.js'), 'SettingsHost', (s) => !!s.settingsPage);
 const ServerSettingsHost = later(() => import('/js/server-settings.js'), 'ServerSettingsHost', (s) => !!s.serverSettings);
 
+// what each mode has, under the two choices: true = yes, false = no, a string = only partly (says how)
+const MODE_FEATURES = [['Chats, servers, DMs, voice and video', true, true], ['Themes, colors and animations', true, true], ['Rain and liquid glass', true, false], ['Wallpaper pictures and blur', true, false],
+  ['Custom fonts', true, false], ['Link previews', true, false], ['Profile effects', true, 'Lighter ones'], ['Full-quality GIFs and pictures', true, 'Smaller copies']];
+const Mark = ({ v }) => (v === true ? html`<span class="mf-yes" aria-label="yes"><${Icon} name="check" size=${16} sw=${3} /></span>`
+  : v ? html`<span class="mf-part">${t(v)}</span>` : html`<span class="mf-no" aria-label="no"><${Icon} name="x" size=${15} sw=${3} /></span>`);
+
 /** The launch screen: Normal or Lite mode (lite.js), every time Orata opens, until "Don't show again" makes the pick the mode it opens in.
  *  Only orata_dev sees it, for now. */
 function ModeChooser() {
@@ -119,7 +125,8 @@ function ModeChooser() {
         <p>${t('Orata will open in')} <b>${picked === 'lite' ? t('Lite mode') : t('Normal mode')}</b> ${t('from now on. You can switch modes, and change the mode Orata opens in, any time in Settings → Advanced.')}</p>
         <${Btn} variant="primary" onClick=${() => { setOpen(false); setMode(picked, picked); }}>${t('OK')}<//>`
       : html`<h2>${t('How should Orata run?')}</h2>
-        <div class="mode-cards">${card('normal', 'sparkles', t('Normal mode'), t('The full Orata: rain, glass, wallpapers and every effect.'))}${card('lite', 'bolt', t('Lite mode'), t('Made for Chromebooks and low-end laptops. Faster and lighter, with fewer effects.'))}</div>
+        <div class="mode-cards">${card('lite', 'bolt', t('Lite mode'), t('Runs smoothly on older and low-power computers. The same chats, servers and calls, without the heavy effects.'))}${card('normal', 'sparkles', t('Normal mode'), t('Everything Orata has: rain, glass, wallpapers and every effect.'))}</div>
+        <div class="mode-features">${MODE_FEATURES.map(([name, normal, lite]) => html`<${Mark} v=${lite} /><span class="mf-name">${t(name)}</span><${Mark} v=${normal} />`)}</div>
         <label class="check-row mode-keep"><input type="checkbox" checked=${keep} onChange=${(e) => setKeep(e.target.checked)} /><span class="box"><${Icon} name="check" size=${13} sw=${3.5} /></span><span>${t('Don’t show this again')}</span></label>`}
   </div></div>`;
 }

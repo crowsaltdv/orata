@@ -606,3 +606,6 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 .mode-card .icon { color: var(--accent); } .mode-card small { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
 .mode-card.current { border-color: rgb(var(--accent-rgb) / .55); }
 .mode-keep { justify-content: center; }
+.mode-features { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px 10px; width: 100%; align-items: center; font-size: 13px; }
+.mode-features > * { justify-self: center; } .mf-name { color: var(--text-2); text-align: center; }
+.mf-yes { color: #3ba55d; display: inline-flex; } .mf-no { color: #ff7b93; display: inline-flex; opacity: .85; } .mf-part { color: #f0b232; font-size: 12px; font-weight: 600; }
