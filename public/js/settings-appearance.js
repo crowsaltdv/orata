@@ -11,6 +11,9 @@ import { pickFile } from '/js/imageutil.js';
 import { upload } from '/js/api.js';
 import { errMsg } from '/js/actions.js';
 import { t } from '/js/i18n.js';
+import { LITE } from '/js/lite.js';
+/** In Lite mode these pages' choices don't show (they're kept for Normal mode): says so at the top. */
+const LiteNote = () => (LITE ? html`<div class="lite-note"><${Icon} name="bolt" size=${16} /><span>${t('Lite mode is on, so this doesn’t show right now. What you pick here is kept for Normal mode (Settings → Advanced).')}</span></div>` : null);
 
 const get = (obj, path) => path.split('.').reduce((o, k) => o?.[k], obj);
 export const SSlider = ({ path, scale = 1, format, ...rest }) => { const v = useSel((s) => get(s.settings, path)); return html`<${Slider} value=${Math.round(v * scale * 100) / 100} onChange=${(x) => setSetting(path, x / scale)} format=${format} ...${rest} />`; };
@@ -100,6 +103,7 @@ export function WallpaperPage() {
     setBusy(false); if (!ok) { toast('Couldn’t load that image. Check the link.', 'error'); return; } addImage(u); setUrl('');
   };
   return html`<div class="s-page">
+    <${LiteNote} />
     <${ThemePreview} />
     <${Section} title=${t('Wallpaper')} desc=${t('Choose what sits behind the glass. Everything updates live.')}>
       <h4 class="s-sub">${t('Gradients')}</h4>
@@ -138,6 +142,7 @@ export function EffectsPage() {
   const rainOn = rain.enabled && !m.reduce;
   const scopes = [['panels', 'Panels, menus & windows'], ['rail', 'Server icons'], ['nav', 'Navigation buttons'], ['toolbar', 'Toolbar & header buttons'], ['buttons', 'Action buttons'], ['composer', 'Message box']];
   return html`<div class="s-page">
+    <${LiteNote} />
     <${Section} title=${t('Rain on glass')} desc=${t('The original Codrops raindrop effect: drops refract your wallpaper upside-down, merge, slide down and leave trails on foggy glass.')}>
       <${SettingRow} title=${t('Enable rain')} desc=${m.reduce ? t('Turn off “Reduce motion” to use this.') : t('Runs on the GPU. Pauses automatically when the tab is hidden.')}><${SToggle} path="rain.enabled" onChange=${(on) => on && state.settings.bg.type === 'solid' && updateSettings({ bg: { type: 'mesh' } })} /><//>
       <div class=${cx('rain-controls', !rainOn && 'dim')}>
@@ -180,6 +185,7 @@ export function FontsPage() {
   const f = useSel((s) => s.settings.fonts);
   const setF = (k, v) => updateSettings({ fonts: { [k]: v } });
   return html`<div class="s-page">
+    <${LiteNote} />
     <${Section} title=${t('Fonts')} desc=${t('Search the entire Google Fonts library. Every font in the list is shown in its own typeface.')}>
       <${SettingRow} title=${t('Interface font')} desc=${t('Menus, buttons and labels.')} stack><${FontField} value=${f.ui} onChange=${(v) => setF('ui', v || 'Inter')} defaultName="Inter" label="Interface font" /><//>
       <${SettingRow} title=${t('Chat font')} desc=${t('Used for message text. Leave on “same as interface” to match.')} stack>

@@ -609,3 +609,5 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 .mode-features { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px 10px; width: 100%; align-items: center; font-size: 13px; }
 .mode-features > * { justify-self: center; } .mf-name { color: var(--text-2); text-align: center; }
 .mf-yes { color: #3ba55d; display: inline-flex; } .mf-no { color: #ff7b93; display: inline-flex; opacity: .85; } .mf-part { color: #f0b232; font-size: 12px; font-weight: 600; }
+.lite-note { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius); background: rgb(var(--accent-rgb) / .12); border: 1px solid rgb(var(--accent-rgb) / .35); font-size: 13px; color: var(--text); }
+.lite-note .icon { color: var(--accent); flex: none; }

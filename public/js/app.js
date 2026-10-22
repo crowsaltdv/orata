@@ -106,7 +106,7 @@ const ServerSettingsHost = later(() => import('/js/server-settings.js'), 'Server
 
 // what each mode has, under the two choices: true = yes, false = no, a string = only partly (says how)
 const MODE_FEATURES = [['Chats, servers, DMs, voice and video', true, true], ['Themes, colors and animations', true, true], ['Rain and liquid glass', true, false], ['Wallpaper pictures and blur', true, false],
-  ['Custom fonts', true, false], ['Link previews', true, false], ['Profile effects', true, 'Lighter ones'], ['Full-quality GIFs and pictures', true, 'Smaller copies']];
+  ['Custom fonts', true, false], ['Link previews', true, false], ['Profile effects', true, true], ['Full-quality GIFs and pictures', true, 'Smaller copies']];
 const Mark = ({ v }) => (v === true ? html`<span class="mf-yes" aria-label="yes"><${Icon} name="check" size=${16} sw=${3} /></span>`
   : v ? html`<span class="mf-part">${t(v)}</span>` : html`<span class="mf-no" aria-label="no"><${Icon} name="x" size=${15} sw=${3} /></span>`);
 

@@ -5,7 +5,7 @@ import { useSel, toast } from '/js/store.js';
 import { chooseAndUploadImage } from '/js/imageutil.js';
 import { Btn, Segmented, Dropdown, Slider, Toggle, ColorSwatch } from '/js/ui.js';
 import { loadFont } from '/js/theme.js';
-import { LITE, HEAVY_EFFECTS } from '/js/lite.js';
+import { LITE } from '/js/lite.js';
 import { t } from '/js/i18n.js';
 import { PROFILE_FONTS, EFFECTS, OUTLINE_STYLES, PROFILE_DEFAULTS, fontFamily, effectColors } from '/js/profile-data.js';
 
@@ -68,15 +68,15 @@ export function UserName({ user, text, class: c }) {
 /** The effect drawn over a profile card. Pauses when the tab is hidden and shows a still picture under Reduce motion. */
 export function ProfileEffect({ fx }) {
   const ref = useRef(null); const reduce = useSel((s) => s.settings.motion?.reduce);
-  const eff = rainbowFx(fx); const off = LITE && HEAVY_EFFECTS.has(fx?.id);   // Lite mode: only the lighter effects, sparser and at 20 frames a second
-  useEffect(() => {
-    if (!ref.current || off) return undefined;
-    let stop = () => {}; let gone = false;
-    import('/js/profile-effects.js').then((m) => { if (!gone && ref.current) stop = m.startEffect(ref.current, LITE ? { ...eff, density: Math.min(eff.density ?? 0.6, 0.35) } : eff, LITE ? { reduce, fps: 20 } : { reduce }); });
-    return () => { gone = true; stop(); };
-  }, [fx?.id, eff.color, eff.color2, fx?.density, fx?.speed, fx?.opacity, reduce]);
-  if (off) return null;
+  const eff = rainbowFx(fx);
+  useEffect(() => (ref.current ? runEffect(ref.current, eff, { reduce }) : undefined), [fx?.id, eff.color, eff.color2, fx?.density, fx?.speed, fx?.opacity, reduce]);
   return html`<canvas class=${cx('pf-fx', fx?.rainbow && 'rainbow')} ref=${ref} aria-hidden="true"></canvas>`;
+}
+/** Starts an effect on a canvas; the effects' code (27 KB) loads the first time one shows. Returns its stop. */
+function runEffect(canvas, eff, opts) {
+  let stop = () => {}; let gone = false;
+  import('/js/profile-effects.js').then((m) => { if (!gone) stop = m.startEffect(canvas, eff, opts); });
+  return () => { gone = true; stop(); };
 }
 /** A rainbow effect is drawn in two far-apart colors; the canvas then hue-rotates through the whole spectrum (see extras.css). */
 const rainbowFx = (fx) => (fx?.rainbow ? { ...fx, color: '#ff3b5c', color2: '#3b9bff' } : fx);
@@ -106,7 +106,7 @@ function Group({ title, on, onToggle, children, desc }) {
 function EffectOption({ id, name, on, fx, onPick }) {
   const ref = useRef(null); const reduce = useSel((s) => s.settings.motion?.reduce);
   const eff = rainbowFx(fx);
-  useEffect(() => (ref.current ? startEffect(ref.current, { ...eff, id }, { reduce, fps: 24, onlyWhenVisible: true, size: { width: 150, height: 84 } }) : undefined), [id, eff.color, eff.color2, fx.density, fx.speed, fx.opacity, reduce]);
+  useEffect(() => (ref.current ? runEffect(ref.current, { ...eff, id }, { reduce, fps: 24, onlyWhenVisible: true, size: { width: 150, height: 84 } }) : undefined), [id, eff.color, eff.color2, fx.density, fx.speed, fx.opacity, reduce]);
   return html`<button type="button" class=${cx('ps-fx', on && 'on')} onClick=${onPick} aria-pressed=${on}><span class="ps-fx-name">${t(name)}</span><span class="ps-fx-view"><canvas class=${cx(fx.rainbow && 'rainbow')} ref=${ref} aria-hidden="true"></canvas></span></button>`;
 }
 /** Solid / gradient fill controls shared by the name color and the name outline. */

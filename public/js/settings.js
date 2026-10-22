@@ -199,7 +199,7 @@ export function exportTheme() { const s = state.settings; return { app: 'Orata',
 function AdvancedPage() {
   const conn = useSel((s) => s.connection); const [pref, setPref] = useState(preferredMode());
   return html`<div class="s-page">
-    ${state.me?.username === MODE_OWNER ? html`<${Section} title=${t('Lite mode')} desc=${t('Runs smoothly on older and low-power computers: no rain, glass, wallpaper picture or downloaded fonts, no link previews, only the lighter profile effects, and smaller pictures and GIFs. Saved on this device.')}>
+    ${state.me?.username === MODE_OWNER ? html`<${Section} title=${t('Lite mode')} desc=${t('Runs smoothly on older and low-power computers: no rain, glass, wallpaper picture or downloaded fonts, no link previews, and smaller pictures and GIFs. Saved on this device.')}>
       <${SettingRow} title=${t('Mode right now')} desc=${t('Switching reloads Orata.')}><${Segmented} value=${LITE ? 'lite' : 'normal'} options=${[{ value: 'normal', label: t('Normal') }, { value: 'lite', label: t('Lite') }]} onChange=${(v) => setMode(v)} /><//>
       <${SettingRow} title=${t('Open Orata in')} desc=${t('“Ask every time” shows the choice whenever Orata opens.')}>
         <${Dropdown} width=${200} value=${pref} options=${[{ value: 'ask', label: t('Ask every time') }, { value: 'normal', label: t('Normal mode') }, { value: 'lite', label: t('Lite mode') }]} onChange=${(v) => { setPref(v); setMode(v === 'ask' ? (LITE ? 'lite' : 'normal') : v, v); }} /><//>

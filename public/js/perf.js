@@ -1,5 +1,6 @@
 // Orata — performance watchdog: if the device can't keep up with liquid glass / rain, quietly step the effects down once.
 import { state, updateSettings, toast, subscribe } from '/js/store.js';
+import { LITE } from '/js/lite.js';
 
 let started = false;
 function sample(ms = 3000) {
@@ -14,6 +15,7 @@ function sample(ms = 3000) {
   });
 }
 export function startPerfWatchdog() {
+  if (LITE) return;   // no rain or glass running, and these are Normal mode's settings
   const unsub = subscribe(async () => {
     if (started || state.phase !== 'ready') return;
     started = true; unsub();
