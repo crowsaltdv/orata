@@ -1,162 +1,175 @@
-// Orata — music from Apple Music's public catalogue: search, 30-second previews and the "Listening to" status. No API key needed.
+// Orata — music from YouTube Music: search, charts, genre pages and the "Listening to" status. No API key and no login needed.
 //
-// Uses Apple's keyless iTunes Search API (https://performance-partners.apple.com/search-api — `GET https://itunes.apple.com/search` and `/lookup`).
-// It is the same catalogue as Apple Music, with the same artwork, links and 30-second previews. (The Apple Music API proper,
-// developer.apple.com/documentation/applemusicapi, needs a developer token signed with a paid Apple Developer account's key — that is the part
-// this avoids.) Full-length playback is not possible without MusicKit and each listener's own Apple Music subscription, so previews play.
+// The catalogue comes from ytmusicapi (https://github.com/sigma67/ytmusicapi), a Python library, so the server starts a small helper
+// (music-service/service.py) and talks to it over its stdin/stdout, one JSON line per request. ytmusicapi only returns metadata:
+// YouTube's audio links need its own player to decode, so the server never touches audio. A track id is a YouTube video id and the
+// browser plays it in YouTube's embedded player (see public/js/music.js). Without Python and `pip install -r music-service/requirements.txt`
+// everything else in Orata works and the Music page says what is missing.
 //
-// The server does all the talking to Apple. A preview is downloaded when it is asked for (it is about 1 MB), kept in memory for a while and served
-// to the <audio> tag from /api/music/play/<id> with Range support so the seek bar works. An <audio> tag can't send a bearer token, so that link is
-// signed by this server (HMAC, short-lived) when a signed-in user asks for it. Apple allows roughly 20 searches a minute per IP address, so results
-// are cached and Orata never sends more than MUSIC_API_PER_MIN (default 18) requests a minute, however many people search.
-import crypto from 'node:crypto';
+// Searches and charts are cached, and Orata never sends more than MUSIC_API_PER_MIN (default 40) requests a minute to YouTube however many people search.
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import net from 'node:net';
-import { ENV, db, save, emitTo, relatedUserIds, publicUser, selfUser, ApiError, bad, notFound } from './core.js';
+import path from 'node:path';
+import { ENV, ROOT, db, save, emitTo, relatedUserIds, publicUser, selfUser, ApiError, bad, notFound } from './core.js';
 
-const API = String(ENV.MUSIC_API_BASE || 'https://itunes.apple.com').replace(/\/$/, '');
 const COUNTRY = (String(ENV.MUSIC_COUNTRY || 'US').trim().toUpperCase().match(/^[A-Z]{2}$/) || ['US'])[0];
-const PER_MIN = Math.max(1, Number(ENV.MUSIC_API_PER_MIN) || 18);
-const EXTRA_HOSTS = String(ENV.MUSIC_MEDIA_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);   // tests / mirrors only
+const PER_MIN = Math.max(1, Number(ENV.MUSIC_API_PER_MIN) || 40);
 /** Music is on by default; MUSIC=off turns the player off for everybody. */
-export const musicConfigured = () => !/^(off|false|0|no)$/i.test(String(ENV.MUSIC || '').trim());
-const needEnabled = () => { if (!musicConfigured()) throw new ApiError(503, 'Music is turned off on this server.', 'music_not_configured'); };
+const enabled = () => !/^(off|false|0|no)$/i.test(String(ENV.MUSIC || '').trim());
+/** Why music can't run right now (no Python, ytmusicapi missing ...), or null. Retried every minute, so installing it needs no restart. */
+let problem = null; let problemAt = 0;
+export const musicProblem = () => (enabled() ? problem : null);
+const needEnabled = () => {
+  if (!enabled()) throw new ApiError(503, 'Music is turned off on this server.', 'music_not_configured');
+  if (problem && Date.now() - problemAt < 60_000) throw new ApiError(503, problem, 'music_not_configured');
+};
 
-const TRACK_ID = /^\d{1,14}$/;
-const appleUrl = (v) => { try { const u = new URL(String(v)); return u.protocol === 'https:' && /(^|\.)(apple\.com|mzstatic\.com)$/i.test(u.hostname) ? u.href : null; } catch { return null; } };
+const TRACK_ID = /^[A-Za-z0-9_-]{11}$/;   // a YouTube video id
+const ART_HOST = /(^|\.)(googleusercontent\.com|ggpht\.com|ytimg\.com)$/i;
+const artUrl = (v) => { try { const u = new URL(String(v)); return u.protocol === 'https:' && ART_HOST.test(u.hostname) && !net.isIP(u.hostname) ? u.href : null; } catch { return null; } };
 
-/* ------------------------------------------------------------ Apple's search API */
-const calls = [];   // when the last requests to Apple were made
+/* ------------------------------------------------------------ the helper process */
+/** What to start: MUSIC_HELPER (a JSON array or a command, for tests), else the first Python that works: MUSIC_PYTHON, music-service/.venv, then the system's. */
+function candidates() {
+  if (ENV.MUSIC_HELPER) {
+    let cmd; try { cmd = JSON.parse(ENV.MUSIC_HELPER); } catch { cmd = String(ENV.MUSIC_HELPER).split(/\s+/); }
+    return [cmd];
+  }
+  const dir = path.join(ROOT, 'music-service'); const script = path.join(dir, 'service.py'); const pys = [];
+  if (ENV.MUSIC_PYTHON) pys.push(ENV.MUSIC_PYTHON);
+  for (const rel of ['.venv/bin/python', '.venv/Scripts/python.exe']) if (fs.existsSync(path.join(dir, rel))) pys.push(path.join(dir, rel));
+  pys.push(...(process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python']));
+  return pys.map((py) => [py, script]);
+}
+
+let helper = null;   // { child, version } while it runs
+let starting = null;
+const pending = new Map();   // request id → { resolve, reject, timer }
+let seq = 0;
+
+function onReply(m) {
+  const p = pending.get(m.id); if (!p) return;
+  pending.delete(m.id); clearTimeout(p.timer);
+  if (m.ok) return p.resolve(m.result);
+  p.reject(m.code === 'bad_request' ? new ApiError(400, m.error, 'bad_request')
+    : m.code === 'not_found' ? new ApiError(404, m.error, 'not_found')
+      : m.code === 'unavailable' ? new ApiError(404, m.error, 'music_unavailable')
+        : new ApiError(502, 'YouTube Music could not be reached, or answered something unexpected. Try again in a moment.', 'music_upstream'));
+}
+function onExit(child) {
+  if (helper?.child === child) helper = null;
+  for (const [id, p] of pending) { pending.delete(id); clearTimeout(p.timer); p.reject(new ApiError(502, 'The music helper stopped. Try again.', 'music_upstream')); }
+}
+function launch([cmd, ...args]) {
+  return new Promise((resolve, reject) => {
+    let child; let phase = 'starting'; let buf = ''; let tail = '';   // starting → running (it said it is ready) or failed
+    const fail = (err) => { if (phase !== 'starting') return; phase = 'failed'; clearTimeout(timer); try { child?.kill(); } catch { /* already gone */ } reject(err); };
+    const timer = setTimeout(() => fail(new Error('it did not start within 20 seconds')), 20_000);
+    try { child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, MUSIC_COUNTRY: COUNTRY, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' } }); } catch (e) { clearTimeout(timer); return reject(e); }
+    child.on('error', (e) => fail(new Error(e.code === 'ENOENT' ? `${cmd} was not found` : e.message)));
+    child.stderr.on('data', (d) => { tail = (tail + d).slice(-400); });
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (d) => {
+      buf += d;
+      for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue;
+        let m; try { m = JSON.parse(line); } catch { continue; }
+        if (phase === 'starting') { if (m.ready === true) { phase = 'running'; clearTimeout(timer); resolve({ child, version: m.version }); } else fail(new Error(m.error || 'the helper did not start')); }
+        else if (phase === 'running') onReply(m);
+      }
+    });
+    child.on('exit', (code) => { if (phase === 'starting') fail(new Error(tail.trim() || `it exited with code ${code}`)); else if (phase === 'running') onExit(child); });
+  });
+}
+async function ensure() {
+  if (helper) return helper;
+  starting ||= (async () => {
+    let first = null; let library = null;
+    for (const cmd of candidates()) {
+      try { helper = await launch(cmd); problem = null; return helper; } catch (e) { const msg = `${cmd[0]}: ${e.message}`; first ||= msg; if (/ytmusicapi/.test(e.message)) library ||= e.message; }
+    }
+    problemAt = Date.now();
+    problem = library ? `Music needs the ytmusicapi Python library on the server. Run: pip install -r music-service/requirements.txt` : `Music needs Python 3.10 or newer on the server (${first || 'none found'}). Install Python, then run: pip install -r music-service/requirements.txt`;
+    throw new ApiError(503, problem, 'music_not_configured');
+  })().finally(() => { starting = null; });
+  return starting;
+}
+process.on('exit', () => { try { helper?.child.kill(); } catch { /* ignore */ } });
+/** Is music usable? A problem found earlier is looked at again once a minute, so installing Python or the library needs no restart. */
+export async function musicReady() {
+  if (!enabled()) return false;
+  if (!helper && (!problem || Date.now() - problemAt >= 60_000)) await ensure().catch(() => {});
+  return !problem;
+}
+/** Starts the helper now (the server does this at launch) and says how it went. */
+export async function musicStatus() {
+  if (!enabled()) return 'off (MUSIC=off)';
+  try { const h = await ensure(); return `YouTube Music through ytmusicapi ${h.version && h.version !== '?' ? h.version : ''}`.trim() + ' — MUSIC=off in .env turns it off'; } catch { return `OFF — ${problem}`; }
+}
+
+async function ask(op, params = {}, timeoutMs = 25_000) {
+  const h = await ensure();
+  return new Promise((resolve, reject) => {
+    const id = ++seq;
+    const timer = setTimeout(() => { pending.delete(id); reject(new ApiError(504, 'YouTube Music took too long to answer. Try again.', 'music_upstream')); }, timeoutMs);
+    pending.set(id, { resolve, reject, timer });
+    try { h.child.stdin.write(`${JSON.stringify({ ...params, id, op })}\n`); } catch { pending.delete(id); clearTimeout(timer); reject(new ApiError(502, 'The music helper stopped. Try again.', 'music_upstream')); }
+  });
+}
+const calls = [];   // when the last requests to YouTube were made
 function takeSlot() {
   const now = Date.now(); while (calls.length && now - calls[0] > 60_000) calls.shift();
-  if (calls.length >= PER_MIN) throw new ApiError(429, 'Music search is busy right now (Apple limits searches per minute). Try again in a few seconds.', 'rate_limited');
+  if (calls.length >= PER_MIN) throw new ApiError(429, 'Music is busy right now. Try again in a few seconds.', 'rate_limited');
   calls.push(now);
 }
-async function apiGet(pathname, params) {
-  takeSlot();
-  const url = new URL(API + pathname);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  let res;
-  try { res = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15_000) }); } catch { throw new ApiError(502, 'Could not reach Apple Music. Try again in a moment.', 'music_upstream'); }
-  if (res.status === 403 || res.status === 429) throw new ApiError(429, 'Apple is limiting music searches right now. Try again in a minute.', 'rate_limited');   // that is how Apple says "too many requests"
-  if (!res.ok) throw new ApiError(502, `Apple Music answered with an error (${res.status}).`, 'music_upstream');
-  try { return JSON.parse(await res.text()); } catch { throw new ApiError(502, 'Apple Music sent an answer Orata could not read.', 'music_upstream'); }   // it is served as text/javascript, so no res.json()
-}
+const upstream = (op, params) => { takeSlot(); return ask(op, params); };
 
 /* ------------------------------------------------------------ tracks */
-const previewUrl = (v) => {   // previews live on Apple's CDN (audio-ssl.itunes.apple.com); https on Apple domains only (tests may add a host)
-  let u; try { u = new URL(String(v)); } catch { return null; }
-  if (EXTRA_HOSTS.includes(u.hostname.toLowerCase())) return u.href;
-  return u.protocol === 'https:' && /(^|\.)(apple\.com|mzstatic\.com)$/i.test(u.hostname) && !net.isIP(u.hostname) ? u.href : null;
-};
-/** One search / lookup result → what the app shows. `_preview` stays on the server. */
+/** One helper result → what the app shows. */
 const songView = (d) => {
-  if (!d || typeof d !== 'object' || (d.wrapperType && d.wrapperType !== 'track') || (d.kind && d.kind !== 'song')) return null;
-  const id = String(d.trackId ?? ''); if (!TRACK_ID.test(id)) return null;
-  const preview = previewUrl(d.previewUrl); if (!preview) return null;   // no preview = nothing to play
+  if (!d || typeof d !== 'object') return null;
+  const id = String(d.id ?? ''); if (!TRACK_ID.test(id)) return null;
   return {
-    id, title: String(d.trackName || 'Untitled').slice(0, 200), artist: String(d.artistName || 'Unknown artist').slice(0, 100), album: String(d.collectionName || '').slice(0, 120) || null,
-    artwork: appleUrl(String(d.artworkUrl100 || '').replace(/\/\d+x\d+bb\.(jpe?g|png)$/i, '/300x300bb.$1')), url: appleUrl(d.trackViewUrl),
-    duration: Math.max(0, Math.round(Number(d.trackTimeMillis) || 0)), explicit: d.trackExplicitness === 'explicit', _preview: preview,
+    id, title: String(d.title || 'Untitled').slice(0, 200), artist: String(d.artist || 'Unknown artist').slice(0, 100), album: String(d.album || '').slice(0, 120) || null,
+    artwork: artUrl(d.artwork), url: `https://music.youtube.com/watch?v=${id}`,
+    duration: Math.max(0, Math.round(Number(d.duration) || 0)), explicit: d.explicit === true,
   };
 };
-const forClient = ({ _preview, ...t }) => t;
-const known = new Map();   // id → song: what the server itself got from Apple (what is shown as "listening to" comes from here, never from a client)
-const remember = (t) => { known.delete(t.id); known.set(t.id, t); if (known.size > 800) known.delete(known.keys().next().value); return t; };
-const searchCache = new Map();
-async function search(q) {
-  const key = q.toLowerCase(); const hit = searchCache.get(key);
-  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.tracks;
-  const data = await apiGet('/search', { term: q, media: 'music', entity: 'song', limit: 24, country: COUNTRY });
-  const tracks = (Array.isArray(data?.results) ? data.results : []).map(songView).filter(Boolean).map(remember).map(forClient);
-  if (searchCache.size > 300) searchCache.clear();
-  searchCache.set(key, { at: Date.now(), tracks });
-  return tracks;
+const known = new Map();   // id → song: what the server itself got from YouTube Music (what is shown as "listening to" comes from here, never from a client)
+const remember = (t) => { known.delete(t.id); known.set(t.id, t); if (known.size > 1500) known.delete(known.keys().next().value); return t; };
+const views = (list) => (Array.isArray(list) ? list : []).map(songView).filter(Boolean).map(remember);
+
+const cached = new Map();
+async function memo(key, ttl, load) {
+  const hit = cached.get(key); if (hit && Date.now() - hit.at < ttl) return hit.value;
+  const value = await load();
+  if (cached.size > 400) cached.clear();
+  cached.set(key, { at: Date.now(), value });
+  return value;
 }
-/* ------------------------------------------------------------ charts (the Music page's categories) */
-// Apple's public top-songs feeds, per genre: `/<country>/rss/topsongs/limit=30/genre=<id>/json` (no key). Entries carry the track id, artwork and a 30-second preview.
-const GENRES = [['top', 'Top Songs', null], ['pop', 'Pop', 14], ['hiphop', 'Hip-Hop / Rap', 18], ['rnb', 'R&B / Soul', 15], ['rock', 'Rock', 21], ['alt', 'Alternative', 20], ['electronic', 'Electronic', 7], ['dance', 'Dance', 17],
-  ['country', 'Country', 6], ['latin', 'Latin', 12], ['kpop', 'K-Pop', 51], ['jpop', 'J-Pop', 27], ['jazz', 'Jazz', 11], ['classical', 'Classical', 5], ['metal', 'Metal', 1153], ['reggae', 'Reggae', 24],
-  ['singer', 'Singer / Songwriter', 10], ['soundtrack', 'Soundtracks', 16], ['blues', 'Blues', 2], ['gospel', 'Christian & Gospel', 22]];
-const chartCache = new Map();
-const chartSong = (e) => {
-  const links = [].concat(e?.link || []); const preview = links.find((l) => l?.attributes?.rel === 'enclosure')?.attributes?.href; const page = links.find((l) => l?.attributes?.rel === 'alternate')?.attributes?.href;
-  const image = [].concat(e?.['im:image'] || []).slice(-1)[0]?.label;
-  return songView({ wrapperType: 'track', kind: 'song', trackId: e?.id?.attributes?.['im:id'], trackName: e?.['im:name']?.label, artistName: e?.['im:artist']?.label, collectionName: e?.['im:collection']?.['im:name']?.label, artworkUrl100: image, trackViewUrl: page, previewUrl: preview });
-};
+const search = (q) => memo(`s:${q.toLowerCase()}`, 10 * 60_000, async () => views(await upstream('search', { q, limit: 24 })));
+const KEY = /^[a-z0-9-]{1,60}$/;
+const categories = () => memo('categories', 6 * 3600_000, async () => (await upstream('categories')).filter((c) => c && KEY.test(c.key)).map((c) => ({ key: c.key, name: String(c.name || c.key).slice(0, 40), group: c.group === 'genre' || c.group === 'mood' ? c.group : 'chart' })));
 async function chart(key) {
-  const g = GENRES.find((x) => x[0] === key); if (!g) throw notFound('Unknown category');
-  const hit = chartCache.get(key); if (hit && Date.now() - hit.at < 30 * 60_000) return hit.tracks;
-  const data = await apiGet(`/${COUNTRY.toLowerCase()}/rss/topsongs/limit=30${g[2] ? `/genre=${g[2]}` : ''}/json`, {});
-  const tracks = [].concat(data?.feed?.entry || []).map(chartSong).filter(Boolean).map(remember).map(forClient);
-  chartCache.set(key, { at: Date.now(), tracks });
-  return tracks;
+  if (!KEY.test(key)) throw notFound('Unknown category');
+  return memo(`c:${key}`, 30 * 60_000, async () => views(await upstream('category', { key })));
 }
 async function trackInfo(id) {
   if (known.has(id)) return known.get(id);
-  const t = songView((await apiGet('/lookup', { id, country: COUNTRY }))?.results?.[0]);
-  if (!t) throw new ApiError(404, 'Apple Music has no playable preview of that track.', 'music_unavailable');
+  const t = songView(await upstream('song', { videoId: id }));
+  if (!t) throw new ApiError(404, 'YouTube Music has no such track.', 'music_unavailable');
   return remember(t);
-}
-
-/* ------------------------------------------------------------ audio */
-const audio = new Map();   // id → { buf, type, at }  (kept 30 minutes, within a memory budget)
-const AUDIO_BUDGET = (Number(ENV.MUSIC_CACHE_MB) || 48) * 1024 * 1024; const MAX_CLIP = 12 * 1024 * 1024;
-let audioBytes = 0; let downloads = 0; const inFlight = new Map();
-const evict = () => { for (const [k, v] of audio) { if (audioBytes <= AUDIO_BUDGET && Date.now() - v.at < 30 * 60_000) break; audio.delete(k); audioBytes -= v.buf.length; } };
-function getAudio(id) {
-  const hit = audio.get(id);
-  if (hit && Date.now() - hit.at < 30 * 60_000) return Promise.resolve(hit);
-  if (!inFlight.has(id)) {
-    if (downloads >= 6) return Promise.reject(new ApiError(429, 'Too many tracks are loading at once. Try again in a moment.', 'rate_limited'));
-    downloads++;
-    inFlight.set(id, downloadAudio(id).finally(() => { downloads--; inFlight.delete(id); }));
-  }
-  return inFlight.get(id);
-}
-async function downloadAudio(id) {
-  const t = await trackInfo(id);
-  let res;
-  try { res = await fetch(t._preview, { redirect: 'follow', signal: AbortSignal.timeout(30_000) }); } catch { throw new ApiError(502, 'Could not download the preview from Apple Music.', 'music_upstream'); }
-  if (!res.ok) throw new ApiError(res.status === 403 || res.status === 404 ? 404 : 502, 'Apple Music could not provide that preview.', res.status === 403 || res.status === 404 ? 'music_unavailable' : 'music_upstream');
-  let type = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-  if (type.startsWith('text/') || type.includes('json') || type.includes('html')) throw new ApiError(502, 'Apple Music did not send audio.', 'music_upstream');
-  if (!/^audio\/(mpeg|mp3|mp4|aac|wav|x-wav|ogg|webm|flac)$/.test(type)) type = 'audio/mp4';   // previews are AAC in an .m4a file; Apple labels them audio/x-m4p, which browsers may not trust
-  if (Number(res.headers.get('content-length')) > MAX_CLIP) throw new ApiError(502, 'That preview is unexpectedly large.', 'music_upstream');
-  const chunks = []; let total = 0;
-  for await (const c of res.body) { total += c.length; if (total > MAX_CLIP) throw new ApiError(502, 'That preview is unexpectedly large.', 'music_upstream'); chunks.push(c); }
-  if (!total) throw new ApiError(502, 'Apple Music sent an empty file.', 'music_upstream');
-  const entry = { buf: Buffer.concat(chunks, total), type, at: Date.now() };
-  const old = audio.get(id); if (old) audioBytes -= old.buf.length;
-  audio.set(id, entry); audioBytes += total; evict();
-  return entry;
-}
-
-const KEY = crypto.randomBytes(32);   // play links only live as long as this process; the player simply asks for a new one
-const sign = (id, exp) => crypto.createHmac('sha256', KEY).update(`${exp}|${id}`).digest('base64url').slice(0, 40);
-const playLink = (id, ttlMs = 4 * 3600_000) => { const exp = Date.now() + ttlMs; return `/api/music/play/${id}?exp=${exp}&sig=${sign(id, exp)}`; };
-
-/** Sends the audio, honouring Range requests (the audio element seeks with them). */
-function sendAudio(req, res, clip) {
-  const total = clip.buf.length; let start = 0; let end = total - 1; let status = 200;
-  const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
-  if (m && (m[1] || m[2])) {
-    if (m[1]) { start = Number(m[1]); end = m[2] ? Math.min(Number(m[2]), total - 1) : total - 1; } else { start = Math.max(0, total - Number(m[2])); }   // "bytes=-500" = the last 500 bytes
-    if (start > end || start >= total) { res.status(416).set('Content-Range', `bytes */${total}`).end(); return; }
-    status = 206;
-  }
-  res.status(status).set({ 'Content-Type': clip.type, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=3600', 'Cross-Origin-Resource-Policy': 'same-origin' });
-  if (status === 206) res.set('Content-Range', `bytes ${start}-${end}/${total}`);
-  res.end(clip.buf.subarray(start, end + 1));
 }
 
 /* ------------------------------------------------------------ "Listening to" */
 const clamp = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : d; };
-/** The player reports which track, how long what it plays lasts (a preview: about 30 s) and where it is; title, artist, artwork and link are Apple's, via the server. */
+/** The player reports which track, how long it is and where it is; title, artist, artwork and link are YouTube Music's, via the server. */
 async function cleanListening(body) {
   const id = String(body?.track?.id ?? ''); if (!TRACK_ID.test(id)) throw bad('Unknown track');
   needEnabled();
   const t = await trackInfo(id);
-  const duration = clamp(body.duration, 1000, 6 * 3600_000, 30_000);
+  const duration = clamp(body.duration, 1000, 6 * 3600_000, t.duration || 180_000);
   const position = clamp(body.position, 0, duration, 0);
   const now = Date.now();
   return { id, title: t.title, artist: t.artist, artwork: t.artwork, url: t.url, duration, startedAt: now - position, endsAt: now + (duration - position) };
@@ -168,17 +181,6 @@ export function setListening(u, value) {
 }
 
 /* ------------------------------------------------------------ routes */
-/** Before sign-in: the audio is authorised by its signature, not by a bearer token (an <audio> tag cannot send one). */
-export function mountMusicPublic(r, { h, limit }) {
-  r.get('/music/play/:id', limit('musicplay', 600, 60_000), h(async (req, res) => {
-    needEnabled();
-    const id = String(req.params.id); const exp = Number(req.query.exp); const sig = String(req.query.sig || '');
-    if (!TRACK_ID.test(id)) throw bad('Unknown track');
-    const want = Buffer.from(sign(id, exp)); const got = Buffer.from(sig);
-    if (!exp || exp < Date.now() || want.length !== got.length || !crypto.timingSafeEqual(want, got)) throw new ApiError(403, 'This audio link has expired.', 'music_expired');
-    sendAudio(req, res, await getAudio(id));
-  }));
-}
 export function mountMusic(r, { h, limit }) {
   r.get('/music/search', limit('musicq', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
     needEnabled();
@@ -186,19 +188,13 @@ export function mountMusic(r, { h, limit }) {
     if (!q) throw bad('Type something to search for');
     res.json({ tracks: await search(q) });
   }));
-  r.get('/music/charts', h(async (req, res) => { needEnabled(); res.json({ genres: GENRES.map(([key, name]) => ({ key, name })) }); }));
+  r.get('/music/charts', h(async (req, res) => { needEnabled(); res.json({ genres: await categories() }); }));
   r.get('/music/charts/:key', limit('musicchart', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
     needEnabled();
-    res.json({ key: String(req.params.key), tracks: await chart(String(req.params.key)) });
+    const key = String(req.params.key);
+    if (key !== 'top' && key !== 'trending' && !(await categories()).some((c) => c.key === key)) throw notFound('Unknown category');
+    res.json({ key, tracks: await chart(key) });
   }));
-  // the player asks right before playing; the preview is loaded now, so problems show up immediately and playback can start at once
-  r.get('/music/tracks/:id/source', limit('musicsrc', 90, 60_000, (req) => req.user.id), h(async (req, res) => {
-    needEnabled();
-    const id = String(req.params.id); if (!TRACK_ID.test(id)) throw bad('Unknown track');
-    const clip = await getAudio(id);
-    res.json({ type: clip.type, url: playLink(id), preview: true, bytes: clip.buf.length });
-  }));
-
   r.put('/me/listening', limit('listening', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
     const value = await cleanListening(req.body);
     setListening(req.user, value);
@@ -214,4 +210,3 @@ export function expireListening() {
   const now = Date.now();
   for (const u of Object.values(db.users)) if (u.listening && u.listening.endsAt < now) setListening(u, null);
 }
-void notFound;

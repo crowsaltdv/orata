@@ -1,25 +1,27 @@
-// Orata — music: the Music page (/music, opened from the note icon above Home) with Apple Music search, top-song categories and a preview player, a mini player, and the "Listening to" card shown on profiles.
-// The server talks to Apple Music (see server/music.js); the browser only plays the 30-second previews from our own /api/music/play links.
+// Orata — music: the Music page (/music, opened from the note icon above Home) with YouTube Music search, categories and a full-song player, a mini player, and the "Listening to" card shown on profiles.
+// The server finds songs through YouTube Music (see server/music.js); the browser plays them in YouTube's embedded player (see youtube-player.js).
 import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
 import { state, set, useSel, toast, setSetting, go } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Spinner, IconBtn, Toggle } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
+import { createPlayer } from '/js/youtube-player.js';
 
 const setMusic = (patch) => set({ music: { ...state.music, ...patch } });
 export const openMusic = () => go('/music');
 /** The last tracks you played, newest first (kept in this browser). */
 function pushRecent(track) {
   const recent = [track, ...(state.music.recent || []).filter((x) => x.id !== track.id)].slice(0, 20);
-  setMusic({ recent }); ls('musicRecent', null, recent);
+  setMusic({ recent }); ls('musicRecentYT', null, recent);
 }
 
 /* ------------------------------------------------------------------ player */
-let audio = null; let reqId = 0; let lastSync = 0;
-const PREVIEW_SECONDS = 30;   // every Apple Music preview is about this long; used until the player knows the real length
-// The server fills in the title, artist and artwork itself (from what Apple Music told it); the player only says which track, how long and where it is.
-const listeningBody = (m) => ({ track: { id: m.track.id }, duration: Math.round(Math.max(1, m.duration || PREVIEW_SECONDS) * 1000), position: Math.round((audio?.currentTime || 0) * 1000) });
+let player = null; let reqId = 0; let lastSync = 0; let idle = true; let watchdog = 0; let failedFor = 0; let skipRun = 0;   // skipRun: songs in a row that could not be played   // idle: nothing is loaded in the player (never started, stopped, or the queue ended)
+// The server fills in the title, artist and artwork itself (from what YouTube Music told it); the player only says which track, how long and where it is.
+/** YouTube refuses to play inside pages whose address is a bare IP number (http://192.168.1.5:3000, 127.0.0.1): it needs localhost or a domain name. */
+const numericHost = /^(\d{1,3}\.){3}\d{1,3}$|^\[[0-9a-f:]+\]$/i.test(location.hostname);
+const listeningBody = (m) => ({ track: { id: m.track.id }, duration: Math.round(Math.max(1, m.duration || 180) * 1000), position: Math.round((m.position || 0) * 1000) });
 /** Tells the server what is playing (it shows on the profile) — never when Activity Status is off. */
 function syncListening(force = false) {
   const m = state.music;
@@ -30,51 +32,57 @@ function syncListening(force = false) {
 }
 function clearListening() { lastSync = 0; if (state.token) api.del('/me/listening').catch(() => {}); }
 
-function el() {
-  if (audio) return audio;
-  audio = new Audio(); audio.preload = 'auto'; audio.volume = state.music.volume;
-  audio.addEventListener('timeupdate', () => {
-    const m = state.music; const d = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : m.duration;
-    if (Math.abs(audio.currentTime - m.position) >= 0.25 || d !== m.duration) setMusic({ position: audio.currentTime, duration: d });
+function yt() {
+  if (player) return player;
+  player = createPlayer({
+    onState(code) {
+      if (!state.music.track || idle) return;
+      if (code === 1) { clearTimeout(watchdog); skipRun = 0; setMusic({ playing: true, loading: false }); syncListening(); }
+      else if (code === 3) { clearTimeout(watchdog); setMusic({ loading: true }); }
+      else if (code === 2) { setMusic({ playing: false, loading: false }); clearListening(); }
+      else if (code === 0) next(true);
+    },
+    onTime(sec, dur) {
+      const m = state.music; if (!m.track || idle) return;
+      if (Math.abs(sec - m.position) >= 0.25 || (dur > 0 && Math.abs(dur - m.duration) >= 0.5)) setMusic({ position: sec, duration: dur > 0 ? dur : m.duration });
+    },
+    onError(code) {   // 100 removed or private, 101 / 150 / 153: the uploader does not allow it to be played outside YouTube
+      if (!state.music.track || idle || failedFor === reqId) return;   // YouTube repeats an error with every update: once per song is enough
+      const id = failedFor = reqId; const blocked = code === 100 || code === 101 || code === 150 || code === 153;
+      if (blocked && numericHost) return fail(t('YouTube won’t play music on a page whose address is just numbers. Open Orata at localhost or a domain name instead.'), 12_000);
+      if (blocked && ++skipRun > 3) return fail(t('Several songs in a row couldn’t be played here, so YouTube may be blocking embedded players on this connection.'), 9000);
+      fail(blocked ? t('This song can’t be played here.') : t('Couldn’t play this track.'));
+      if (blocked) setTimeout(() => id === reqId && next(true), 1500);   // a song that can't be played is skipped; other problems are not retried down the list
+    },
   });
-  audio.addEventListener('loadedmetadata', () => { if (Number.isFinite(audio.duration) && audio.duration > 0) setMusic({ duration: audio.duration }); });
-  audio.addEventListener('playing', () => { setMusic({ playing: true, loading: false }); syncListening(); });
-  audio.addEventListener('waiting', () => setMusic({ loading: true }));
-  audio.addEventListener('pause', () => { if (audio.ended || !state.music.track) return; setMusic({ playing: false }); clearListening(); });
-  audio.addEventListener('ended', () => next(true));
-  audio.addEventListener('error', () => { if (state.music.track && audio.getAttribute('src')) fail(t('Couldn’t play this track.')); });
-  return audio;
+  player.volume(state.music.volume);
+  return player;
 }
-function teardown() {
-  if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load(); }
-}
-function fail(message) {
+function fail(message, ms = 4000) {
+  clearTimeout(watchdog);
   setMusic({ playing: false, loading: false, error: message }); clearListening();
-  toast(message, 'error', 4000);
+  toast(message, 'error', ms);
 }
-async function load(track, queue, index) {
-  const id = ++reqId;
-  teardown();
-  setMusic({ track, queue: queue || state.music.queue, index: index ?? state.music.index, loading: true, playing: false, position: 0, duration: PREVIEW_SECONDS, error: null });
+function load(track, queue, index) {
+  const id = ++reqId; idle = false;
+  setMusic({ track, queue: queue || state.music.queue, index: index ?? state.music.index, loading: true, playing: false, position: 0, duration: (track.duration || 0) / 1000, error: null });
   pushRecent(track);
-  let src;
-  try { src = await api.get(`/music/tracks/${encodeURIComponent(track.id)}/source`); } catch (e) { if (id === reqId) { fail(e.message); if (e.code === 'music_unavailable') setTimeout(() => id === reqId && next(true), 1500); } return; }   // a track Audiomack can't play is skipped; real problems (keys, network) are not retried down the list
-  if (id !== reqId) return;
-  const a = el();
-  try {
-    a.src = src.url;
-    await a.play();
-  } catch (e) { if (id === reqId && e.name !== 'AbortError') fail(e.message || t('Couldn’t play this track.')); }
+  yt().load(track.id);
+  clearTimeout(watchdog);
+  watchdog = setTimeout(() => { if (id === reqId && !state.music.playing) fail(t('YouTube didn’t respond. Check your connection or ad blocker.')); }, 15_000);
 }
 export const music = {
   play(track, queue) { const q = queue || [track]; load(track, q, Math.max(0, q.findIndex((x) => x.id === track.id))); },
-  toggle() { const m = state.music; if (!m.track) return; const a = el(); if (a.paused) { if (!a.getAttribute('src')) load(m.track, m.queue, m.index); else a.play().catch(() => {}); } else a.pause(); },
+  toggle() {
+    const m = state.music; if (!m.track) return;
+    if (idle) load(m.track, m.queue, m.index); else if (m.playing) yt().pause(); else yt().play();
+  },
   next: () => next(false),
-  prev() { const m = state.music; if (audio && audio.currentTime > 3) return music.seek(0); if (m.index > 0) load(m.queue[m.index - 1], m.queue, m.index - 1); else music.seek(0); },
-  seek(sec) { const a = el(); a.currentTime = Math.max(0, sec); setMusic({ position: a.currentTime }); syncListening(true); },
-  volume(v) { const x = Math.min(1, Math.max(0, v)); if (audio) audio.volume = x; ls('musicVolume', null, x); setMusic({ volume: x }); },
+  prev() { const m = state.music; if (m.position > 3) return music.seek(0); if (m.index > 0) load(m.queue[m.index - 1], m.queue, m.index - 1); else music.seek(0); },
+  seek(sec) { if (idle) return; yt().seek(sec); setMusic({ position: Math.max(0, sec) }); syncListening(true); },
+  volume(v) { const x = Math.min(1, Math.max(0, v)); if (player) player.volume(x); ls('musicVolume', null, x); setMusic({ volume: x }); },
   stop({ silent = false } = {}) {
-    reqId++; teardown();
+    reqId++; idle = true; clearTimeout(watchdog); player?.stop();
     if (!silent) clearListening();
     setMusic({ track: null, queue: [], index: -1, playing: false, loading: false, position: 0, duration: 0, error: null });
   },
@@ -99,9 +107,21 @@ export const music = {
 function next(auto) {
   const m = state.music;
   if (m.index + 1 < m.queue.length) load(m.queue[m.index + 1], m.queue, m.index + 1);
-  else if (auto) { setMusic({ playing: false, position: 0 }); clearListening(); } else music.seek(0);
+  else if (auto) { idle = true; setMusic({ playing: false, loading: false, position: 0 }); clearListening(); } else music.seek(0);
 }
 export const stopMusic = (opts) => music.stop(opts);
+
+/** The Music page's video slot: while it is on screen the player's video sits over it (and follows it as the page scrolls or resizes); otherwise the player is parked. */
+let slotOff = null;
+function bindVideoSlot(el) {
+  slotOff?.(); slotOff = null;
+  if (!el) { player?.dock(); return; }
+  const fit = () => { if (el.isConnected && player) player.place(el.getBoundingClientRect(), el.closest('.mpg-scroll')?.getBoundingClientRect()); };
+  const ro = new ResizeObserver(fit); ro.observe(el); window.addEventListener('scroll', fit, true); window.addEventListener('resize', fit);
+  const until = Date.now() + 900; let raf = requestAnimationFrame(function tick() { fit(); if (Date.now() < until) raf = requestAnimationFrame(tick); });   // the page slides in: follow it for a moment
+  slotOff = () => { ro.disconnect(); window.removeEventListener('scroll', fit, true); window.removeEventListener('resize', fit); cancelAnimationFrame(raf); };
+  fit();
+}
 // a track that finished while the tab was asleep, or Activity Status switched back on mid-song
 setInterval(() => { if (state.music?.playing) syncListening(); }, 20_000);
 
@@ -110,7 +130,7 @@ const clock = (s) => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor
 function Art({ src, size = 44, playing }) {
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [src]);
-  return html`<span class=${cx('m-art', playing && 'on')} style=${{ width: size + 'px', height: size + 'px' }}>${src && !broken ? html`<img src=${size <= 64 ? src.replace('/300x300bb.', '/100x100bb.') : src} alt="" decoding="async" referrerpolicy="no-referrer" draggable=${false} onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${Math.round(size * 0.45)} />`}${playing ? html`<span class="eq sm"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
+  return html`<span class=${cx('m-art', playing && 'on')} style=${{ width: size + 'px', height: size + 'px' }}>${src && !broken ? html`<img src=${size <= 64 ? src.replace('=w400-h400', '=w120-h120') : src} alt="" decoding="async" referrerpolicy="no-referrer" draggable=${false} onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${Math.round(size * 0.45)} />`}${playing ? html`<span class="eq sm"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
 }
 function Progress() {
   const pos = useSel((s) => s.music.position); const dur = useSel((s) => s.music.duration);
@@ -139,14 +159,14 @@ function Cover({ src, playing }) {
 
 /** What is playing, big, with the controls. Shown above everything else on the page. */
 function Hero() {
-  const track = useSel((s) => s.music.track); const playing = useSel((s) => s.music.playing); const volume = useSel((s) => s.music.volume);
+  const track = useSel((s) => s.music.track); const volume = useSel((s) => s.music.volume);
   const show = useSel((s) => s.settings.privacy?.showActivity !== false);
   if (!track) return html`<section class="mpg-hero empty"><span class="mpg-hero-ico"><${Icon} name="music" size=${34} sw=${1.6} /></span>
-    <div><h1>${t('Music')}</h1><p>${t('Search Apple Music or pick a category below and hear a 30-second preview. What you play can show on your profile.')}</p></div></section>`;
+    <div><h1>${t('Music')}</h1><p>${t('Search YouTube Music or pick a category below and play full songs. What you play can show on your profile.')}</p></div></section>`;
   return html`<section class="mpg-hero" style=${track.artwork ? { '--cover': `url("${track.artwork}")` } : null}>
-    <div class="mpg-hero-art"><${Cover} src=${track.artwork} playing=${playing} /></div>
+    <div class="mpg-hero-art"><div class="mpg-video" ref=${bindVideoSlot}><${Cover} src=${track.artwork} /></div></div>
     <div class="mpg-now">
-      <span class="m-chip">${t('30-second preview')}</span>
+      <span class="m-chip">${t('YouTube Music')}</span>
       <h2 title=${track.title}>${track.title}</h2>
       <a class="mpg-artist" href=${track.artistUrl || track.url} target="_blank" rel="noopener noreferrer">${track.artist}</a>
       ${track.album ? html`<small class="mpg-album">${track.album}</small>` : null}
@@ -157,7 +177,7 @@ function Hero() {
           <input type="range" min="0" max="1" step="0.01" value=${volume} style=${{ '--p': `${volume * 100}%` }} aria-label=${t('Volume')} onInput=${(e) => music.volume(Number(e.target.value))} /></label>
         <label class="m-share" data-tip=${t('Show what you’re listening to on your profile')}><span>${t('Show on my profile')}</span><${Toggle} checked=${show} onChange=${(v) => { setSetting('privacy.showActivity', v); if (v) setTimeout(() => syncListening(true), 50); }} /></label>
       </div>
-      ${track.url ? html`<div class="m-credit"><a href=${track.url} target="_blank" rel="noopener noreferrer">${t('Get the full track on')} Apple Music <${Icon} name="external" size=${12} /></a></div>` : null}
+      ${track.url ? html`<div class="m-credit"><a href=${track.url} target="_blank" rel="noopener noreferrer">${t('Open in')} YouTube Music <${Icon} name="external" size=${12} /></a></div>` : null}
     </div>
   </section>`;
 }
@@ -172,8 +192,13 @@ function TrackGrid({ tracks }) {
 
 function Categories() {
   const genres = useSel((s) => s.music.genres); const cat = useSel((s) => s.music.category);
+  const [all, setAll] = useState(false);
   const list = genres || [{ key: 'top', name: 'Top Songs' }];
-  return html`<div class="mpg-chips" role="tablist" aria-label=${t('Categories')}>${list.map((g) => html`<button type="button" role="tab" key=${g.key} aria-selected=${cat === g.key} class=${cx('mpg-chip', cat === g.key && 'on')} onClick=${() => music.openChart(g.key)}>${g.name}</button>`)}</div>`;
+  const FIRST = 14;   // YouTube Music has about 40 genres and moods: the popular ones show, the rest are behind "More" (the open one always shows)
+  const long = list.length > FIRST + 2;
+  const shown = all || !long ? list : [...list.slice(0, FIRST), ...list.slice(FIRST).filter((g) => g.key === cat)];
+  return html`<div class="mpg-chips" role="tablist" aria-label=${t('Categories')}>${shown.map((g) => html`<button type="button" role="tab" key=${g.key} aria-selected=${cat === g.key} class=${cx('mpg-chip', cat === g.key && 'on')} onClick=${() => music.openChart(g.key)}>${g.name}</button>`)}
+    ${long ? html`<button type="button" class="mpg-chip" onClick=${() => setAll(!all)}>${all ? t('Fewer') : `${t('More')} (${list.length - shown.length})`}</button>` : null}</div>`;
 }
 
 function Chart() {
@@ -203,7 +228,7 @@ function SearchResults() {
 
 /** The Music page (`/music`): search, what is playing, categories of top songs and what you played recently. */
 export function MusicPage() {
-  const ok = useSel((s) => s.musicOk); const query = useSel((s) => s.music.query);
+  const ok = useSel((s) => s.musicOk); const why = useSel((s) => s.musicWhy); const query = useSel((s) => s.music.query);
   const [q, setQ] = useState(query); const timer = useRef(null);
   useEffect(() => { if (ok !== false) { music.loadGenres(); music.openChart(state.music.category || 'top'); } }, [ok]);
   const typing = (v) => { setQ(v); clearTimeout(timer.current); timer.current = setTimeout(() => music.search(v), 450); };
@@ -212,10 +237,10 @@ export function MusicPage() {
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
       <div class="m-title"><${Icon} name="music" size=${23} /><span class="name">${t('Music')}</span></div>
-      <div class="m-topic">${t('via')} <a href="https://music.apple.com" target="_blank" rel="noopener noreferrer">Apple Music</a></div>
+      <div class="m-topic">${t('via')} <a href="https://music.youtube.com" target="_blank" rel="noopener noreferrer">YouTube Music</a></div>
     </header>
     <div class="mpg-scroll">
-      ${ok === false ? html`<div class="m-empty setup"><${Icon} name="music" size=${34} sw=${1.5} /><b>${t('Music is turned off on this server')}</b><p>${t('The server admin switched the music player off.')}</p></div>` : html`
+      ${ok === false ? html`<div class="m-empty setup"><${Icon} name="music" size=${34} sw=${1.5} /><b>${why ? t('Music isn’t set up on this server yet') : t('Music is turned off on this server')}</b><p>${why || t('The server admin switched the music player off.')}</p></div>` : html`
         <div class="mpg-search"><div class="input-wrap"><${Icon} name="search" size=${18} /><input class="input" placeholder=${t('Search songs and artists…')} value=${q} onInput=${(e) => typing(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter') { clearTimeout(timer.current); music.search(q); } }} />
           ${q ? html`<button type="button" class="mpg-clear" aria-label=${t('Clear')} onClick=${() => { setQ(''); clearTimeout(timer.current); music.search(''); }}><${Icon} name="x" size=${16} /></button>` : null}</div></div>
         <${Hero} />
@@ -236,14 +261,14 @@ export function MiniPlayer() {
   </div>`;
 }
 
-/** "Listening on Apple Music" on a profile. `listening` = { title, artist, artwork, url, duration, startedAt, endsAt } (milliseconds). */
+/** "Listening on YouTube Music" on a profile. `listening` = { title, artist, artwork, url, duration, startedAt, endsAt } (milliseconds). */
 export function ListeningCard({ listening: l }) {
   const [, tick] = useState(0);
   useEffect(() => { const id = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(id); }, []);
   if (!l || l.endsAt < Date.now()) return null;
   const pos = Math.min(l.duration, Math.max(0, Date.now() - l.startedAt));
   return html`<div class="listening-card">
-    <h5><${Icon} name="music" size=${13} /> ${t('Listening on Apple Music')}</h5>
+    <h5><${Icon} name="music" size=${13} /> ${t('Listening on YouTube Music')}</h5>
     <div class="lc-row"><${Art} src=${l.artwork} size=${60} playing=${true} />
       <div class="lc-text">${l.url ? html`<a class="lc-title" href=${l.url} target="_blank" rel="noopener noreferrer" title=${l.title}>${l.title}</a>` : html`<b class="lc-title">${l.title}</b>`}<small>${l.artist}</small>
         <div class="lc-bar"><span>${clock(pos / 1000)}</span><i><b style=${{ width: `${(pos / l.duration) * 100}%` }}></b></i><span>${clock(l.duration / 1000)}</span></div></div></div>
@@ -252,6 +277,6 @@ export function ListeningCard({ listening: l }) {
 /** What the signed-in user is playing right now, shaped like a `listening` status (their own is never hidden from themselves). */
 export function myListening() {
   const m = state.music; if (!m?.playing || !m.track) return null;
-  const now = Date.now(); const pos = m.position * 1000; const dur = Math.max(1, m.duration || PREVIEW_SECONDS) * 1000;
+  const now = Date.now(); const pos = m.position * 1000; const dur = Math.max(1, m.duration || 180) * 1000;
   return { id: m.track.id, title: m.track.title, artist: m.track.artist, artwork: m.track.artwork, url: m.track.url, duration: dur, startedAt: now - pos, endsAt: now + (dur - pos) };
 }

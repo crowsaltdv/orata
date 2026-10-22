@@ -1,6 +1,6 @@
 // Orata feature self-test (runs after the main self-test):  npm test
 // Channel & category permission overwrites (allow / deny / inherit, sync with the category), sessions that never expire, invite cards,
-// the keyless Apple Music preview player (against a fake iTunes Search server) and the "listening to" status.
+// the Music player's server side (YouTube Music through ytmusicapi, against a fake helper) and the "listening to" status.
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -13,49 +13,43 @@ import WebSocket from 'ws';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-feat-test-'));
 const PORT = 3800 + Math.floor(Math.random() * 90);
-const AP_PORT = PORT + 100;
 const base = `http://127.0.0.1:${PORT}`;
 let pass = 0; let fail = 0;
 const ok = (c, name, extra = '') => { if (c) { pass++; console.log('  ✓', name); } else { fail++; console.log('  ✗', name, extra); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/* ---------------------------------------------------------------- a fake iTunes Search API (/search, /lookup) + preview host */
-const ap = { requests: [], mediaFetches: {} };
-const itunesSong = (id, name, extra = {}) => ({ wrapperType: 'track', kind: 'song', trackId: id, artistName: 'Test Artist', collectionName: 'Test Album', trackName: name, trackViewUrl: `https://music.apple.com/us/album/${name.toLowerCase().replace(/\W+/g, '-')}/55?i=${id}&uo=4`, previewUrl: `http://127.0.0.1:${AP_PORT}/media/${id}.m4a`, artworkUrl100: `https://is1-ssl.mzstatic.com/image/thumb/Music/test/${id}/100x100bb.jpg`, trackTimeMillis: 215000, trackExplicitness: 'notExplicit', ...extra });
-const fakeItunes = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://127.0.0.1:${AP_PORT}`);
-  const js = (o, code = 200) => { res.writeHead(code, { 'content-type': 'text/javascript; charset=utf-8' }); res.end(JSON.stringify(o)); };   // the real one is served as text/javascript too
-  if (url.pathname.startsWith('/media/')) {
-    const id = url.pathname.split('/').pop().replace('.m4a', ''); ap.mediaFetches[id] = (ap.mediaFetches[id] || 0) + 1;
-    res.writeHead(200, { 'content-type': 'audio/x-m4p', 'content-length': 20000 }); return res.end(Buffer.alloc(20000, 7));   // Apple labels previews audio/x-m4p
-  }
-  ap.requests.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), hasAuth: !!req.headers.authorization });
-  if (url.pathname === '/search') {
-    const term = url.searchParams.get('term');
-    if (term === 'ratelimit') { res.writeHead(403); return res.end('Forbidden'); }
-    if (term === 'empty') return js({ resultCount: 0, results: [] });
-    return js({ resultCount: 6, results: [itunesSong(101, 'Night Drive'), itunesSong(102, 'Rain Sounds', { trackTimeMillis: 187000, trackExplicitness: 'explicit' }), itunesSong(103, 'No Preview Here', { previewUrl: undefined }), { ...itunesSong(201, 'An Album'), wrapperType: 'collection', kind: undefined }, { ...itunesSong(202, 'A Video'), kind: 'music-video' }, itunesSong(203, 'Bad Host', { previewUrl: 'https://evil.example/x.m4a' })] });
-  }
-  const rss = url.pathname.match(/^\/us\/rss\/topsongs\/limit=30(?:\/genre=(\d+))?\/json$/);
-  if (rss) {
-    const entry = (id, name) => ({ 'im:name': { label: name }, 'im:image': [{ label: `https://is1-ssl.mzstatic.com/image/thumb/Music/test/${id}/55x55bb.png` }, { label: `https://is1-ssl.mzstatic.com/image/thumb/Music/test/${id}/170x170bb.png` }], 'im:collection': { 'im:name': { label: 'Chart Album' } }, id: { label: `https://music.apple.com/us/album/x/1?i=${id}`, attributes: { 'im:id': String(id) } }, 'im:artist': { label: 'Chart Artist' }, link: [{ attributes: { rel: 'alternate', href: `https://music.apple.com/us/album/x/1?i=${id}&uo=2` } }, { attributes: { rel: 'enclosure', href: `http://127.0.0.1:${AP_PORT}/media/${id}.m4a` } }] });
-    return js({ feed: { entry: [entry(rss[1] === '14' ? 301 : 300, rss[1] === '14' ? 'Pop Hit' : 'Overall Hit'), { ...entry(302, 'No Preview'), link: [] }] } });
-  }
-  if (url.pathname === '/lookup') {
-    const id = Number(url.searchParams.get('id'));
-    if (id === 104) return js({ resultCount: 1, results: [itunesSong(104, 'Deep Cut', { trackTimeMillis: 187000 })] });
-    if (id === 103) return js({ resultCount: 1, results: [itunesSong(103, 'No Preview Here', { previewUrl: undefined })] });
-    return js({ resultCount: 0, results: [] });
-  }
-  res.writeHead(404); res.end();
-});
+/* ---------------------------------------------------------------- a fake music helper (what music-service/service.py would answer) */
+const HELPER = path.join(ROOT, 'server', 'selftest-music-helper.mjs'); const HELPER_LOG = path.join(data, 'music-helper.log');
+const helperCalls = (op) => { let list = []; try { list = fs.readFileSync(HELPER_LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { /* nothing asked yet */ } return op ? list.filter((x) => x.op === op) : list; };
+/** Starts a helper program, waits for its "ready" line, sends it `requests` and collects the answers; { error } when it can't be started. */
+function talkToHelper(cmd, args, requests, ms = 20000) {
+  return new Promise((resolve) => {
+    let p; let buf = ''; const lines = [];
+    const done = (v) => { clearTimeout(timer); try { p?.kill(); } catch { /* gone */ } resolve(v); };
+    const timer = setTimeout(() => done({ lines }), ms);
+    try { p = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, PYTHONIOENCODING: 'utf-8' } }); } catch (e) { return done({ error: e }); }
+    p.on('error', (e) => done({ error: e }));
+    p.on('exit', () => done({ lines }));
+    p.stdout.setEncoding('utf8');
+    p.stdout.on('data', (d) => {
+      buf += d;
+      for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+        const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!l) continue;
+        let m; try { m = JSON.parse(l); } catch { continue; }
+        lines.push(m);
+        if (lines.length === 1 && m.ready === true) for (const q of requests) p.stdin.write(`${JSON.stringify(q)}\n`);
+        if (m.ready === false || lines.length > requests.length) return done({ lines });
+      }
+    });
+  });
+}
 
 /* ---------------------------------------------------------------- scratch server */
 let child = null;
 function startServer(extra = {}) {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '',
-      MUSIC: '', MUSIC_API_BASE: `http://127.0.0.1:${AP_PORT}`, MUSIC_MEDIA_HOSTS: '127.0.0.1', ...extra },
+      MUSIC: '', MUSIC_HELPER: JSON.stringify([process.execPath, HELPER]), FAKE_MUSIC_LOG: HELPER_LOG, ...extra },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
 }
@@ -84,7 +78,6 @@ const register = async (username, email) => {
 };
 
 async function main() {
-  await new Promise((r) => fakeItunes.listen(AP_PORT, '127.0.0.1', r));
   startServer(); await ready();
   console.log('Orata feature test on port', PORT);
 
@@ -207,70 +200,49 @@ async function main() {
   r = await api('GET', '/invites/nonsense', E.token); ok(r.status === 404, 'unknown invite codes are invalid');
 
   /* ---------------------------------------------------------------- music + listening status */
-  console.log('\nMusic (Apple Music previews, no key)');
-  r = await api('GET', '/config'); ok(r.body.music === true, '/api/config says music is available — without any key being set');
+  console.log('\nMusic (YouTube Music through ytmusicapi)');
+  r = await api('GET', '/config'); ok(r.body.music === true && r.body.musicWhy === null, '/api/config says music is available — without any key being set');
   r = await api('GET', '/music/search?q=night', null); ok(r.status === 401, 'search needs a login');
   r = await api('GET', '/music/search?q=night', A3);
-  ok(r.status === 200 && r.body.tracks.map((x) => x.id).join() === '101,102', 'search returns the songs that have a preview (albums, videos, other hosts and previewless songs are left out)', JSON.stringify(r.body).slice(0, 200));
+  ok(r.status === 200 && r.body.tracks.map((x) => x.id).join() === 'nightdrive1,rainsounds2,evilartwork', 'search returns songs that have a real YouTube video id (the others are left out)', JSON.stringify(r.body).slice(0, 240));
   const t0 = r.body.tracks[0];
-  ok(t0.title === 'Night Drive' && t0.artist === 'Test Artist' && t0.album === 'Test Album' && t0.artwork === 'https://is1-ssl.mzstatic.com/image/thumb/Music/test/101/300x300bb.jpg' && t0.url.startsWith('https://music.apple.com/') && t0.duration === 215000 && t0.explicit === false && r.body.tracks[1].explicit === true, 'titles, artwork (upsized), the Apple Music link and the song length come through');
-  ok(!JSON.stringify(r.body).includes('127.0.0.1') && !('_preview' in t0), 'the preview address stays on the server');
-  const q1 = ap.requests.find((x) => x.path === '/search');
-  ok(q1.query.term === 'night' && q1.query.media === 'music' && q1.query.entity === 'song' && q1.query.country === 'US' && !q1.hasAuth, 'it asked Apple\'s keyless search for songs in the US storefront, with no credentials');
-  await api('GET', '/music/search?q=night', A3); ok(ap.requests.filter((x) => x.path === '/search').length === 1, 'repeat searches are served from a cache');
+  ok(t0.title === 'Night Drive' && t0.artist === 'Test Artist' && t0.album === 'Test Album' && t0.artwork === 'https://i.ytimg.com/vi/nightdrive1/hqdefault.jpg' && t0.url === 'https://music.youtube.com/watch?v=nightdrive1' && t0.duration === 215000 && t0.explicit === false && r.body.tracks[1].explicit === true && r.body.tracks[1].artwork.startsWith('https://yt3.googleusercontent.com/'), 'titles, artwork, the YouTube Music link and the song length come through');
+  ok(r.body.tracks[2].artwork === null, 'artwork from any other website is dropped');
+  const s1 = helperCalls('search'); ok(s1.length === 1 && s1[0].q === 'night' && s1[0].limit === 24, 'one search was sent to the helper');
+  await api('GET', '/music/search?q=night', A3); ok(helperCalls('search').length === 1, 'repeat searches are served from a cache');
   r = await api('GET', '/music/search?q=empty', A3); ok(r.status === 200 && r.body.tracks.length === 0, 'an empty result is an empty list');
   r = await api('GET', '/music/search?q=', A3); ok(r.status === 400, 'blank searches are rejected');
-  r = await api('GET', '/music/search?q=ratelimit', A3); ok(r.status === 429 && r.body.code === 'rate_limited', 'when Apple says "too many requests" (403) people are told to wait');
+  r = await api('GET', '/music/search?q=broken', A3); ok(r.status === 502 && r.body.code === 'music_upstream' && !JSON.stringify(r.body).includes('boom'), 'when YouTube Music fails people get a plain message (the technical error stays on the server)');
   r = await api('GET', '/music/charts', null); ok(r.status === 401, 'the category list needs a login');
-  r = await api('GET', '/music/charts', A3); ok(r.status === 200 && r.body.genres[0].key === 'top' && r.body.genres.some((g) => g.key === 'hiphop' && g.name === 'Hip-Hop / Rap') && r.body.genres.length >= 15, 'the Music page has categories');
-  r = await api('GET', '/music/charts/pop', A3);
-  ok(r.status === 200 && r.body.tracks.length === 1 && r.body.tracks[0].id === '301' && r.body.tracks[0].title === 'Pop Hit' && r.body.tracks[0].artist === 'Chart Artist' && r.body.tracks[0].artwork.endsWith('/301/300x300bb.png') && !JSON.stringify(r.body).includes('127.0.0.1'), 'a category lists the top songs that have a preview (artwork upsized, preview address kept on the server)', JSON.stringify(r.body).slice(0, 200));
-  ok(ap.requests.some((x) => x.path === '/us/rss/topsongs/limit=30/genre=14/json' && !x.hasAuth), "… from Apple's keyless genre chart");
-  r = await api('GET', '/music/charts/top', A3); ok(r.body.tracks[0].id === '300', 'Top Songs is the overall chart');
-  const chartCalls = ap.requests.filter((x) => x.path.includes('/rss/')).length; await api('GET', '/music/charts/pop', A3); ok(ap.requests.filter((x) => x.path.includes('/rss/')).length === chartCalls, 'charts are cached');
-  r = await api('GET', '/music/charts/nonsense', A3); ok(r.status === 404, 'unknown categories are refused');
-  r = await api('GET', '/music/tracks/101/source', null); ok(r.status === 401, 'asking for a play link needs a login');
-  r = await api('GET', '/music/tracks/bad!id/source', A3); ok(r.status === 400, 'track ids are validated');
-  r = await api('GET', '/music/tracks/101/source', A3);
-  ok(r.status === 200 && r.body.type === 'audio/mp4' && r.body.preview === true && r.body.bytes === 20000 && r.body.url.startsWith('/api/music/play/101?exp='), 'the player gets a signed link; the preview was downloaded first (and labelled audio/mp4, not Apple\'s audio/x-m4p)', JSON.stringify(r.body).slice(0, 140));
-  const playUrl = r.body.url;
-  let st = await fetch(base + playUrl);
-  ok(st.status === 200 && st.headers.get('content-type') === 'audio/mp4' && (await st.arrayBuffer()).byteLength === 20000, 'the audio plays without a bearer token (an <audio> tag cannot send one)');
-  st = await fetch(base + playUrl); ok(st.status === 200 && ap.mediaFetches['101'] === 1, '… as often as needed from memory — Apple was asked once');
-  st = await fetch(base + playUrl, { headers: { range: 'bytes=0-99' } });
-  ok(st.status === 206 && st.headers.get('content-range') === 'bytes 0-99/20000' && (await st.arrayBuffer()).byteLength === 100, 'range requests (seeking) are answered');
-  st = await fetch(base + playUrl, { headers: { range: 'bytes=15000-' } }); ok(st.status === 206 && st.headers.get('content-range') === 'bytes 15000-19999/20000', 'so are open-ended ranges');
-  st = await fetch(base + playUrl, { headers: { range: 'bytes=-500' } }); ok(st.status === 206 && st.headers.get('content-range') === 'bytes 19500-19999/20000', 'and suffix ranges');
-  st = await fetch(base + playUrl, { headers: { range: 'bytes=50000-60000' } }); ok(st.status === 416, 'a range past the end is refused');
-  st = await fetch(base + playUrl.replace(/sig=[^&]+/, 'sig=forged')); ok(st.status === 403, 'a forged link is refused');
-  st = await fetch(base + playUrl.replace(/exp=\d+/, 'exp=1')); ok(st.status === 403, 'so is a link whose time ran out or that was edited');
-  st = await fetch(base + playUrl.replace('/play/101', '/play/102')); ok(st.status === 403, 'and a link cannot be reused for another track');
-  r = await api('GET', '/music/tracks/103/source', A3); ok(r.status === 404 && r.body.code === 'music_unavailable', 'a song without a preview says so (the player skips it)');
-  r = await api('GET', '/music/tracks/999/source', A3); ok(r.status === 404 && r.body.code === 'music_unavailable', 'so does an unknown one');
-  r = await api('GET', '/music/tracks/203/source', A3); ok(r.status === 404, 'a preview on a non-Apple host is never fetched');
-  ok(ap.mediaFetches['203'] === undefined, '… (the fake never saw a request for it)');
+  r = await api('GET', '/music/charts', A3);
+  ok(r.status === 200 && r.body.genres[0].key === 'top' && r.body.genres.some((g) => g.key === 'g-pop' && g.name === 'Pop' && g.group === 'genre') && r.body.genres.some((g) => g.key === 'm-chill' && g.group === 'mood') && !r.body.genres.some((g) => g.key === 'BAD KEY!'), 'the Music page has categories (charts, genres, moods; unusable keys are dropped)', JSON.stringify(r.body).slice(0, 200));
+  r = await api('GET', '/music/charts/g-pop', A3); ok(r.status === 200 && r.body.tracks.length === 1 && r.body.tracks[0].id === 'popsong0001' && r.body.tracks[0].title === 'Pop Hit', 'a category lists its songs');
+  r = await api('GET', '/music/charts/top', A3); ok(r.body.tracks[0].id === 'overallhit0', 'Top Songs is the overall chart');
+  const catCalls = helperCalls('category').length; await api('GET', '/music/charts/g-pop', A3); ok(helperCalls('category').length === catCalls, 'categories are cached');
+  r = await api('GET', '/music/charts/nonsense', A3); ok(r.status === 404 && helperCalls('category').every((x) => x.key !== 'nonsense'), 'unknown categories are refused without bothering YouTube');
+  r = await api('GET', '/music/tracks/nightdrive1/source', A3); ok(r.status === 404, 'there is no audio relay: the browser plays the song in YouTube’s own player');
 
   console.log('\nListening status');
   const w1 = await connect(A3); const w2 = await connect(D.token);
-  r = await api('PUT', '/me/listening', A3, { track: { id: '101', title: 'Night Drive' }, duration: 30000, position: 5000 });
-  ok(r.status === 200 && r.body.listening?.title === 'Night Drive' && r.body.listening.artist === 'Test Artist' && r.body.listening.artwork.endsWith('/300x300bb.jpg') && r.body.listening.url.startsWith('https://music.apple.com/') && r.body.listening.duration === 30000, 'set what you are listening to');
+  r = await api('PUT', '/me/listening', A3, { track: { id: 'nightdrive1', title: 'Night Drive' }, duration: 30000, position: 5000 });
+  ok(r.status === 200 && r.body.listening?.title === 'Night Drive' && r.body.listening.artist === 'Test Artist' && r.body.listening.artwork === 'https://i.ytimg.com/vi/nightdrive1/hqdefault.jpg' && r.body.listening.url === 'https://music.youtube.com/watch?v=nightdrive1' && r.body.listening.duration === 30000, 'set what you are listening to');
   const upd = await w2.wait('user_update', (d) => d.user.listening?.title === 'Night Drive', 2000).catch(() => null);
   ok(!!upd && upd.user.listening.artist === 'Test Artist' && upd.user.listening.endsAt > Date.now(), 'people who share a server see it live, with an end time');
   r = await api('GET', `/users/${(await api('GET', '/me', A3)).body.id}`, D.token); ok(r.body.user.listening?.title === 'Night Drive', 'it is on the profile too');
-  r = await api('PUT', '/me/listening', A3, { track: { id: '101', title: '<img src=x onerror=alert(1)>', artist: 'Somebody Else', artwork: 'https://evil.example/pixel.gif', url: 'https://evil.example/' }, duration: 30000 });
-  ok(r.status === 200 && r.body.listening.title === 'Night Drive' && r.body.listening.artwork.startsWith('https://is1-ssl.mzstatic.com/') && r.body.listening.url.startsWith('https://music.apple.com/'), 'titles, artwork and links come from Apple via the server — whatever a client sends is ignored');
-  r = await api('PUT', '/me/listening', A3, { track: { id: '104' }, position: 1000 });
-  ok(r.status === 200 && r.body.listening.title === 'Deep Cut' && r.body.listening.duration === 30000, 'a song the server hasn’t listed yet is looked up on Apple (and a preview lasts 30 s unless the player says otherwise)');
-  r = await api('PUT', '/me/listening', A3, { track: { id: '999' }, duration: 30000 }); ok(r.status === 404, 'an unknown song is refused');
+  r = await api('PUT', '/me/listening', A3, { track: { id: 'nightdrive1', title: '<img src=x onerror=alert(1)>', artist: 'Somebody Else', artwork: 'https://evil.example/pixel.gif', url: 'https://evil.example/' }, duration: 30000 });
+  ok(r.status === 200 && r.body.listening.title === 'Night Drive' && r.body.listening.artwork.startsWith('https://i.ytimg.com/') && r.body.listening.url.startsWith('https://music.youtube.com/'), 'titles, artwork and links come from YouTube Music via the server — whatever a client sends is ignored');
+  r = await api('PUT', '/me/listening', A3, { track: { id: 'deepcut0001' }, position: 1000 });
+  ok(r.status === 200 && r.body.listening.title === 'Deep Cut' && r.body.listening.duration === 187000, 'a song the server hasn’t listed yet is looked up on YouTube Music (and lasts as long as it says unless the player says otherwise)');
+  r = await api('PUT', '/me/listening', A3, { track: { id: 'nosuchtrack' }, duration: 30000 }); ok(r.status === 404 && r.body.code === 'music_unavailable', 'an unknown song is refused');
   r = await api('PUT', '/me/listening', A3, { track: { id: 'x1' }, duration: 30000 }); ok(r.status === 400, 'so is a malformed id');
   await api('PATCH', '/me/settings', A3, { privacy: { showActivity: false } });
-  r = await api('PUT', '/me/listening', A3, { track: { id: '102' }, duration: 30000 });
+  r = await api('PUT', '/me/listening', A3, { track: { id: 'rainsounds2' }, duration: 30000 });
   r = await api('GET', `/users/${(await api('GET', '/me', A3)).body.id}`, D.token); ok(!r.body.user.listening, 'Activity Status off hides it from everybody else');
   await api('PATCH', '/me/settings', A3, { privacy: { showActivity: true } });
-  await api('PUT', '/me/listening', A3, { track: { id: '102' }, duration: 30000 });
+  await api('PUT', '/me/listening', A3, { track: { id: 'rainsounds2' }, duration: 30000 });
   r = await api('DELETE', '/me/listening', A3); ok(r.status === 200, 'stop listening');
   ok(!!(await w2.wait('user_update', (d) => d.user.listening === null, 2000).catch(() => null)), 'everyone sees it clear');
-  await api('PUT', '/me/listening', A3, { track: { id: '102' }, duration: 60000 });
+  await api('PUT', '/me/listening', A3, { track: { id: 'rainsounds2' }, duration: 60000 });
   w1.ws.close();
   const gone = await w2.wait('presence_update', (d) => d.userId === (A.user.id) && d.listening === null, 5000).catch(() => null);
   ok(!!gone, 'closing the last tab clears the status (the music stopped with it)');
@@ -278,16 +250,40 @@ async function main() {
 
   console.log('\nRequest budget');
   await stopServer(); startServer({ MUSIC_API_PER_MIN: '2' }); await ready();
-  const before = ap.requests.length;
+  const before = helperCalls().length;
   r = await api('GET', '/music/search?q=one', A3); const r2 = await api('GET', '/music/search?q=two', A3); r = await api('GET', '/music/search?q=three', A3);
-  ok(r2.status === 200 && r.status === 429 && r.body.code === 'rate_limited' && ap.requests.length === before + 2, 'Orata never sends Apple more than MUSIC_API_PER_MIN requests a minute, however many people search');
+  ok(r2.status === 200 && r.status === 429 && r.body.code === 'rate_limited' && helperCalls().length === before + 2, 'Orata never sends YouTube more than MUSIC_API_PER_MIN requests a minute, however many people search');
   r = await api('GET', '/music/search?q=one', A3); ok(r.status === 200, '… and cached searches still work when the budget is used up');
+
+  console.log('\nMusic helper trouble');
+  await stopServer(); startServer(); await ready();
+  r = await api('GET', '/music/search?q=crash', A3); ok(r.status === 502 && r.body.code === 'music_upstream', 'if the helper dies in the middle of a request the person gets an error, not a hang');
+  r = await api('GET', '/music/search?q=afterwards', A3); ok(r.status === 200 && r.body.tracks.length === 3, '… and the next search starts it again');
+  await stopServer(); startServer({ MUSIC_HELPER: JSON.stringify(['no-such-program-for-orata-tests']) }); await ready();
+  r = await api('GET', '/config'); ok(r.body.music === false && /Python/.test(r.body.musicWhy || ''), 'without Python (or the helper) /api/config says music is off and what is missing');
+  r = await api('GET', '/music/search?q=night', A3); ok(r.status === 503 && r.body.code === 'music_not_configured' && /Python/.test(r.body.error), 'searching says what to install');
+  r = await api('GET', '/me', A3); ok(r.status === 200, 'and the rest of Orata carries on');
 
   console.log('\nMusic switched off');
   await stopServer(); startServer({ MUSIC: 'off' }); await ready();
   r = await api('GET', '/config'); ok(r.body.music === false, 'MUSIC=off turns the player off');
   r = await api('GET', '/music/search?q=night', A3); ok(r.status === 503 && r.body.code === 'music_not_configured', 'and searching explains it');
 
+  /* the real helper (music-service/service.py), only the parts that need no internet: it starts, and refuses bad requests politely */
+  console.log('\nThe real music helper (offline checks)');
+  let real = null;
+  for (const py of process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python']) {
+    real = await talkToHelper(py, [path.join(ROOT, 'music-service', 'service.py')], [{ id: 1, op: 'ping' }, { id: 2, op: 'search', q: '   ' }, { id: 3, op: 'song', videoId: 'bad!' }, { id: 4, op: 'nonsense' }]);
+    if (!real.error) break;
+  }
+  if (real?.error || !real?.lines.length) ok(true, 'skipped: no working Python on this machine (the helper is optional)');
+  else if (real.lines[0].ready === false) ok(/pip install/.test(real.lines[0].error), 'without ytmusicapi the helper says how to install it');
+  else {
+    const byId = Object.fromEntries(real.lines.slice(1).map((l) => [l.id, l]));
+    ok(real.lines[0].ready === true && byId[1]?.result === 'pong', 'it starts and answers a ping');
+    ok(byId[2]?.ok === false && byId[2].code === 'bad_request' && byId[3]?.code === 'bad_request' && byId[4]?.code === 'bad_request', 'blank searches, malformed track ids and unknown operations are refused politely');
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
 }
-main().catch((e) => { console.error(e); fail++; }).finally(async () => { await stopServer(); fakeItunes.close(); setTimeout(() => { fs.rmSync(data, { recursive: true, force: true }); process.exit(fail ? 1 : 0); }, 300); });
+main().catch((e) => { console.error(e); fail++; }).finally(async () => { await stopServer(); setTimeout(() => { fs.rmSync(data, { recursive: true, force: true }); process.exit(fail ? 1 : 0); }, 300); });

@@ -24,7 +24,7 @@ import { verificationMode, isGated, issueVerification, consumeVerification, rese
 import { beginSignup, confirmSignup, resendSignup } from './signup.js';
 import { closeConns, storeUpload, restoreUpload } from './core.js';
 import { createSession, findSession, touchSession, endSession, endUserSessions, listSessions } from './sessions.js';
-import { mountMusic, mountMusicPublic, musicConfigured } from './music.js';
+import { mountMusic, musicReady, musicProblem } from './music.js';
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 import { mountBadges } from './badges.js';
 import { mountOrbit, addOrbit, reactionRole } from './orbit.js';
@@ -177,12 +177,12 @@ export function createApi() {
   const r = express.Router();
   r.use(express.json({ limit: '2mb' }));
 
-  r.get('/config', (req, res) => res.json({
+  r.get('/config', h(async (req, res) => res.json({
     name: 'Orata', gifs: !!ENV.KLIPY_API_KEY, discord: discordOn, turn: turnConfigured(), maxUpload: Number(ENV.MAX_UPLOAD_MB || 25) * 1024 * 1024, version: '1.0.0',
     users: Object.keys(db.users).length, botId: db.botId,
     emailVerification: verificationMode(),   // { enabled, required, smtp }
-    music: musicConfigured(),
-  }));
+    music: await musicReady(), musicWhy: musicProblem(),   // musicWhy: what the server still needs (Python, ytmusicapi), shown on the Music page
+  })));
 
   /* --------------------------- auth --------------------------- */
   r.post('/auth/check', limit('check', 60, 60_000), h(async (req, res) => {
@@ -345,8 +345,6 @@ export function createApi() {
     fs.writeFileSync(file, Buffer.concat(chunks)); fs.writeFileSync(metaFile, JSON.stringify({ type, url }));
     serve(type);
   }));
-
-  mountMusicPublic(r, { h, limit });   // audio relay: signed links, no bearer token
 
   // Everything below requires a session.
   r.use(h(async (req, res, next) => {

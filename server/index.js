@@ -12,7 +12,7 @@ import { attachGateway } from './gateway.js';
 import './bot.js';
 import { mailConfig } from './mail.js';
 import { verificationMode } from './verify.js';
-import { musicConfigured } from './music.js';
+import { musicStatus } from './music.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -89,7 +89,7 @@ server.listen(PORT, HOST, () => {
   console.log(`    Storage: ${storageSummary()}`);
   console.log(`    Discord bridge: ${discordOn ? 'on — /link in a channel (Orbit) links it with a Discord channel' : 'off (set DISCORD_BOT_TOKEN in .env, see README → "Discord bridge")'}`);
   console.log(`    Voice relay (TURN): ${turnConfigured() ? 'on — calls connect even across strict networks' : 'OFF — people on school or work Wi-Fi may not hear each other; add CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN (free) or TURN_URLS to .env, see README → "TURN relay"'}`);
-  console.log(`    Music: ${musicConfigured() ? 'Apple Music previews (no key needed) — MUSIC=off in .env turns it off' : 'off (MUSIC=off)'}`);
+  musicStatus().then((s) => console.log(`    Music: ${s}\n`));   // starts the music helper now, so a missing Python or library shows up in this log
   const vm = verificationMode(); const mc = mailConfig();
   console.log(`    Email verification: ${vm.enabled ? (mc ? `ON — sign-up needs a code emailed via ${mc.host}:${mc.port}` : 'ON (dev mode) — no SMTP_HOST, so sign-up codes are printed in this console') : 'OFF — add SMTP_HOST to .env to require an emailed code at sign-up (see README)'}\n`);
 });

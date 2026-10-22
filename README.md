@@ -17,7 +17,7 @@ npm start
 
 Open <http://localhost:3000>, create an account, and you're in. The first account to register becomes the owner of the shared **Orata Community** server; everybody after joins it automatically. A built-in helper bot, **Orbit**, DMs every new user (say `help`).
 
-Requires Node.js 20 or newer. Nothing else — there is no database to set up, data lives in `data/`.
+Requires Node.js 20 or newer. Nothing else — there is no database to set up, data lives in `data/`. (Only the **Music** page also wants Python 3.10+ and one pip package, see [Music](#music-youtube-music--no-key-needed); without them everything else works.)
 
 ```bash
 npm run dev                      # restart on file changes
@@ -42,7 +42,7 @@ npm run reset-password <user>    # forgot a password? prints a new one
 | `TURN_USERNAME` / `TURN_CREDENTIAL` | – | Fixed TURN credentials (use instead of `TURN_SECRET`) |
 | `TURN_TTL` | `86400` | Lifetime of generated TURN credentials, in seconds |
 | `ICE_TRANSPORT_POLICY` | `all` | Set to `relay` to force every call through TURN (testing / hiding IP addresses) |
-| `MUSIC` | on | `MUSIC=off` turns the Music player off — see [Music](#music-apple-music-previews--no-key-needed) |
+| `MUSIC` | on | `MUSIC=off` turns the Music player off — see [Music](#music-youtube-music--no-key-needed) |
 | `DISCORD_BOT_TOKEN` | – | Turns on the [Discord bridge](#discord-bridge): `/link` mirrors an Orata channel with a Discord channel |
 
 > **Microphone, camera, screen sharing and desktop notifications only work on `localhost` or over HTTPS.** To use voice with other devices on your network, set `HTTPS_KEY`/`HTTPS_CERT`, or put Orata behind a TLS reverse proxy (Caddy, nginx, Cloudflare Tunnel …). Make sure it forwards WebSocket upgrades on `/gateway`.
@@ -143,22 +143,34 @@ Orata asks the provider for credentials on the server (never from the browser), 
 
 **Calls: nobody can hear / see anyone?** Two people on the same home Wi-Fi usually connect directly, but school and public Wi-Fi often stops devices on it from reaching each other, so two friends sitting next to each other can both be stuck on *Connecting…* (the same relay fixes that). Across the internet the usual culprit is a network that blocks direct connections (mobile data, school / work Wi-Fi, some routers) and **no relay**. Orata shows *Connecting…* / *Can't connect* on each person's tile and explains it once with a message; the fix is the relay above. Also remember that the microphone, camera and screen share only work on `https://` or `localhost` (a plain `http://192.168…` address can listen but can't talk).
 
-## Music (Apple Music previews — no key needed)
+## Music (YouTube Music — no key needed)
 
-The note icon above Home opens the **Music page** (`/music`): search the Apple Music catalogue or browse **categories** — Top Songs, Pop, Hip-Hop / Rap, R&B, Rock, Alternative, Electronic, Dance, Country, Latin, K-Pop, J-Pop, Jazz, Classical, Metal, Reggae, Singer / Songwriter, Soundtracks, Blues and Gospel (Apple's public top-songs charts, cached for 30 minutes) — press play, and what you're listening to shows on your profile (and in friends' *Active Now*) while it plays. A big *Now playing* card, a mini player above your user bar and your recently played tracks are always at hand. It works out of the box — **no account, no API key**.
+The note icon above Home opens the **Music page** (`/music`): search YouTube Music or browse **categories** — Top Songs, Trending, the popular genres (Pop, Hip-hop, Rock, R&B & soul, Dance & electronic, Latin, K-Pop, Country, Jazz, Classical, Metal …, with the other ~30 behind *More*) and moods (Chill, Focus, Workout, Party, Sleep …) — press play, and what you're listening to shows on your profile (and in friends' *Active Now*) while it plays. A big *Now playing* card with the song's video, a mini player above your user bar and your recently played songs are always at hand. It plays **full songs** and needs **no account and no API key**.
 
-Orata uses Apple's public, keyless [iTunes Search API](https://performance-partners.apple.com/search-api) (`itunes.apple.com/search` and `/lookup`): the same catalogue as Apple Music, with cover art, a link to every song on Apple Music and a **30-second preview** of each one. (The Apple Music API proper needs a developer token signed with a key from a paid Apple Developer account — that's the part this avoids. Full-length playback needs MusicKit and each listener's own Apple Music subscription, so previews it is. When a preview ends the next result starts.)
+Orata finds songs with [ytmusicapi](https://github.com/sigma67/ytmusicapi) (MIT), an unofficial Python library for YouTube Music's public search and charts, and plays them in YouTube's own embedded player. So the **server needs Python 3.10 or newer and that one library** — everything else in Orata works without them:
+
+```bash
+pip install -r music-service/requirements.txt
+python music-service/service.py --check      # optional: searches once, to show everything is installed
+```
+
+To keep it apart from your other Python projects use a virtual environment: `python -m venv music-service/.venv`, then `music-service/.venv/bin/pip install -r music-service/requirements.txt` (`music-service\.venv\Scripts\pip` on Windows). Orata uses `music-service/.venv` by itself when it exists. Without Python or the library the server log says `Music: OFF — …` and the Music page tells people what is missing; once you have installed it, music turns on within a minute (no restart).
 
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `MUSIC` | on | `MUSIC=off` turns the music player off for everybody |
-| `MUSIC_COUNTRY` | `US` | Which Apple Music storefront the search uses (two letters, e.g. `GB`) |
-| `MUSIC_API_PER_MIN` | `18` | The most requests Orata sends to Apple per minute (Apple allows about 20 per IP address) |
-| `MUSIC_CACHE_MB` | `48` | Memory used to keep recently played previews |
+| `MUSIC_COUNTRY` | `US` | Which country's charts and catalogue YouTube Music shows (two letters, e.g. `GB`) |
+| `MUSIC_API_PER_MIN` | `40` | The most requests Orata sends to YouTube per minute, however many people search |
+| `MUSIC_PYTHON` | – | Path to the Python that has ytmusicapi, when it isn't the `music-service/.venv` one or `python3` |
 
-**How it works:** the server does all the talking to Apple. A preview (about 1 MB) is downloaded when it's asked for, kept in memory for a while and served to the `<audio>` tag from `/api/music/play/<track>` with Range support, so the seek bar works. An `<audio>` tag can't send a login, so that link is signed by the server and short-lived. Searches are cached (10 minutes), and because Apple limits searches per IP address, Orata never sends more than `MUSIC_API_PER_MIN` a minute however many people search — beyond that people see "search is busy" for a moment.
+**How it works:** the server starts `music-service/service.py` once and talks to it over stdin/stdout (a line of JSON per request); if it ever dies, the next request starts it again. Searches are cached for 10 minutes and charts for 30. ytmusicapi only returns *information* about songs (YouTube hands out its audio links in a form only its own player can decode), so the browser plays each song in YouTube's embedded player — a track id is a YouTube video id — which is kept on the page so the music goes on while you move around: on the Music page you see the video, elsewhere it is parked out of sight.
 
-**What others see:** the title, artist, artwork and a progress bar, only while it plays. They always come from Apple via the server — a client can't make up a "listening to" status — and disappear when you pause, stop, close the last tab or the preview ends. Nothing is shown when **Settings → Privacy → Show my status to everyone** is off or you are *Invisible* (the switch is also on the Music page). The player links every track back to Apple Music.
+**Good to know:**
+* YouTube only plays embedded videos on pages with a real address: **`localhost` or a domain name**, not a bare IP number like `http://192.168.1.5:3000` — there the Music page says so. (Your domain with HTTPS, as in the Droplet setup, is fine.)
+* Playback is YouTube's: it may show an ad now and then, and a few songs can't be embedded (the player skips them). It is subject to YouTube's Terms of Service.
+* ytmusicapi is unofficial and YouTube Music changes now and then. If search stops working, update it: `pip install -U ytmusicapi`.
+
+**What others see:** the title, artist, artwork and a progress bar, only while it plays. They always come from YouTube Music via the server — a client can't make up a "listening to" status — and disappear when you pause, stop, close the last tab or the song ends. Nothing is shown when **Settings → Privacy → Show my status to everyone** is off or you are *Invisible* (the switch is also on the Music page). The player links every song back to YouTube Music.
 
 ## Discord bridge
 
@@ -269,7 +281,7 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 
 **Stage channels** — create a *Stage* (Create Channel → Stage) for a talk: a few **speakers** are on stage and everybody else is in the **audience**, listening. Whoever manages the channel or can time members out (the owner, administrators, anyone with *Manage Channel* / *Timeout Members*) opens an empty stage by joining it; everyone else joins muted, with no microphone or camera, and can **raise their hand** (the button, or the mic button in the sidebar). Moderators see raised hands first — oldest first — and press **Invite to Speak** (or right-click anyone); a speaker starts muted, can unmute, turn on a camera or share a screen, and can **Move to Audience** at any time, while moderators can send other speakers back. The stage holds up to 10 speakers; the *Speak* permission is what lets someone raise a hand or take the stage, and anyone who loses it (role or channel change) steps down by themselves. Audio and video only travel where a speaker is involved — listeners connect to speakers and never to each other, and the server refuses anything else — so a big audience costs the speakers, not the other listeners. The channel topic is shown on the stage (Edit Channel → *Stage topic*). Stage channels follow the same channel permissions as voice channels.
 
-**Music** — a full Music page with Apple Music search, genre charts and a 30-second preview player behind the note icon above Home (no key needed), and a "Listening to" card on your profile (see [Music](#music-apple-music-previews--no-key-needed)).
+**Music** — a full Music page with YouTube Music search, charts, genres and moods and a full-song player (YouTube's embedded player) behind the note icon above Home (no key needed; needs Python and ytmusicapi on the server), and a "Listening to" card on your profile (see [Music](#music-youtube-music--no-key-needed)).
 
 **Customization** (User Settings → Appearance) — new accounts start with a slate-blue dark theme, the Snow Peaks wallpaper, light rain and the Montserrat font; everything below can be changed. The sign-in and sign-up screens always show this default look (a new account starts from it too), and your own look returns when you log in.
 
@@ -306,13 +318,15 @@ server/
   env.js        .env parsing   db-tool.js  db:import / db:export / db:info
   verify.js     email verification tokens, modes and gating
   sessions.js   sign-in sessions (never expire; in their own Postgres table when DATABASE_URL is set)
-  music.js      Apple Music (iTunes Search API) search + preview relay + "listening to" status
+  music.js      YouTube Music search, charts and the "listening to" status, through the Python helper below
   discord.js    the Discord bridge: gateway connection, /link codes, mirroring both ways
   badges.js     profile badges: the catalog, developers (the "dev" badge) and their routes
   automod.js    AutoMod's rules (links, invites, mentions, spam)
   orbit.js      a server's own Orbit: its slash commands (shared list: public/js/orbit-commands.js), /settings and reminders
+music-service/
+  service.py    the music helper: ytmusicapi behind a line-of-JSON-per-request pipe (requirements.txt: the one pip package)
 public/
-  js/           Preact + htm (vendored, no build step), ES modules (rain.js, fx.js: rain, button particles; voice.js / stageview.js: calls and stages)
+  js/           Preact + htm (vendored, no build step), ES modules (rain.js, fx.js: rain, button particles; voice.js / stageview.js: calls and stages; music.js / youtube-player.js: the Music page and YouTube's embedded player)
   css/          base · layout · chat · ui · features · settings · auth · extras
   img/rain/     drop textures for the rain effect
   data/         emoji dataset (generated from Emojibase)
@@ -331,7 +345,7 @@ Passwords are hashed with scrypt; sessions are random 256-bit tokens (stored has
 
 * **Rain on glass** is a port of Lucas Bebber's [Rain & Water Effect Experiments](https://tympanus.net/codrops/2015/11/04/rain-water-effect-experiments/) (Codrops, 2015): the drop simulation, the drop textures (`public/img/rain/`) and the water shader come from the [original project](https://github.com/codrops/RainEffect), adapted into a single ES module with Orata's sliders, presets and lightning. Its licence lets you integrate or build upon it in personal or commercial projects, but not republish or redistribute it as-is — so keep it as part of Orata rather than extracting it on its own.
 * **Discord's animated stickers** are played with [lottie-web](https://github.com/airbnb/lottie-web) (MIT, `public/vendor/lottie_light.min.js`, license in `public/vendor/lottie-web.LICENSE.md`).
-* **Music** comes from Apple's public iTunes Search API (the Apple Music catalogue and its 30-second previews); tracks and artwork belong to their artists and Apple.
+* **Music** is found with [ytmusicapi](https://github.com/sigma67/ytmusicapi) by sigma67 (MIT, installed with pip, not bundled) and plays in YouTube's embedded player; songs, artwork and videos belong to their artists and YouTube.
 * **Liquid glass** is a pure-CSS glass-button recipe — inset highlights, a blurred diagonal corner glow and a light backdrop blur.
 
 ## License

@@ -36,7 +36,7 @@ function clearSession() {
   gateway.disconnect(); lsRemove('token');
   set({
     token: null, phase: 'auth', gated: false, verifyDismissed: false, me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {}, msgs: {}, reads: {}, lastMsg: {}, typing: {},
-    voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel, musicOk: null, postIndex: {}, postLists: {},
+    voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel, musicOk: null, musicWhy: null, postIndex: {}, postLists: {},
   });
 }
 export async function logout({ silent } = {}) {
@@ -127,7 +127,7 @@ function bootstrap(d) {
   }
   if (state.settings.notif.desktop && 'Notification' in window && Notification.permission === 'default') { /* asked from settings, never on load */ }
 }
-gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, musicOk: !!c.music, discordOk: !!c.discord, maxUpload: c.maxUpload, turn: !!c.turn, emailVerif: { enabled: !!c.emailVerification?.enabled, required: !!c.emailVerification?.required, smtp: !!c.emailVerification?.smtp } })).catch(() => {}); });
+gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, musicOk: !!c.music, musicWhy: c.musicWhy || null, discordOk: !!c.discord, maxUpload: c.maxUpload, turn: !!c.turn, emailVerif: { enabled: !!c.emailVerification?.enabled, required: !!c.emailVerification?.required, smtp: !!c.emailVerification?.smtp } })).catch(() => {}); });
 
 /* ------------------------------------------------------------ helpers */
 function isMentioned(m, ch) {
