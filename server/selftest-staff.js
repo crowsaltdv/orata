@@ -142,15 +142,35 @@ async function main() {
   ok(auto?.reason === 'scam' && /free nitro/.test(auto.excerpt), 'Orata flags a scam-looking message by itself');
   ok(rep?.note === 'phishing' && rep.where === `#${text.name} in Club`, 'reports reach staff with the message and where it was');
   r = await api('GET', '/staff/overview', Y.token); const needs = r.body.attention?.find((u) => u.id === D.user.id);
-  ok(needs?.openFlags === 2 && needs.why.includes('Scam-looking link') && needs.why.includes('Reported: scam') && r.body.newest?.length > 0 && !('messagesToday' in r.body.stats),
+  ok(needs?.openFlags === 2 && needs.why.includes('Scam-looking link') && needs.why.includes('Reported: Scam, phishing or malware') && r.body.newest?.length > 0 && !('messagesToday' in r.body.stats),
     'the overview lists accounts that need a look, and why, plus the newest accounts', JSON.stringify(r.body?.attention));
   r = await api('POST', `/staff/flags/${rep.id}`, Y.token, { action: 'delete' }); ok(r.status === 200 && !(await msgs(B.token, text.id)).some((m) => m.id === scam.id), 'staff can delete a flagged message');
-  r = await api('POST', '/reports', E.token, { userId: E.user.id, reason: 'spam' }); ok(r.status === 400, 'you can’t report yourself');
+  r = await api('POST', '/reports', E.token, { userId: E.user.id, reason: 'scam' }); ok(r.status === 400, 'you can’t report yourself');
   r = await api('GET', '/staff/log', Y.token); ok(['lock', 'unlock', 'terminate', 'unterminate', 'delete_message'].every((a) => r.body.log.some((e) => e.action === a && e.by === Y.user.id)), 'every staff action is in the staff log');
+
+  console.log('\nReport reasons, and reports that are obviously jokes');
+  r = await api('POST', '/reports', E.token, { userId: B.user.id, reason: 'spam' }); ok(r.status === 400, '“spam” isn’t a report reason');
+  r = await api('POST', '/reports', E.token, { userId: B.user.id, reason: 'harassment' }); ok(r.status === 400, '… nor is “harassment”');
+  const hi = (await say(B.token, 'hi')).body;
+  await api('POST', '/reports', E.token, { messageId: hi.id, channelId: text.id, reason: 'hate' });
+  await api('POST', '/reports', D.token, { userId: B.user.id, reason: 'impersonation', note: 'lol jk' });
+  await api('POST', '/reports', D.token, { userId: B.user.id, reason: 'self-harm', note: 'lol' });
+  r = await api('GET', '/staff/flags', Y.token);
+  ok(!r.body.flags.some((f) => f.messageId === hi.id) && !r.body.flags.some((f) => f.reason === 'impersonation' && f.reportedBy === D.user.id) && r.body.hidden === 2,
+    'reports that are obviously jokes stay out of staff’s way', JSON.stringify(r.body.hidden));
+  ok(r.body.flags.some((f) => f.reason === 'self-harm' && f.reportedBy === D.user.id && f.label === 'Reported: Self-harm or suicide'), '… but never ones where someone may be in danger');
+  r = await api('GET', '/staff/flags?hidden=1', Y.token); const joke = r.body.flags.find((f) => f.reason === 'impersonation' && f.reportedBy === D.user.id);
+  ok(/joke/.test(joke?.hidden) && /everyday message/.test(r.body.flags.find((f) => f.messageId === hi.id)?.hidden), 'staff can still see them, and why they were hidden');
+  await api('POST', `/staff/flags/${joke.id}`, Y.token, { action: 'unhide' });
+  ok((await api('GET', '/staff/flags', Y.token)).body.flags.some((f) => f.id === joke.id), '“Not a joke” puts one back');
+  await api('POST', '/reports', D.token, { userId: B.user.id, reason: 'scam', note: 'keeps scamming people' });
+  r = await api('GET', '/staff/flags?hidden=1', Y.token); ok(r.body.flags.some((f) => f.reportedBy === D.user.id && f.reason === 'scam' && /twice today/.test(f.hidden)), 'a third report of the same person in a day is hidden');
+  await api('POST', '/reports', E.token, { messageId: hi.id, channelId: text.id, reason: 'hate' });
+  r = await api('GET', '/staff/flags?hidden=1', Y.token); ok(r.body.flags.filter((f) => f.messageId === hi.id).length === 1, 'reporting the same thing twice makes one report');
 
   console.log('\nServers, ghosting, and who used a command');
   r = await api('POST', '/reports', B.token, { serverId: S.id, reason: 'scam', note: 'fake giveaways' }); ok(r.status === 200, 'anyone can report a server');
-  r = await api('POST', '/reports', A.token, { serverId: S.id, reason: 'spam' }); ok(r.status === 400, '… but not their own');
+  r = await api('POST', '/reports', A.token, { serverId: S.id, reason: 'scam' }); ok(r.status === 400, '… but not their own');
   r = await api('GET', '/staff/servers', B.token); ok(r.status === 403, 'only staff see every server');
   r = await api('GET', '/staff/servers', Y.token); const club = r.body.find?.((s) => s.id === S.id);
   ok(club?.reports === 1 && club.score > 0 && r.body[0].id === S.id, 'a reported server comes first on the staff list', JSON.stringify(club));

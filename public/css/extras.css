@@ -589,3 +589,4 @@ button.stat-tile { text-align: left; font: inherit; } button.stat-tile:disabled 
 .legal-open { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: 13px; color: var(--text-3); } .legal-open:hover { color: var(--text); }
 .check-row a { color: var(--accent); }
 .sdm-avs { display: flex; flex: none; } .sdm-avs > * + * { margin-left: -10px; } .sdm-excerpt { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; }
+.flag-hidden { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-style: italic; }

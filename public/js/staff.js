@@ -14,12 +14,15 @@ import { t } from '/js/i18n.js';
 /** Does the signed-in person have the staff or dev badge? (The server checks again.) */
 export const isStaffMe = () => !!state.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev');
 
-const REASONS = [['spam', 'Spam'], ['scam', 'Scam or phishing'], ['harassment', 'Harassment or threats'], ['hate', 'Hate speech'], ['impersonation', 'Pretending to be someone'], ['self-harm', 'Someone may hurt themselves'], ['other', 'Something else']];
+// what can be reported: what the Community Guidelines (/guidelines) forbid (server/staff.js has the same list)
+const REASONS = [['hate', 'Hate speech'], ['threats', 'Threats or violent extremism'], ['self-harm', 'Self-harm or suicide'], ['child-safety', 'Sexualizing minors'], ['nonconsensual', 'Intimate images shared without consent'],
+  ['nsfw', 'Adult or gory content where it isn’t allowed'], ['privacy', 'Sharing someone’s private info'], ['scam', 'Scam, phishing or malware'], ['impersonation', 'Pretending to be someone or Orata staff'],
+  ['ban-evasion', 'Dodging a ban with another account'], ['illegal', 'Illegal goods, services or piracy'], ['misinformation', 'Harmful misinformation']];
 /** Report a message (messageId + channelId), an account (userId) or a server (serverId) to Orata staff. */
 MODALS.report = function Report({ id, messageId, channelId, userId, serverId }) {
   const [reason, setReason] = useState(''); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false); const [done, setDone] = useState(false);
   const send = async () => { setBusy(true); if (await act(api.post('/reports', { messageId, channelId, userId, serverId, reason, note }))) setDone(true); setBusy(false); };
-  return html`<${Modal} title=${messageId ? t('Report message') : serverId ? t('Report server') : t('Report account')} subtitle=${t('Goes to Orata staff, not to the server’s moderators. Use it for things against Orata’s rules; a server’s own rules are up to its moderators.')} width=${460} onClose=${() => closeModal(id)}
+  return html`<${Modal} title=${messageId ? t('Report message') : serverId ? t('Report server') : t('Report account')} subtitle=${t('Pick which of Orata’s Community Guidelines it breaks. It goes to Orata staff; a server’s own rules are up to its moderators.')} width=${460} onClose=${() => closeModal(id)}
     footer=${done ? html`<${Btn} variant="primary" onClick=${() => closeModal(id)}>${t('Done')}<//>` : html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="danger" icon="flag" loading=${busy} disabled=${!reason} onClick=${send}>${t('Send report')}<//>`}>
     ${done ? html`<div class="rep-done"><${Icon} name="check-circle" size=${40} sw=${1.6} /><b>${t('Thanks, staff will take a look.')}</b><p>${t('If it was in a DM, staff can read that conversation around the message you reported, and nothing else.')}</p></div>`
       : html`<div class="rep-reasons">${REASONS.map(([k, label]) => html`<button type="button" key=${k} class=${cx('rep-opt', reason === k && 'on')} onClick=${() => setReason(k)}><span class="radio"></span>${t(label)}</button>`)}</div>
@@ -179,16 +182,17 @@ function Dms() {
 }
 
 function Flags() {
-  const [all, setAll] = useState(false); const [d, setD] = useState(null);
-  const load = () => api.get(`/staff/flags${all ? '?status=all' : ''}`).then((r) => { addUsers(r.users); setD(r); }, (e) => setD({ error: errMsg(e) }));
-  useEffect(() => { setD(null); load(); }, [all]);
+  const [all, setAll] = useState(false); const [jokes, setJokes] = useState(false); const [d, setD] = useState(null);   // jokes: the reports that look fake
+  const load = () => api.get(`/staff/flags?${all ? 'status=all&' : ''}${jokes ? 'hidden=1' : ''}`).then((r) => { addUsers(r.users); setD(r); }, (e) => setD({ error: errMsg(e) }));
+  useEffect(() => { setD(null); load(); }, [all, jokes]);
   const users = useSel((s) => s.users);
   const handle = async (f, action) => { const r = await act(api.post(`/staff/flags/${f.id}`, { action })); if (r) setD((x) => ({ ...x, flags: all ? x.flags.map((y) => (y.id === f.id ? r : y)) : x.flags.filter((y) => y.id !== f.id) })); };
   const userAct = async (uid, what) => { const u = users[uid]; if (u && await moderate(u, what)) load(); };
   if (!d) return html`<div class="pk-center"><${Spinner} /></div>`;
   if (d.error) return html`<p class="text-danger">${d.error}</p>`;
   return html`<div class="staff-bar"><p class="text-muted">${t('Accounts and messages Orata found suspicious, and what people reported. Server rules are each server’s business.')}</p>
-      <label class="staff-lock-len"><input type="checkbox" checked=${all} onChange=${(e) => setAll(e.target.checked)} /> ${t('Show handled ones too')}</label></div>
+      <label class="staff-lock-len"><input type="checkbox" checked=${all} onChange=${(e) => setAll(e.target.checked)} /> ${t('Show handled ones too')}</label>
+      <label class="staff-lock-len"><input type="checkbox" checked=${jokes} onChange=${(e) => setJokes(e.target.checked)} /> ${t('Only reports that look fake')} (${d.hidden || 0})</label></div>
     ${!d.flags.length ? html`<${Empty} icon="check-circle" title=${t('Nothing to look at')}>${t('No open flags or reports.')}<//>`
       : html`<div class="flag-list">${d.flags.map((f) => { const u = users[f.userId]; const by = f.reportedBy && users[f.reportedBy]; return html`<div class=${cx('flag-row', f.status !== 'open' && 'done')} key=${f.id}>
         <div class="flag-top"><span class=${cx('flag-kind', f.reportedBy && 'report')}><${Icon} name=${f.reportedBy ? 'alert-triangle' : 'flag'} size=${14} />${f.label}</span>
@@ -197,10 +201,12 @@ function Flags() {
         ${f.detail && f.detail !== 'reported' ? html`<div class="flag-detail">${f.detail}</div>` : null}
         ${f.excerpt ? html`<blockquote class="flag-excerpt">${f.excerpt}${f.gone ? html` <small>(${t('already deleted')})</small>` : null}</blockquote>` : null}
         ${by ? html`<div class="flag-detail">${t('Reported by')} ${by.displayName}${f.note ? `: “${f.note}”` : ''}</div>` : null}
+        ${f.hidden ? html`<div class="flag-detail flag-hidden"><${Icon} name="eye-off" size=${14} />${t('Hidden from staff because')} ${f.hidden}.</div>` : null}
         <div class="flag-acts">${f.status === 'open' ? html`
           ${f.messageId && !f.gone ? html`<${Btn} size="sm" variant="danger" icon="trash" onClick=${() => handle(f, 'delete')}>${t('Delete message')}<//>` : null}
-          ${f.serverId ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(f.serverId, f.channelId)}>${t('Ghost in')}<//>` : null}
-          ${f.channelId && !f.serverId ? html`<${Btn} size="sm" icon="message" onClick=${() => openModal('staff-dm', { flagId: f.id })}>${t('Read the DM')}<//>` : null}
+          ${f.hidden ? html`<${Btn} size="sm" icon="check" onClick=${() => handle(f, 'unhide')}>${t('Not a joke')}<//>` : null}
+          ${f.serverId && !f.hidden ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(f.serverId, f.channelId)}>${t('Ghost in')}<//>` : null}
+          ${f.channelId && !f.serverId && !f.hidden ? html`<${Btn} size="sm" icon="message" onClick=${() => openModal('staff-dm', { flagId: f.id })}>${t('Read the DM')}<//>` : null}
           <${Btn} size="sm" icon="lock" onClick=${() => userAct(f.userId, 'lock')}>${t('Lock account')}<//>
           <${Btn} size="sm" variant="danger" icon="ban" onClick=${() => userAct(f.userId, 'terminate')}>${t('Terminate')}<//>
           <${Btn} size="sm" variant="ghost" onClick=${() => handle(f, 'dismiss')}>${t('Dismiss')}<//>`
@@ -208,7 +214,7 @@ function Flags() {
       </div>`; })}</div>`}`;
 }
 
-const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into', view_dm: 'read a flagged DM of' };
+const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into', view_dm: 'read a flagged DM of', unhide_flag: 'said a report wasn’t a joke, about' };
 function Log() {
   const [d, setD] = useState(null);
   useEffect(() => { api.get('/staff/log').then((r) => { addUsers(r.users); setD(r); }, () => setD({ log: [] })); }, []);

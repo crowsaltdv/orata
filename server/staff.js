@@ -12,10 +12,34 @@ import { db, save, newId, emitTo, audienceOf, effectiveStatus, publicUser, messa
 import { hooks, messagesDeleted } from './messages.js';
 import { endUserSessions } from './sessions.js';
 import { isFounder, isStaff } from './names.js';
+import { hasProfanity } from './profanity.js';
 
 const KEEP_FLAGS = 1000; const KEEP_LOG = 1000;
 const LOCKS = [1, 6, 24, 72, 168, 720];   // hours
-const REASONS = ['spam', 'scam', 'harassment', 'hate', 'impersonation', 'self-harm', 'other'];
+// what people can report: things the Community Guidelines (public/guidelines.html) forbid
+const REASONS = { hate: 'Hate speech', threats: 'Threats or violent extremism', 'self-harm': 'Self-harm or suicide', 'child-safety': 'Sexualizing minors', nonconsensual: 'Intimate images shared without consent',
+  nsfw: 'Adult or gory content where it isn’t allowed', privacy: 'Sharing someone’s private info', scam: 'Scam, phishing or malware', impersonation: 'Pretending to be someone or Orata staff',
+  'ban-evasion': 'Dodging a ban with another account', illegal: 'Illegal goods, services or piracy', misinformation: 'Harmful misinformation' };
+const URGENT = new Set(['self-harm', 'child-safety', 'threats']);   // never hidden as a joke: someone may be in danger
+const JOKE = /^(?:(?:jk|j\/k|lol+|lmf?ao+|rofl|(?:ha)+h?|(?:he)+h?|xd+|test(?:ing)?|just kidding|kidding|for fun|bruh+|idk|nothing|no reason|cuz|bc|because|random|joke|trolling|troll|meme|sus)\s*)+$/i;
+const HARMLESS = new Set('hi hello hey heya hiya yo sup gm gn ok okay k kk yes yeah yep ya no nope nah lol lmao haha thanks thank you ty thx np bye cya cool nice good great morning night what why how who when where wow same true facts bruh hmm oh ah ye'.split(' '));
+/** Why a report is obviously a joke or fake, so staff aren't shown it (they can still look), or null. Only the plain cases:
+ *  a note that just says it's a joke (or is keyboard mashing), a report of an everyday message ("hi"), or a third report of the same person in a day. */
+function fakeWhy({ reason, note, reporter, userId, m }) {
+  if (URGENT.has(reason)) return null;
+  const words = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}/\s]/gu, ' ').split(/\s+/).filter(Boolean);
+  const said = words(note); const flat = said.join('');
+  if (said.length && JOKE.test(said.join(' '))) return 'the note says it’s a joke';
+  if (!said.length && /[😂🤣💀😭🤡]/u.test(note)) return 'the note is only laughing emoji';
+  if (flat.length >= 5 && /^[a-z]+$/.test(flat) && (/^(.)\1+$/.test(flat) || /^[^aeiouy]+$/.test(flat) || /asdf|qwer|zxcv|hjkl|sdfg|dfgh|fghj/.test(flat))) return 'the note is keyboard mashing';
+  if (m && !m.attachments?.length && !m.gif && !m.sticker && !m.forward && !m.poll) {
+    const w = words(m.content);
+    if (w.length && w.length <= 4 && w.every((x) => HARMLESS.has(x) || /^\d+$/.test(x)) && !hasProfanity(m.content)) return `it’s an everyday message (“${String(m.content).trim().slice(0, 30)}”)`;
+  }
+  const today = (db.flags || []).filter((f) => f.reportedBy === reporter && f.userId === userId && f.at > Date.now() - 86400_000).length;
+  if (today >= 2) return 'the same person already reported them twice today';
+  return null;
+}
 const INVITE = /\/invite\/[A-Za-z0-9-]{3,}|discord(?:app)?\.(?:gg|com\/invite)\/\S+/i;
 const SCAM = /free\s*nitro|nitro\s*(?:giveaway|for\s*free)|discord-?(?:gift|nitro)s?\.(?!com\b)[a-z]{2,}|steam\s*(?:gift|giveaway)|airdrop|claim\s+your\s+(?:prize|reward|gift)|crypto\s*(?:giveaway|doubl)|grabify|iplogger|2no\.co|blasze|yip\.su|ps3cfw|bit\.ly\/[a-z0-9]+.*(?:nitro|gift)/i;
 const LABEL = { spam: 'Spam burst', invite_spam: 'Invite spam', mass_mentions: 'Mass mentions', scam: 'Scam-looking link', dm_fanout: 'Messaging lots of people', alts: 'Many accounts on one browser' };
@@ -72,22 +96,26 @@ hooks.onMessage.push((ch, m) => {
 export function mountStaff(r, { h, limit, removeMember }) {
   // anyone: report a message, an account or a server to Orata staff
   r.post('/reports', limit('report', 10, 600_000, (req) => req.user.id), h(async (req, res) => {
-    const b = req.body || {}; const reason = REASONS.includes(b.reason) ? b.reason : null; if (!reason) throw bad('Pick what’s wrong');
-    const note = String(b.note || '').trim().slice(0, 500);
+    const b = req.body || {}; const reason = Object.hasOwn(REASONS, String(b.reason)) ? String(b.reason) : null; if (!reason) throw bad('Pick which guideline it breaks');
+    const note = String(b.note || '').trim().slice(0, 500); const base = { reason, detail: 'reported', note, reportedBy: req.user.id };
+    let f; let m = null;
     if (b.messageId) {
-      const ch = db.channels[String(b.channelId)]; const m = ch && (db.messages[ch.id] || []).find((x) => x.id === String(b.messageId));
+      const ch = db.channels[String(b.channelId)]; m = ch && (db.messages[ch.id] || []).find((x) => x.id === String(b.messageId));
       if (!m || !canView(req.user.id, ch)) throw notFound('Unknown message');
       if (m.authorId === req.user.id) throw bad('You can’t report your own message');
-      flag({ kind: 'message', reason, detail: 'reported', note, reportedBy: req.user.id, userId: m.authorId, messageId: m.id, channelId: ch.id, serverId: ch.serverId || null, excerpt: excerptOf(m) });
+      f = { kind: 'message', ...base, userId: m.authorId, messageId: m.id, channelId: ch.id, serverId: ch.serverId || null, excerpt: excerptOf(m) };
     } else if (b.serverId) {
       const s = db.servers[String(b.serverId)]; if (!s) throw notFound('Unknown server');
       if (s.ownerId === req.user.id) throw bad('You can’t report your own server');
-      flag({ kind: 'server', reason, detail: 'reported', note, reportedBy: req.user.id, userId: s.ownerId, serverId: s.id });
+      f = { kind: 'server', ...base, userId: s.ownerId, serverId: s.id };
     } else {
       const u = db.users[String(b.userId)]; if (!u || u.bot || u.deleted) throw notFound('Unknown user');
       if (u.id === req.user.id) throw bad('You can’t report yourself');
-      flag({ kind: 'account', reason, detail: 'reported', note, reportedBy: req.user.id, userId: u.id });
+      f = { kind: 'account', ...base, userId: u.id };
     }
+    // the same report twice is one report; an obvious joke is kept, but out of staff's way
+    const same = (db.flags || []).some((x) => x.status === 'open' && x.reportedBy === req.user.id && x.kind === f.kind && x.userId === f.userId && (x.messageId || null) === (f.messageId || null) && (x.serverId || null) === (f.serverId || null) && x.reason === f.reason);
+    if (!same) { const why = fakeWhy({ reason, note, reporter: req.user.id, userId: f.userId, m }); if (why) f.hidden = why; flag(f); }
     res.json({ ok: true });
   }));
 
@@ -114,7 +142,7 @@ export function mountStaff(r, { h, limit, removeMember }) {
     const live = people.filter((u) => !u.terminated);
     const month = now - 30 * 86400_000; const acts = {};
     for (const e of db.staffLog || []) if (e.at > month) acts[e.by] = (acts[e.by] || 0) + 1;
-    const flags = (db.flags || []).filter((f) => f.status === 'open');
+    const flags = (db.flags || []).filter((f) => f.status === 'open' && !f.hidden);
     const why = new Map();   // user id -> what their open flags and reports are about
     for (const f of flags) why.set(f.userId, [...(why.get(f.userId) || []), flagView(f).label]);
     const locked = live.filter((u) => u.lockedUntil > now);
@@ -164,7 +192,7 @@ export function mountStaff(r, { h, limit, removeMember }) {
 
   /** What makes a server look fishy: open reports about it, open flags on messages in it, a scam-looking name (these three let staff ghost in),
    * and terminated members (only for sorting). */
-  const fishy = (s, open = (db.flags || []).filter((f) => f.status === 'open' && f.serverId === s.id)) => {
+  const fishy = (s, open = (db.flags || []).filter((f) => f.status === 'open' && !f.hidden && f.serverId === s.id)) => {
     const reports = open.filter((f) => f.kind === 'server' && f.serverId === s.id).length;
     const flagged = open.filter((f) => f.kind === 'message' && f.serverId === s.id).length;
     const terminated = Object.keys(s.members).filter((id) => db.users[id]?.terminated).length;
@@ -174,7 +202,7 @@ export function mountStaff(r, { h, limit, removeMember }) {
   /** Every server (or those matching ?q), fishiest first. */
   r.get('/staff/servers', h(async (req, res) => {
     staff(req); const q = String(req.query.q || '').trim().toLowerCase();
-    const open = (db.flags || []).filter((f) => f.status === 'open' && f.serverId);
+    const open = (db.flags || []).filter((f) => f.status === 'open' && !f.hidden && f.serverId);
     const list = Object.values(db.servers).filter((s) => !q || s.id === q || s.name.toLowerCase().includes(q)).map((s) => ({
       id: s.id, name: s.name, icon: s.icon || null, tag: s.tag || null, joinMode: s.joinMode || 'invite', createdAt: s.createdAt,
       members: Object.keys(s.members).filter((id) => !db.users[id]?.bot).length, owner: publicUser(db.users[s.ownerId]), ...fishy(s, open),
@@ -197,15 +225,15 @@ export function mountStaff(r, { h, limit, removeMember }) {
   /** A flag with what staff need to judge it: who, where, and (for messages) the words. */
   const flagView = (f) => {
     const ch = f.channelId && db.channels[f.channelId]; const s = f.serverId && db.servers[f.serverId];
-    return { ...f, label: f.kind === 'server' ? `Server reported: ${f.reason}` : f.reportedBy ? `Reported: ${f.reason}` : LABEL[f.reason] || f.reason,
+    return { ...f, label: f.kind === 'server' ? `Server reported: ${REASONS[f.reason] || f.reason}` : f.reportedBy ? `Reported: ${REASONS[f.reason] || f.reason}` : LABEL[f.reason] || f.reason,
       where: f.kind === 'server' ? `the server ${s?.name || '(deleted)'}` : s ? `#${ch?.name || '?'} in ${s.name}` : ch?.type === 'group' ? 'a group DM' : f.channelId ? 'a DM' : null,
       gone: f.messageId ? !(db.messages[f.channelId] || []).some((m) => m.id === f.messageId) : false };
   };
   r.get('/staff/flags', h(async (req, res) => {
-    staff(req); const all = req.query.status === 'all';
-    const list = (db.flags || []).filter((f) => all || f.status === 'open').slice(-200).reverse().map(flagView);
+    staff(req); const all = req.query.status === 'all'; const hidden = req.query.hidden === '1';   // hidden=1: only the reports that look like jokes
+    const list = (db.flags || []).filter((f) => (all || f.status === 'open') && !!f.hidden === hidden).slice(-200).reverse().map(flagView);
     const ids = new Set(list.flatMap((f) => [f.userId, f.reportedBy, f.handledBy]).filter(Boolean));
-    res.json({ flags: list, users: [...ids].map((id) => db.users[id] && { ...publicUser(db.users[id]), state: stateOf(db.users[id]) }).filter(Boolean) });
+    res.json({ flags: list, users: [...ids].map((id) => db.users[id] && { ...publicUser(db.users[id]), state: stateOf(db.users[id]) }).filter(Boolean), hidden: (db.flags || []).filter((f) => f.status === 'open' && f.hidden).length });
   }));
   r.post('/staff/flags/:id', h(async (req, res) => {
     staff(req); const f = (db.flags || []).find((x) => x.id === req.params.id); if (!f) throw notFound('Unknown flag');
@@ -218,6 +246,7 @@ export function mountStaff(r, { h, limit, removeMember }) {
       }
       f.status = 'done'; log(req.user.id, 'delete_message', f.userId, f.label || f.reason, { flag: f.id });
     } else if (action === 'dismiss') { f.status = 'dismissed'; log(req.user.id, 'dismiss_flag', f.userId, '', { flag: f.id }); } else if (action === 'reopen') f.status = 'open';
+    else if (action === 'unhide') { delete f.hidden; log(req.user.id, 'unhide_flag', f.userId, '', { flag: f.id }); }   // "not a joke": it counts like any other report
     else throw bad('Unknown action');
     f.handledBy = req.user.id; f.handledAt = Date.now(); save();
     res.json(flagView(f));
@@ -225,7 +254,7 @@ export function mountStaff(r, { h, limit, removeMember }) {
   /** Every DM and group DM with a flagged or reported message: who is in it, how many flags are open, and the latest one (to read around it). */
   r.get('/staff/dms', h(async (req, res) => {
     staff(req); const by = new Map();
-    for (const f of db.flags || []) { const ch = f.channelId && db.channels[f.channelId]; if (ch && !ch.serverId) by.set(ch.id, [...(by.get(ch.id) || []), f]); }
+    for (const f of db.flags || []) { const ch = f.channelId && db.channels[f.channelId]; if (ch && !ch.serverId && !f.hidden) by.set(ch.id, [...(by.get(ch.id) || []), f]); }
     const list = [...by].map(([id, flags]) => {
       const ch = db.channels[id]; const last = flags[flags.length - 1];
       return { id, group: ch.type === 'group', name: ch.type === 'group' ? ch.name || null : null, recipients: (ch.recipients || []).map((u) => publicUser(db.users[u])).filter(Boolean),
@@ -237,6 +266,7 @@ export function mountStaff(r, { h, limit, removeMember }) {
   r.get('/staff/flags/:id/conversation', h(async (req, res) => {
     staff(req); const f = (db.flags || []).find((x) => x.id === req.params.id); if (!f) throw notFound('Unknown flag');
     const ch = f.channelId && db.channels[f.channelId]; if (!ch || ch.serverId) throw bad('That flag isn’t about a DM');
+    if (f.hidden) throw forbidden('That report looks like a joke. Mark it as not a joke first.');
     const list = db.messages[ch.id] || [];
     let i = list.findIndex((m) => m.id === f.messageId); if (i < 0) i = list.findIndex((m) => m.createdAt > f.at); if (i < 0) i = list.length - 1;
     const slice = list.slice(Math.max(0, i - 50), i + 51);
