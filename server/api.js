@@ -24,7 +24,7 @@ import { verificationMode, isGated, issueVerification, consumeVerification, rese
 import { beginSignup, confirmSignup, resendSignup } from './signup.js';
 import { closeConns, storeUpload, restoreUpload } from './core.js';
 import { createSession, findSession, touchSession, endSession, endUserSessions, listSessions } from './sessions.js';
-import { mountMusic, mountMusicPublic, musicConfigured } from './music.js';
+import { mountMusic, musicConfigured } from './music.js';
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 import { mountBadges } from './badges.js';
 import { mountOrbit, addOrbit, reactionRole } from './orbit.js';
@@ -346,7 +346,6 @@ export function createApi() {
     serve(type);
   }));
 
-  mountMusicPublic(r, { h, limit });   // audio relay: signed links, no bearer token
 
   // Everything below requires a session.
   r.use(h(async (req, res, next) => {

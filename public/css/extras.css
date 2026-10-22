@@ -543,3 +543,17 @@ button.stat-tile { text-align: left; font: inherit; } button.stat-tile:disabled 
 .legal-open { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: 13px; color: var(--text-3); } .legal-open:hover { color: var(--text); }
 .check-row a { color: var(--accent); }
 .sdm-avs { display: flex; flex: none; } .sdm-avs > * + * { margin-left: -10px; } .sdm-excerpt { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; }
+
+/* ---- YouTube player: docked in the Now-playing card on the Music page, floating in the corner elsewhere (see public/js/music.js) */
+.mpg-hero-art.video { width: 360px; aspect-ratio: 16 / 9; align-self: center; border-radius: 14px; background: rgb(0 0 0 / .55); }
+.yt-host { position: fixed; z-index: 25; overflow: hidden; border-radius: 14px; background: #000; }
+.yt-host[hidden] { display: none; }
+.yt-host.floating { right: 16px; bottom: 88px; width: 300px; aspect-ratio: 16 / 9; border: 1px solid var(--border); box-shadow: 0 12px 34px rgb(0 0 0 / .45); }
+.yt-slot, .yt-slot iframe { display: block; width: 100%; height: 100%; border: 0; }
+.yt-bar { position: absolute; top: 6px; right: 6px; z-index: 1; display: flex; gap: 4px; opacity: 0; transition: opacity var(--t-fast, .15s); }
+.yt-host.floating:hover .yt-bar, .yt-host.floating:focus-within .yt-bar { opacity: 1; }
+.yt-host.docked .yt-bar { display: none; }
+.yt-btn { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: rgb(0 0 0 / .65); color: #fff; cursor: pointer; }
+.yt-btn:hover { background: rgb(0 0 0 / .85); }
+@media (hover: none) { .yt-bar { opacity: 1; } }
+@media (max-width: 760px) { .mpg-hero-art.video { width: 100%; } .yt-host.floating { right: 10px; bottom: 76px; width: 220px; } }
