@@ -45,7 +45,7 @@ function describe(look) {
   parts.push(bg.type === 'photo' ? PHOTO_WALLPAPERS.find((p) => p.id === bg.photo)?.name : bg.type === 'mesh' ? MESH_WALLPAPERS.find((m) => m.id === bg.mesh)?.name : bg.type === 'image' && bg.image ? t('Custom wallpaper') : bg.type === 'gradient' ? t('Gradient wallpaper') : t('Solid wallpaper'));
   if (all.rain.enabled) parts.push(t('Rain'));
   if (all.glass.style !== 'off') parts.push(t('Liquid glass'));
-  if (all.fonts.ui) parts.push(all.fonts.ui);
+  if (all.fonts.ui) parts.push(/^\/uploads\//.test(all.fonts.ui) ? t('Custom font') : all.fonts.ui);
   return parts.filter(Boolean).join(' · ');
 }
 

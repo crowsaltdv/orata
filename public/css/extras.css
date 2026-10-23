@@ -721,3 +721,20 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 .sc-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / .4); color: #fff; opacity: 0; transition: opacity 160ms; }
 .sc-art:hover .sc-play, .sc-art:focus-visible .sc-play, .song-card.cur .sc-play { opacity: 1; }
 .sc-title { font-size: 16px; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Discovery: themes waiting for Orata staff (themes.js) */
+.tcard-review { display: flex; gap: 8px; padding: 0 12px 12px; } .tcard-review .btn { flex: 1; }
+.tcard-wait { color: #f0b232; } .themes-note { margin: 0 0 12px; font-size: 13.5px; }
+/* your uploaded fonts, at the top of the font picker (fontpicker.js) */
+.fp-mine { padding: 10px 12px 8px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+.fp-mine-head { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); }
+.fp-mine-head .link-btn { text-transform: none; letter-spacing: 0; font-size: 13px; display: inline-flex; align-items: center; gap: 5px; }
+.fp-mine-row { display: flex; align-items: center; gap: 4px; border-radius: 10px; } .fp-mine-row:hover, .fp-mine-row.sel { background: var(--hover); }
+.fp-mine-pick { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; text-align: left; font-size: 17px; color: var(--text); }
+.fp-mine-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .fp-mine-row.sel .fp-mine-pick .icon { color: rgb(var(--accent-rgb)); }
+.fp-mine-none { margin: 2px 0 4px; font-size: 12.5px; color: var(--text-3); }
+/* server emoji / stickers: drop pictures or a folder (server-settings.js) */
+.expr-page { position: relative; } .expr-acts { display: inline-flex; gap: 8px; }
+.expr-drop { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 24px;
+  border: 2px dashed rgb(var(--accent-rgb) / .7); border-radius: 18px; background: rgb(var(--panel-rgb) / .9); color: var(--text-2); pointer-events: none; }
+.expr-drop .icon { color: rgb(var(--accent-rgb)); } .expr-drop b { font-size: 17px; color: var(--text); }
+.expr-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 8px 12px; border-radius: 10px; background: rgb(var(--accent-rgb) / .1); font-size: 13.5px; color: var(--text-2); }

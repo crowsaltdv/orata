@@ -1,6 +1,6 @@
 // Orata self-test for the theme library and Discovery:  npm test
 // The library (25 profile + 25 site themes per account, enforced here), everything a site / profile theme keeps, pictures that keep working, the
-// preview pictures, who may post (the creator badge, and staff and developers) and remove, installing from Discovery, upvotes and Featured sorting, and the sweep of theme files nobody uses.
+// preview pictures, sending a theme (anyone; Orata staff approve or turn it away; the old Creator badge is gone) and removing, installing from Discovery, upvotes and Featured sorting, and the sweep of theme files nobody uses.
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import os from 'node:os';
@@ -93,20 +93,16 @@ async function main() {
   await stopServer();   // alice is a founder (oratedev), xavier a developer, stella staff
   const j = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8'));
   j.users[A.user.id].username = 'oratedev'; j.users[A.user.id].badges = ['dev']; j.users[X.user.id].badges = ['dev']; j.users[S.user.id].badges = ['staff'];
+  j.users[C.user.id].badges = ['creator', 'early'];   // the old Creator badge: taken off at start
   fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(j)); startServer(); await ready();
 
-  /* ---------------------------------------------------------------- the creator badge */
-  console.log('\nThe creator badge');
-  let r = await api('GET', '/badges', N.token); const creator = r.body.find((b) => b.id === 'creator');
-  ok(creator?.name === 'Creator' && creator.icon === 'paintbrush' && creator.builtin, 'there is a built-in Creator badge with a paintbrush');
-  r = await api('PUT', `/users/${C.user.id}/creator`, X.token, { creator: true }); ok(r.status === 404, 'there is no separate way to hand it out: only Edit Badges does');
-  r = await api('PUT', `/users/${C.user.id}/badges`, N.token, { badges: ['creator'] }); ok(r.status === 403, 'an ordinary account can’t give it');
-  r = await api('PUT', `/users/${C.user.id}/badges`, C.token, { badges: ['creator'] }); ok(r.status === 403, '… not even to itself');
-  r = await api('PUT', `/users/${C.user.id}/badges`, S.token, { badges: ['creator'] }); ok(r.status === 403, 'staff who aren’t developers can’t (Edit Badges is the developers’)');
-  r = await api('PUT', `/users/${C.user.id}/badges`, X.token, { badges: ['creator'] }); ok(r.status === 200 && r.body.badges.some((b) => b.id === 'creator' && b.icon === 'paintbrush'), 'a developer gives it in Edit Badges');
-  r = await api('PUT', `/users/${D.user.id}/badges`, X.token, { badges: ['creator'] }); ok(r.status === 200 && r.body.badges.some((b) => b.id === 'creator'), '… to anyone');
-  r = await api('PUT', `/users/${E.user.id}/badges`, X.token, { badges: ['creator'] }); ok(r.status === 200, '… and takes it away again the same way');
-  r = await api('PUT', `/users/${E.user.id}/badges`, X.token, { badges: [] }); ok(r.status === 200 && !r.body.badges.some((b) => b.id === 'creator'), '(it is gone)');
+  /* ---------------------------------------------------------------- the Creator badge is gone */
+  console.log('\nNo more Creator badge');
+  let r = await api('GET', '/badges', N.token); ok(r.status === 200 && !r.body.some((b) => b.id === 'creator'), 'the Creator badge is gone');
+  r = await api('GET', `/users/${C.user.id}`, N.token); const cb = (r.body.user || r.body).badges || [];
+  ok(!cb.some((b) => b.id === 'creator') && cb.some((b) => b.id === 'early'), '… taken off everyone who had it (their other badges stay)');
+  r = await api('PUT', `/users/${D.user.id}/badges`, X.token, { badges: ['creator'] }); ok(r.status === 200 && !r.body.badges.some((b) => b.id === 'creator'), '… and it can’t be given any more');
+  const approve = (id) => api('POST', `/themes/discover/${id}/review`, S.token, { approve: true });
 
   /* ---------------------------------------------------------------- the library */
   console.log('\nThe library');
@@ -162,7 +158,7 @@ async function main() {
   const wall = await upload(N.token, await png(120, 80, '#336699'));
   r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Photo', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: wall } }) }); const T2 = r.body;
   const copy = T2.data?.bg?.image;
-  ok(r.status === 200 && /^\/uploads\/th_\d+\.png$/.test(copy) && copy !== wall && T2.data.bg.type === 'image', 'a theme with your own wallpaper gets a copy of the picture that belongs to the theme');
+  ok(r.status === 200 && /^\/uploads\/th_\d+\.png$/.test(copy) && copy !== wall && T2.data.bg.type === 'image', 'a theme with your own wallpaper gets a copy of the picture that belongs to the theme', `${r.status} ${JSON.stringify(r.body).slice(0, 300)}`);
   ok(await fetchOk(copy) && Buffer.compare(Buffer.from(await (await fetch(base + copy)).arrayBuffer()), Buffer.from(await (await fetch(base + wall)).arrayBuffer())) === 0, '… which is the same picture');
   r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Photo again', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: wall } }) });
   ok(r.body.data.bg.image === copy, 'saving the same wallpaper in more themes reuses the one copy');
@@ -200,6 +196,17 @@ async function main() {
   r = await api('POST', '/themes/library', N.token, { kind: 'profile', name: 'Fake banner', data: profileLook({ banner: { image: fake } }) }); ok(r.status === 400 && r.body.code === 'picture_bad', 'a banner that isn’t a picture is refused');
   r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'GIF wallpaper', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: gifUp } }) });
   ok(r.status === 200 && /^\/uploads\/th_\d+\.gif$/.test(r.body.data.bg.image) && await pagesOf(r.body.data.bg.image) === 2, 'a GIF wallpaper is kept as a GIF that moves');
+  // an uploaded font: a theme keeps its own copy, served as a font; something that only calls itself a font is refused
+  const ttf = Buffer.concat([Buffer.from([0, 1, 0, 0]), Buffer.alloc(60, 7)]);
+  const fontUrl = await upload(N.token, ttf, 'font/ttf', 'My Font.ttf');
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Own Font', data: siteLook({ fonts: { ...siteLook().fonts, ui: fontUrl, chat: 'Lora' } }) });
+  const fontRes = r.status === 200 && await fetch(base + r.body.data.fonts.ui);
+  ok(r.status === 200 && /^\/uploads\/th_\d+\.ttf$/.test(r.body.data.fonts.ui) && r.body.data.fonts.ui !== fontUrl && r.body.data.fonts.chat === 'Lora' && fontRes.status === 200 && /^font\/ttf/.test(fontRes.headers.get('content-type') || ''), 'a theme with an uploaded font gets its own copy of the font, served as a font', JSON.stringify(r.body?.data?.fonts || r.body));
+  const OWNFONT = r.body; await api('DELETE', `/themes/library/${OWNFONT.id}`, N.token);
+  const fakeFont = await upload(N.token, await png(30, 30, '#123456'), 'font/woff2', 'sneaky.woff2');
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Fake Font', data: siteLook({ fonts: { ...siteLook().fonts, ui: fakeFont } }) }); ok(r.status === 400 && r.body.code === 'font_bad', 'a picture renamed to .woff2 isn’t a font');
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Far Font', data: siteLook({ fonts: { ...siteLook().fonts, ui: 'https://evil.example/x.woff2' } }) }); ok(r.status === 200 && r.body.data.fonts.ui !== 'https://evil.example/x.woff2', 'a font from another website isn’t taken');
+  if (r.status === 200) await api('DELETE', `/themes/library/${r.body.id}`, N.token);
   const biggish = await upload(N.token, Buffer.concat([gifBytes, Buffer.alloc(16 * 1024 * 1024)]), 'image/gif', 'huge.gif');
   r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Too big GIF', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: biggish } }) }); ok(r.status === 400 && r.body.code === 'picture_big' && /15 MB/.test(r.body.error), 'a GIF over 15 MB is refused, and the message says the limit');
   // a wallpaper that is a web link is fetched and kept (this test's own little picture server stands in for the web)
@@ -232,22 +239,40 @@ async function main() {
 
   /* ---------------------------------------------------------------- publishing */
   console.log('\nPublishing on Discovery');
-  r = await api('POST', '/themes/discover', N.token, { id: T2.id }); ok(r.status === 403 && /creators and Orata staff/i.test(r.body.error), 'without the Creator badge (or a staff or developer badge) nobody can post');
   r = await api('POST', '/themes/library', C.token, { kind: 'site', name: 'Sunset Glass', data: siteLook() }); const CT1 = r.body;
-  r = await api('POST', '/themes/discover', C.token, { id: CT1.id }); ok(r.status === 400 && r.body.code === 'no_preview', 'a creator’s theme needs its preview first');
+  r = await api('POST', '/themes/discover', C.token, { id: CT1.id }); ok(r.status === 400 && r.body.code === 'no_preview', 'a theme needs its preview first');
   await sendBytes('PUT', `/themes/library/${CT1.id}/preview`, C.token, prev);
   r = await api('POST', '/themes/discover', C.token, { id: CT1.id, name: rot13('shpx') }); ok(r.status === 400, 'the name has to be clean');
   r = await api('POST', '/themes/discover', C.token, { id: '1234' }); ok(r.status === 404, 'only a theme in your own library can be published');
   r = await api('POST', '/themes/discover', C.token, { id: CT1.id, name: 'Sunset Glass' }); const PUB1 = r.body;
-  ok(r.status === 200 && PUB1.kind === 'site' && PUB1.name === 'Sunset Glass' && PUB1.preview?.endsWith('.webp') && PUB1.author.id === C.user.id && PUB1.mine && !('data' in PUB1), 'a creator can publish one of their themes');
-  r = await api('POST', '/themes/discover', C.token, { id: CT1.id }); ok(r.status === 400 && r.body.code === 'already_published', 'but only once');
-  r = await api('GET', '/themes/library', C.token); ok(r.body.themes[0].published === PUB1.id, 'the library shows which of your themes are published');
+  ok(r.status === 200 && PUB1.status === 'pending' && PUB1.kind === 'site' && PUB1.name === 'Sunset Glass' && PUB1.preview?.endsWith('.webp') && PUB1.author.id === C.user.id && PUB1.mine && !('data' in PUB1), 'anyone can send one of their themes to Discovery: it waits for Orata staff');
+  r = await api('GET', '/themes/discover?kind=site', N.token); ok(r.status === 200 && !r.body.themes.some((t) => t.id === PUB1.id), 'a theme waiting for staff isn’t on Discovery');
+  r = await api('POST', `/themes/discover/${PUB1.id}/install`, N.token); ok(r.status === 404, '… so nobody can install it');
+  r = await api('PUT', `/themes/discover/${PUB1.id}/vote`, N.token, { vote: true }); ok(r.status === 404, '… or upvote it');
+  r = await api('GET', '/themes/library', C.token); ok(r.body.themes[0].published === PUB1.id && r.body.themes[0].pending === true, 'its author’s library says it is waiting');
+  r = await api('GET', '/themes/discover?status=pending', N.token); ok(r.status === 403, 'only Orata staff see what is waiting');
+  r = await api('GET', '/themes/discover?status=pending', S.token); ok(r.status === 200 && r.body.themes.some((t) => t.id === PUB1.id && t.status === 'pending'), 'Orata staff do');
+  r = await api('POST', `/themes/discover/${PUB1.id}/review`, C.token, { approve: true }); ok(r.status === 403, 'its author can’t approve it');
+  const wc = await connect(C.token);
+  r = await approve(PUB1.id); ok(r.status === 200 && r.body.status === 'approved', 'a staff member approves it');
+  ok(/is on Discovery now/.test((await wc.wait('message_create').catch(() => null))?.message?.content || ''), '… and Orbit tells its author'); wc.ws.close();
+  r = await approve(PUB1.id); ok(r.status === 400 && r.body.code === 'already_reviewed', '(once)');
+  r = await api('GET', '/themes/library', C.token); ok(r.body.themes[0].published === PUB1.id && r.body.themes[0].pending === false, 'the library shows which of your themes are on Discovery');
+  r = await api('POST', '/themes/discover', C.token, { id: CT1.id }); ok(r.status === 400 && r.body.code === 'already_published', 'a theme goes up only once');
   r = await api('POST', '/themes/library', D.token, { kind: 'profile', name: 'Zebra', data: profileLook() }); const DT1 = r.body; await sendBytes('PUT', `/themes/library/${DT1.id}/preview`, D.token, prev);
-  r = await api('POST', '/themes/discover', D.token, { id: DT1.id }); const PUB2 = r.body; ok(r.status === 200 && PUB2.kind === 'profile', 'a profile theme can be published');
+  r = await api('POST', '/themes/discover', D.token, { id: DT1.id }); const PUB2 = r.body; ok(r.status === 200 && PUB2.kind === 'profile', 'a profile theme can be sent');
+  await approve(PUB2.id);
   for (const [n, kind] of [['Apple', 'site'], ['mango', 'site'], ['Banana', 'site'], ['cherry', 'site']]) {
     const t = (await api('POST', '/themes/library', C.token, { kind, name: n, data: siteLook({ theme: { ...siteLook().theme, radius: n.length } }) })).body;
-    await sendBytes('PUT', `/themes/library/${t.id}/preview`, C.token, prev); await api('POST', '/themes/discover', C.token, { id: t.id });
+    await sendBytes('PUT', `/themes/library/${t.id}/preview`, C.token, prev); await approve((await api('POST', '/themes/discover', C.token, { id: t.id })).body.id);
   }
+  r = await api('POST', '/themes/discover', N.token, { id: T2.id }); const NP = r.body; ok(r.status === 200 && NP.status === 'pending', 'someone else sends one too');
+  const wn = await connect(N.token);
+  r = await api('POST', `/themes/discover/${NP.id}/review`, S.token, { approve: false, reason: 'Too close to another theme' }); ok(r.status === 200, 'staff can turn a theme away');
+  ok(/wasn’t approved/.test((await wn.wait('message_create').catch(() => null))?.message?.content || ''), '… Orbit tells its author why'); wn.ws.close();
+  r = await api('GET', '/themes/library', N.token); ok(r.body.themes.find((t) => t.id === T2.id).published === null, '… it stays in their library, off Discovery');
+  r = await approve(NP.id); ok(r.status === 404, '… and leaves the waiting list');
+  r = await api('GET', '/staff/log', S.token); ok(['approve_theme', 'reject_theme'].every((a) => r.body?.log?.some((e) => e.action === a && e.by === S.user.id)), 'approvals and turn-aways go in the staff log');
 
   /* ---------------------------------------------------------------- Discovery */
   console.log('\nBrowsing Discovery');
@@ -282,7 +307,7 @@ async function main() {
   ok(featured.slice(2).every((x) => x.votes === 0), '… then the ones nobody has upvoted');
   ok(featured.slice(2).map((x) => x.id).join() === [...featured.slice(2)].sort((x, y) => (BigInt(y.id) > BigInt(x.id) ? 1 : -1)).map((x) => x.id).join(), '(newest first among the ones nobody upvoted)');
   r = await api('GET', '/themes/discover?kind=site&sort=featured', N.token); ok(r.body.themes.map((x) => x.id).join() === featured.map((x) => x.id).join(), '“featured” is the same order, asked for by name');
-  ok(featured[0].author.avatar === avatar && featured[0].author.displayName === 'Cora' && featured[0].author.id === C.user.id && featured[0].author.badges.some((b) => b.id === 'creator'), 'each theme carries its poster’s name, picture and badges (what clicking their name shows as their profile)');
+  ok(featured[0].author.avatar === avatar && featured[0].author.displayName === 'Cora' && featured[0].author.id === C.user.id && featured[0].author.badges.some((b) => b.id === 'early'), 'each theme carries its poster’s name, picture and badges (what clicking their name shows as their profile)');
   r = await api('GET', '/themes/discover?kind=site&sort=alpha', N.token); ok(r.body.themes[0].name === 'Apple', 'the other sorts are not affected by upvotes');
   r = await vote(N.token, named.cherry.id, false); ok(r.body.votes === 1 && r.body.voted === false, 'an upvote can be taken back');
   r = await api('GET', '/themes/discover?kind=site', N.token); ok(r.body.themes[0].id === named.cherry.id && r.body.themes[1].id === named.mango.id, 'equal votes: the newer theme first');
@@ -295,7 +320,7 @@ async function main() {
   r = await api('POST', `/themes/discover/${PUB1.id}/install`, N.token); ok(r.status === 200 && r.body.already === true, 'installing it again does nothing');
   r = await api('GET', '/themes/library', N.token); ok(r.body.themes.filter((t) => t.from === PUB1.id).length === 1, '… and doesn’t add a second copy');
   r = await api('GET', '/themes/discover?kind=site&sort=alpha', N.token); ok(r.body.themes.find((t) => t.id === PUB1.id).installed === true && r.body.themes.find((t) => t.id === PUB1.id).installs === 1, 'Discovery says it is installed, and counts the install');
-  r = await api('POST', '/themes/discover', N.token, { id: IN1.id }); ok(r.status === 403, 'an installed theme can’t be published by someone without the badge');
+  r = await api('POST', '/themes/discover', N.token, { id: IN1.id }); ok(r.status === 400 && r.body.code === 'not_yours', 'an installed theme isn’t yours to send');
   r = await api('POST', `/themes/discover`, C.token, { id: IN1.id }); ok(r.status === 404, '… and nobody else can publish what is in your library');
   r = await api('POST', `/themes/discover/${PUB2.id}/install`, C.token); const CIN = r.body.theme;
   r = await api('POST', '/themes/discover', C.token, { id: CIN.id }); ok(r.status === 400 && r.body.code === 'not_yours', 'even a creator can only publish their own work, not a theme they installed');
@@ -325,21 +350,16 @@ async function main() {
   const stray = (await api('GET', '/themes/discover?kind=site&sort=alpha', N.token)).body.themes[0];
   r = await api('DELETE', `/themes/discover/${stray.id}`, S.token); ok(r.status === 200, 'staff can take any theme down');
   r = await api('DELETE', `/themes/discover/${stray.id}`, S.token); ok(r.status === 404, 'once');
-  r = await api('POST', '/themes/discover', C.token, { id: CT1.id }); ok(r.status === 200, 'an unpublished theme can be published again');
+  r = await api('POST', '/themes/discover', C.token, { id: CT1.id }); ok(r.status === 200 && r.body.status === 'pending', 'an unpublished theme can be sent again (and waits for staff again)');
   r = await api('GET', '/staff/log', S.token); ok(r.body?.log?.some((e) => e.action === 'unpublish_theme' && e.by === S.user.id && e.target === C.user.id), 'a staff takedown goes in the staff log');
-  r = await api('PUT', `/users/${C.user.id}/badges`, X.token, { badges: [] });
-  r = await api('POST', '/themes/library', C.token, { kind: 'site', name: 'After', data: siteLook() }); const AFTER = r.body; await sendBytes('PUT', `/themes/library/${AFTER.id}/preview`, C.token, prev);
-  r = await api('POST', '/themes/discover', C.token, { id: AFTER.id }); ok(r.status === 403, 'lose the badge and publishing stops');
-  r = await api('GET', '/themes/discover?kind=site', N.token); ok(r.body.themes.some((t) => t.author.id === C.user.id), '… while what was already published stays up until it is taken down');
-  await api('PUT', `/users/${C.user.id}/badges`, X.token, { badges: ['creator'] });
 
   /* ---------------------------------------------------------------- staff and developers post too */
   console.log('\nWho may post');
   const staffTheme = (await api('POST', '/themes/library', S.token, { kind: 'site', name: 'Staff Look', data: siteLook() })).body; await sendBytes('PUT', `/themes/library/${staffTheme.id}/preview`, S.token, prev);
-  r = await api('POST', '/themes/discover', S.token, { id: staffTheme.id }); const staffPub = r.body; ok(r.status === 200 && staffPub.author.id === S.user.id, 'Orata staff can post a theme without the Creator badge');
+  r = await api('POST', '/themes/discover', S.token, { id: staffTheme.id }); const staffPub = r.body; ok(r.status === 200 && staffPub.author.id === S.user.id && staffPub.status === 'approved', 'Orata staff’s own themes go up at once (they are the ones who approve)');
   const devTheme = (await api('POST', '/themes/library', X.token, { kind: 'site', name: 'Dev Look', data: siteLook() })).body; await sendBytes('PUT', `/themes/library/${devTheme.id}/preview`, X.token, prev);
-  r = await api('POST', '/themes/discover', X.token, { id: devTheme.id }); const devPub = r.body; ok(r.status === 200, 'so can a developer');
-  r = await api('POST', '/themes/discover', N.token, { id: (await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Nope', data: siteLook() })).body.id }); ok(r.status === 403, 'an ordinary account still can’t');
+  r = await api('POST', '/themes/discover', X.token, { id: devTheme.id }); const devPub = r.body; ok(r.status === 200 && devPub.status === 'approved', 'so do a developer’s');
+  r = await api('POST', '/themes/discover', N.token, { id: (await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Nope', data: siteLook() })).body.id }); ok(r.status === 400 && r.body.code === 'no_preview', 'everyone else’s go through the same checks (here: no preview yet)');
   await api('DELETE', `/themes/discover/${staffPub.id}`, S.token); await api('DELETE', `/themes/discover/${devPub.id}`, X.token);
 
   /* ---------------------------------------------------------------- syncing between devices */

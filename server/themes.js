@@ -1,7 +1,7 @@
 // Orata — the theme library and Discovery. The screens are public/js/themes.js; what a theme is (and how it is checked) is public/js/theme-data.js.
 // Library: every account keeps its own themes on the server (so they follow you to other devices): up to 25 profile themes and 25 site themes.
-// Discovery: people with the "creator" badge (and Orata staff and developers) post a theme of their own there; anyone installs one, which copies it into their library,
-// and anyone can upvote one (the most upvoted are shown first, "Featured").
+// Discovery: anyone sends a theme of their own there; it waits until Orata staff approve it (a staff member's own goes up at once), then anyone installs it,
+// which copies it into their library, and anyone can upvote it (the most upvoted are shown first, "Featured"). Orbit tells the author what staff decided.
 // Pictures (and GIFs): a theme's wallpaper, card picture and banner are copied into files the theme owns (th_<id>.<ext> in the uploads, checked to be a real
 // picture), so they keep working after the original upload is replaced; a wallpaper that is a web link is fetched and kept too (when the link can't be fetched
 // the theme keeps the link). A sweep removes theme files nothing uses any more. Every theme also has a preview picture the browser draws
@@ -15,18 +15,16 @@ import { isSafeFileName } from './storage.js';
 import { isStaff } from './names.js';
 import { hasProfanity } from './profanity.js';
 import { staffLog } from './staff.js';
+import { orbitTells } from './applications.js';
 import { THEME_KINDS, LIBRARY_LIMIT, sanitizeTheme, cleanThemeName, themeFiles, mapThemeFiles } from '../public/js/theme-data.js';
 
-db.themes ||= {};        // Discovery: id -> { id, kind, name, data, preview, authorId, createdAt, installs }
+db.themes ||= {};        // Discovery: id -> { id, kind, name, data, preview, authorId, createdAt, installs, status: 'pending' (waiting for staff) | 'approved' (none: posted before approval existed) }
 db.themeCopies ||= {};   // an upload's name -> the theme file that is its copy (so saving one wallpaper in many themes keeps one copy)
 
 const FILE = /^th_(\d+)\.[a-z0-9]+$/;
 const FORMATS = { png: 'png', jpeg: 'jpg', webp: 'webp', gif: 'gif', heif: 'avif' };
 const BIG_BYTES = 3 * 1024 * 1024; const BIG_PIXELS = 2600; const MAX_ANIMATED = 15 * 1024 * 1024; const MAX_REMOTE = 25 * 1024 * 1024; const MAX_DATA = 12_000;
 const kindName = (k) => (k === 'site' ? 'site' : 'profile');
-export const hasCreator = (u) => !!u?.badges?.includes('creator');
-/** Who may post a theme on Discovery: people with the creator badge, and Orata staff and developers. */
-export const canPost = (u) => hasCreator(u) || isStaff(u);
 const votesOf = (t) => (Array.isArray(t.votes) ? t.votes.length : 0);
 
 /** Checks a picture (a real PNG, JPEG, WebP, GIF or AVIF; a GIF may move) and keeps it as a file the theme owns. Resolves the new file name. */
@@ -43,13 +41,24 @@ async function keepPicture(buf) {
   try { await storeUpload(file, `image/${ext === 'jpg' ? 'jpeg' : ext}`, buf); } catch (e) { throw e.code === 'QUOTA' ? new ApiError(507, e.message, 'storage_full') : new ApiError(503, 'Could not save the picture right now. Try again in a moment.', 'storage_error'); }
   return file;
 }
-/** An upload of this server (a wallpaper, card picture or banner), copied into a file of its own. Resolves the new file name. */
+const FONT_FILE = /\.(woff2?|ttf|otf)$/i; const MAX_FONT = 5 * 1024 * 1024;
+/** Checks a font (WOFF2, WOFF, TrueType or OpenType, told from its first bytes) and keeps it as a file the theme owns. Resolves the new file name. */
+async function keepFont(buf) {
+  const tag = buf.subarray(0, 4).toString('latin1');
+  const ext = buf.length < 12 || buf.length > MAX_FONT ? null : tag === 'wOF2' ? 'woff2' : tag === 'wOFF' ? 'woff' : tag === 'OTTO' ? 'otf' : (tag === 'true' || buf.readUInt32BE(0) === 0x00010000) ? 'ttf' : null;
+  if (!ext) throw bad('A font in this theme isn’t a font Orata can use (WOFF2, WOFF, TTF or OTF, 5 MB at most).', 'font_bad');
+  const file = `th_${newId()}.${ext}`;
+  try { await storeUpload(file, `font/${ext}`, buf); } catch (e) { throw e.code === 'QUOTA' ? new ApiError(507, e.message, 'storage_full') : new ApiError(503, 'Could not save the font right now. Try again in a moment.', 'storage_error'); }
+  return file;
+}
+/** An upload of this server (a wallpaper, card picture, banner or font), copied into a file of its own. Resolves the new file name. */
 async function ownCopy(name) {
   if (FILE.test(name)) return name;   // already a theme's
   const known = db.themeCopies[name];
   if (known && await restoreUpload(known)) return known;
-  if (!isSafeFileName(name) || !await restoreUpload(name)) throw bad('A picture in this theme can’t be found any more. Pick it again and save once more.', 'picture_missing');
-  const file = await keepPicture(fs.readFileSync(path.join(UPLOAD_DIR, name)));
+  if (!isSafeFileName(name) || !await restoreUpload(name)) throw bad(FONT_FILE.test(name) ? 'A font in this theme can’t be found any more. Pick it again and save once more.' : 'A picture in this theme can’t be found any more. Pick it again and save once more.', 'picture_missing');
+  const buf = fs.readFileSync(path.join(UPLOAD_DIR, name));
+  const file = FONT_FILE.test(name) ? await keepFont(buf) : await keepPicture(buf);
   db.themeCopies[name] = file;
   return file;
 }
@@ -87,6 +96,7 @@ function inUse() {
   const keep = new Set(); const ref = (v) => { if (typeof v === 'string' && v.startsWith('/uploads/')) keep.add(v.slice(9)); };
   for (const u of Object.values(db.users)) {
     ref(u.avatar); ref(u.banner); ref(u.profile?.colors?.image); ref(u.settings?.bg?.image); for (const x of u.settings?.bg?.library || []) ref(x);
+    for (const k of ['ui', 'chat', 'code']) ref(u.settings?.fonts?.[k]);   // a theme's font someone is using right now
     for (const t of u.themes || []) for (const f of filesOf(t)) keep.add(f);
   }
   for (const t of Object.values(db.themes)) for (const f of filesOf(t)) keep.add(f);
@@ -112,13 +122,16 @@ export function dropUserThemes(userId) {
   for (const t of Object.values(db.themes)) if (t.authorId === userId) delete db.themes[t.id];
 }
 
-const libView = (t) => ({ id: t.id, kind: t.kind, name: t.name, data: t.data, preview: t.preview || null, createdAt: t.createdAt, from: t.from || null, published: t.published && db.themes[t.published] ? t.published : null });
+const libView = (t) => ({ id: t.id, kind: t.kind, name: t.name, data: t.data, preview: t.preview || null, createdAt: t.createdAt, from: t.from || null, published: t.published && db.themes[t.published] ? t.published : null,
+  pending: !!(t.published && db.themes[t.published]?.status === 'pending') });
 const alive = (t) => { const a = db.users[t.authorId]; return !!a && !a.deleted && !a.terminated; };
+/** On Discovery for everyone: its author is still here, and Orata staff approved it. */
+const shown = (t) => alive(t) && t.status !== 'pending';
 function pubView(t, viewer) {
   const a = db.users[t.authorId];
   return { id: t.id, kind: t.kind, name: t.name, preview: t.preview || null, createdAt: t.createdAt, installs: t.installs || 0, votes: votesOf(t), voted: !!t.votes?.includes(viewer.id),
     author: publicUser(a),   // (name, picture and style: what clicking their name on a card shows as their profile)
-    mine: t.authorId === viewer.id, installed: (viewer.themes || []).some((x) => x.from === t.id) };
+    mine: t.authorId === viewer.id, installed: (viewer.themes || []).some((x) => x.from === t.id), status: t.status === 'pending' ? 'pending' : 'approved' };
 }
 /** The same shuffle for the same seed (so scrolling through a random order doesn't reshuffle between pages). */
 function shuffled(list, seed) {
@@ -172,8 +185,13 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
 
   /* ---- Discovery ---- */
   r.get('/themes/discover', h(async (req, res) => {
+    if (req.query.status === 'pending') {   // what Orata staff still have to look at: both kinds, oldest first
+      if (!isStaff(req.user)) throw forbidden('Only Orata staff review themes');
+      const waiting = Object.values(db.themes).filter((t) => t.status === 'pending' && alive(t)).sort((a, b) => cmpId(a.id, b.id));
+      return res.json({ total: waiting.length, themes: waiting.slice(0, 100).map((t) => pubView(t, req.user)) });
+    }
     const kind = THEME_KINDS.includes(req.query.kind) ? req.query.kind : 'site';
-    let list = Object.values(db.themes).filter((t) => t.kind === kind && alive(t));
+    let list = Object.values(db.themes).filter((t) => t.kind === kind && shown(t));
     // Featured (the default): the most upvoted first, newest first among equals; Most downloaded (installed); alphabetical; or a shuffle
     list = req.query.sort === 'alpha' ? list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || cmpId(a.id, b.id))
       : req.query.sort === 'random' ? shuffled(list, req.query.seed)
@@ -182,16 +200,15 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
     const off = Math.max(0, Math.floor(Number(req.query.offset)) || 0); const lim = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit)) || 48));
     res.json({ total: list.length, themes: list.slice(off, off + lim).map((t) => pubView(t, req.user)) });
   }));
-  /** Post one of your own library themes. Only people with the creator badge, and Orata staff and developers; a theme you installed from someone else can't be posted again. */
+  /** Send one of your own library themes to Discovery (a theme you installed from someone else can't be). It waits for Orata staff; a staff member's own goes up at once. */
   r.post('/themes/discover', limit('themepub', 20, 60_000, (req) => req.user.id), h(async (req, res) => {
-    if (!canPost(req.user)) throw forbidden('Only creators and Orata staff can post themes.');
     const t = find({ ...req, params: { id: String(req.body?.id || '') } });
     if (t.from) throw bad('You can only post themes you made yourself, not ones you installed.', 'not_yours');
     if (t.published && db.themes[t.published]) throw bad('This theme is already posted. Remove it from Discovery first to post it again.', 'already_published');
     if (!t.preview) throw bad('This theme has no preview picture yet. Open it in your library and try again.', 'no_preview');
     const name = cleanThemeName(req.body?.name ?? t.name); if (!name) throw bad('Give the theme a name');
     if (hasProfanity(name)) throw bad('That name isn’t allowed.', 'name');
-    const pub = { id: newId(), kind: t.kind, name, data: structuredClone(t.data), preview: t.preview, authorId: req.user.id, createdAt: Date.now(), installs: 0 };
+    const pub = { id: newId(), kind: t.kind, name, data: structuredClone(t.data), preview: t.preview, authorId: req.user.id, createdAt: Date.now(), installs: 0, status: isStaff(req.user) ? 'approved' : 'pending' };
     db.themes[pub.id] = pub; t.published = pub.id; save(); changed(req.user.id, req);
     res.json(pubView(pub, req.user));
   }));
@@ -205,9 +222,25 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
     save(); changed(t.authorId, req);
     res.json({ ok: true });
   }));
+  /** Orata staff decide on a theme waiting for Discovery: { approve: true } puts it up; { approve: false, reason } turns it away (it stays in its author's library). */
+  r.post('/themes/discover/:id/review', h(async (req, res) => {
+    if (!isStaff(req.user)) throw forbidden('Only Orata staff review themes');
+    const t = db.themes[req.params.id]; if (!t) throw notFound('That theme isn’t waiting any more');
+    if (t.status !== 'pending') throw bad('That theme was already approved', 'already_reviewed');
+    const approve = req.body?.approve === true; const reason = approve ? '' : String(req.body?.reason || '').trim().slice(0, 300);
+    if (approve) Object.assign(t, { status: 'approved', reviewedBy: req.user.id, reviewedAt: Date.now() });
+    else { delete db.themes[t.id]; for (const x of db.users[t.authorId]?.themes || []) if (x.published === t.id) x.published = null; }
+    staffLog(req.user.id, approve ? 'approve_theme' : 'reject_theme', t.authorId, reason, { theme: t.name });
+    save(); changed(t.authorId);
+    if (db.users[t.authorId]) {
+      orbitTells(t.authorId, approve ? `✅ Your theme **${t.name}** is on Discovery now. Everyone can install and upvote it.`
+        : `Your theme **${t.name}** wasn’t approved for Discovery.${reason ? ` Reason: ${reason}` : ''} It’s still in your library.`);
+    }
+    res.json(approve ? pubView(t, req.user) : { ok: true });
+  }));
   /** Upvote a theme (or take your upvote back): { vote: true | false }. Not your own. Resolves the theme's votes and whether you voted. */
   r.put('/themes/discover/:id/vote', limit('themevote', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
-    const t = db.themes[req.params.id]; if (!t || !alive(t)) throw notFound('That theme isn’t on Discovery any more');
+    const t = db.themes[req.params.id]; if (!t || !shown(t)) throw notFound('That theme isn’t on Discovery any more');
     if (typeof req.body?.vote !== 'boolean') throw bad('Say whether to upvote or take the upvote back');
     if (t.authorId === req.user.id) throw bad('You can’t upvote your own theme.', 'own_theme');
     const votes = (t.votes ||= []); const at = votes.indexOf(req.user.id);
@@ -216,7 +249,7 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
   }));
   /** Copies a posted theme into your library, if there is room for it. */
   r.post('/themes/discover/:id/install', pace, h(async (req, res) => {
-    const pub = db.themes[req.params.id]; if (!pub || !alive(pub)) throw notFound('That theme isn’t on Discovery any more');
+    const pub = db.themes[req.params.id]; if (!pub || !shown(pub)) throw notFound('That theme isn’t on Discovery any more');
     const have = mine(req).find((x) => x.from === pub.id);
     if (have) return res.json({ already: true, theme: libView(have) });
     if (mine(req).filter((x) => x.kind === pub.kind).length >= LIBRARY_LIMIT) throw full(pub.kind);

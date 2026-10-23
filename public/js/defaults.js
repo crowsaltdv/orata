@@ -46,7 +46,7 @@ export const DEFAULT_SETTINGS = {
   rain: { enabled: true, preset: 'rain', amount: 0.7, size: 0.88, speed: 1, refraction: 1, mist: 3, trails: 1, droplets: 50, lightning: 0, fps: 60 },
   glass: { style: 'off', intensity: 1, rail: true, nav: true, toolbar: true, buttons: true, composer: true, panels: true },
   fx: { particles: true, ripples: true, amount: 1 },
-  fonts: { ui: 'Montserrat', chat: null, code: 'JetBrains Mono', size: 16, weight: 400, lineHeight: 1.45, letterSpacing: 0 },
+  fonts: { ui: 'Montserrat', chat: null, code: 'JetBrains Mono', size: 16, weight: 400, lineHeight: 1.45, letterSpacing: 0, custom: [] },   // custom: the fonts you uploaded, [{ url, name }] (fontpicker.js)
   motion: { reduce: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, parallaxHover: true },
   chat: { compact: true, hour24: false, linkPreviews: true, inlineMedia: true, jumbo: true, showAvatars: true, spacing: 16, gifAutoplay: true, spoilerOnHover: false },
   notif: { desktop: true, sounds: true, volume: 0.5, mentionsOnly: false, flash: true },

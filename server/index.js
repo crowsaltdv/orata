@@ -43,7 +43,7 @@ app.use((req, res, next) => {
 app.use('/api', createApi());
 
 // Uploaded files: only well-known media renders inline; everything else downloads. CSP sandbox keeps stray HTML inert.
-const INLINE = /\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm|mov|m4v|mp3|ogg|oga|wav|m4a|flac|opus|pdf|txt)$/i;
+const INLINE = /\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm|mov|m4v|mp3|ogg|oga|wav|m4a|flac|opus|pdf|txt|woff2?|ttf|otf)$/i;   // (fonts: as fonts, for uploaded ones in Settings → Fonts and themes)
 // with Postgres the disk is only a cache: fetch a file back from the database if a restart wiped it
 app.use('/uploads', (req, res, next) => {
   if (!pg) return next();

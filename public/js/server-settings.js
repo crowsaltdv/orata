@@ -137,14 +137,40 @@ function Members({ server }) {
 /* ------------------------------------------------------------------ custom emoji + stickers */
 const EXPR = { emojis: { max: 50, title: 'Emoji', one: 'emoji', size: 128, desc: 'Custom emoji anyone in the server can use in messages and reactions — type :name: or pick them from the emoji picker. PNG, JPEG, GIF or WebP under 512 KB.' },
   stickers: { max: 30, title: 'Stickers', one: 'sticker', size: 320, desc: 'Stickers anyone in the server can send from the sticker picker. PNG, JPEG, GIF or WebP under 512 KB.' } };
-/** Picks a picture, squares it up (GIFs stay as they are so they keep moving) and uploads it. Resolves { url, name } or null. */
-async function pickExpressionImage(kind) {
-  const file = await pickFile('image/png,image/jpeg,image/webp,image/gif'); if (!file) return null;
+/** Picks a picture (or takes `given`), squares it up (GIFs stay as they are so they keep moving) and uploads it. Resolves { url, name } or null. */
+async function pickExpressionImage(kind, given) {
+  const file = given || await pickFile('image/png,image/jpeg,image/webp,image/gif'); if (!file) return null;
   const base = file.name.replace(/\.[^.]+$/, '');
   let up;
   if (file.type === 'image/gif') { if (file.size > 512 * 1024) throw new Error('Animated pictures must be under 512 KB'); up = await upload(file); }
   else { const blob = await cropImage(file, { aspect: 1, out: EXPR[kind].size, title: kind === 'emojis' ? 'Custom Emoji' : 'Sticker' }); if (!blob) return null; if (blob.size > 512 * 1024) throw new Error('That picture is too big even after resizing'); up = await upload(new File([blob], 'image.webp', { type: 'image/webp' })); }
   return { url: up.url, name: base };
+}
+const isPicture = (f) => /^image\/(png|jpeg|webp|gif)$/.test(f.type) || /\.(png|jpe?g|webp|gif)$/i.test(f.name);
+const isGif = (f) => f.type === 'image/gif' || /\.gif$/i.test(f.name);
+/** Every file dropped: the pictures in a dropped folder too (and in the folders inside it). `entries` must be read during the drop itself. */
+async function droppedFiles(entries, files) {
+  if (!entries.length) return files;
+  const out = [];
+  const walk = async (e) => {
+    if (e.isFile) out.push(await new Promise((res, rej) => e.file(res, rej)));
+    else if (e.isDirectory) { const reader = e.createReader(); for (;;) { const batch = await new Promise((res, rej) => reader.readEntries(res, rej)); if (!batch.length) break; for (const x of batch) await walk(x); } }
+  };
+  for (const e of entries) await walk(e);
+  return out;
+}
+/** A picture cut to a square from its middle and scaled to `size`, as WebP. */
+async function squared(file, size) {
+  const bmp = await createImageBitmap(file); const s = Math.min(bmp.width, bmp.height);
+  const c = document.createElement('canvas'); c.width = size; c.height = size;
+  c.getContext('2d').drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, size, size); bmp.close?.();
+  return new Promise((res) => c.toBlob(res, 'image/webp', 0.9));
+}
+/** Runs `fn` again when Orata says to slow down (it allows 30 uploads a minute), up to about a minute. */
+async function patiently(fn, onWait) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) { if (e.status !== 429 || i >= 12) throw e; onWait?.(); await new Promise((r) => setTimeout(r, 5000)); }
+  }
 }
 const uniqueName = (base, list, kind) => {
   let n = kind === 'emojis' ? base.replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 28) : base.replace(/[_-]+/g, ' ').trim().slice(0, 26);
@@ -163,12 +189,51 @@ function ExprRow({ server, kind, item, can }) {
 }
 function Expressions({ server, kind }) {
   const cfg = EXPR[kind]; const list = server[kind] || []; const can = hasPerm(server.id, 'MANAGE_EXPRESSIONS'); const [busy, setBusy] = useState(false);
-  const add = async () => {
+  const [over, setOver] = useState(false); const [progress, setProgress] = useState(null); const depth = useRef(0); const folder = useRef(null);
+  const add = async (given) => {
     setBusy(true);
-    try { const f = await pickExpressionImage(kind); if (f) { await api.post(`/servers/${server.id}/${kind}`, { name: uniqueName(f.name, list, kind), url: f.url }); toast(`${t('Added')} ${cfg.one}`, 'success', 1800); } } catch (e) { toast(errMsg(e), 'error'); }
+    try { const f = await pickExpressionImage(kind, given); if (f) { await api.post(`/servers/${server.id}/${kind}`, { name: uniqueName(f.name, list, kind), url: f.url }); toast(`${t('Added')} ${cfg.one}`, 'success', 1800); } } catch (e) { toast(errMsg(e), 'error'); }
     setBusy(false);
   };
-  return html`<div class="s-page"><${Section} title=${`${t(cfg.title)} — ${list.length} / ${cfg.max}`} desc=${t(cfg.desc)} action=${can ? html`<${Btn} size="sm" variant="primary" icon="upload" loading=${busy} disabled=${list.length >= cfg.max} onClick=${add}>${t('Upload')} ${t(cfg.one)}<//>` : null}>
+  /** Many pictures (or a folder of them) at once: each becomes one, named after its file, squared from its middle (GIFs as they are). */
+  const addMany = async (files) => {
+    const pics = files.filter(isPicture);
+    if (!pics.length) { toast(t('Drop pictures (PNG, JPEG, GIF or WebP), or a folder of them.'), 'error', 4000); return; }
+    if (files.length === 1 && !isGif(pics[0])) return add(pics[0]);   // one picture: crop it like an upload
+    const room = Math.max(0, cfg.max - list.length); const todo = pics.slice(0, room);
+    const names = list.map((x) => ({ name: x.name })); const skipped = { big: 0, bad: 0, full: pics.length - todo.length }; let added = 0;
+    setBusy(true);
+    for (const [i, f] of todo.entries()) {
+      setProgress(`${t('Adding')} ${i + 1} / ${todo.length}`);
+      try {
+        let file = f;
+        if (isGif(f)) { if (f.size > 512 * 1024) { skipped.big++; continue; } }
+        else { const blob = await squared(f, cfg.size); if (!blob || blob.size > 512 * 1024) { skipped.big++; continue; } file = new File([blob], 'image.webp', { type: 'image/webp' }); }
+        const wait = () => setProgress(`${t('Adding')} ${i + 1} / ${todo.length} · ${t('waiting a moment (upload limit)…')}`);
+        const up = await patiently(() => upload(file), wait);
+        const name = uniqueName(f.name.replace(/\.[^.]+$/, ''), names, kind);
+        await patiently(() => api.post(`/servers/${server.id}/${kind}`, { name, url: up.url }), wait);
+        names.push({ name }); added++;
+      } catch { skipped.bad++; }
+    }
+    setBusy(false); setProgress(null);
+    const why = [skipped.big && `${skipped.big} ${t('too big')}`, skipped.bad && `${skipped.bad} ${t('couldn’t be used')}`, skipped.full && `${skipped.full} ${t('over the limit of')} ${cfg.max}`].filter(Boolean);
+    toast(`${t('Added')} ${added} ${added === 1 ? t(cfg.one) : t(cfg.title).toLowerCase()}${why.length ? ` · ${t('skipped')} ${why.join(', ')}` : ''}`, added ? 'success' : 'error', 5000);
+  };
+  const drop = can && list.length < cfg.max && !busy ? {
+    onDragEnter: (e) => { if (![...e.dataTransfer.types].includes('Files')) return; e.preventDefault(); depth.current++; setOver(true); },
+    onDragOver: (e) => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); },
+    onDragLeave: () => { if (--depth.current <= 0) { depth.current = 0; setOver(false); } },
+    onDrop: (e) => { e.preventDefault(); depth.current = 0; setOver(false); const entries = [...(e.dataTransfer.items || [])].map((it) => it.webkitGetAsEntry?.()).filter(Boolean); const files = [...e.dataTransfer.files]; droppedFiles(entries, files).then(addMany); },
+  } : {};
+  const actions = can ? html`<span class="expr-acts">
+    <${Btn} size="sm" icon="folder" disabled=${busy || list.length >= cfg.max} onClick=${() => folder.current?.click()}>${t('Upload folder')}<//>
+    <input ref=${folder} type="file" hidden multiple webkitdirectory onChange=${(e) => { const files = [...e.target.files]; e.target.value = ''; addMany(files); }} />
+    <${Btn} size="sm" variant="primary" icon="upload" loading=${busy} disabled=${list.length >= cfg.max} onClick=${() => add()}>${t('Upload')} ${t(cfg.one)}<//></span>` : null;
+  return html`<div class=${cx('s-page', 'expr-page', over && 'dropping')} ...${drop}>
+    ${over ? html`<div class="expr-drop"><${Icon} name="upload" size=${36} /><b>${t('Drop to add them')}</b><span>${t(`Pictures or a folder of them: each becomes ${kind === 'emojis' ? 'an emoji' : 'a sticker'} named after its file.`)}</span></div>` : null}
+    ${progress ? html`<div class="expr-progress"><${Spinner} size=${14} /> ${progress}</div>` : null}
+    <${Section} title=${`${t(cfg.title)} — ${list.length} / ${cfg.max}`} desc=${`${t(cfg.desc)}${can ? ` ${t('Drag pictures or a folder here to add many at once.')}` : ''}`} action=${actions}>
     ${list.length ? html`<div class=${cx('expr-grid', kind)}>${list.map((it) => html`<${ExprRow} key=${it.id} server=${server} kind=${kind} item=${it} can=${can} />`)}</div>` : html`<${Empty} icon=${kind === 'emojis' ? 'smile' : 'sticker'} title=${`${t('No')} ${t(cfg.title).toLowerCase()} ${t('yet')}`}>${can ? t('Upload one to get started.') : t('Ask someone with Manage Expressions to add some.')}<//>`}
   <//></div>`;
 }

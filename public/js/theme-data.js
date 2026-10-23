@@ -22,7 +22,8 @@ const ENUM = {
   'rain.preset': ['rain', 'drizzle', 'storm', 'fallout', 'custom'], 'rain.fps': [30, 60], 'glass.style': ['off', 'liquid'],
 };
 const COLORS = new Set(['theme.accent', 'theme.accent2', 'theme.panelColor', 'theme.panelColor2', 'theme.textColor', 'bg.color', 'bg.gradient.c1', 'bg.gradient.c2']);
-const HEX = /^#[0-9a-f]{6}$/i; const FONT = /^[\w .+-]{1,60}$/; const IMAGE = /^(\/uploads\/[\w.-]+|\/img\/[\w./-]+|https?:\/\/[^\s"'()\\]+)$/i;
+// FONT: a font's name, or an uploaded font's address
+const HEX = /^#[0-9a-f]{6}$/i; const FONT = /^([\w .+-]{1,60}|\/uploads\/[\w.-]{1,120}\.(woff2?|ttf|otf))$/i; const IMAGE = /^(\/uploads\/[\w.-]+|\/img\/[\w./-]+|https?:\/\/[^\s"'()\\]+)$/i;
 
 function checkValue(path, v, def) {
   if (path in ENUM) return ENUM[path].includes(v) ? v : undefined;
@@ -40,7 +41,7 @@ export const CARD_SECTIONS = ['theme', 'bg', 'rain', 'glass', 'fonts', 'motion',
  *  and the chat settings that are about what is fetched or shown rather than how it looks (link previews, GIF autoplay, 24-hour time …). */
 export const SITE_SECTIONS = ['theme', 'bg', 'rain', 'glass', 'fx', 'fonts', 'motion', 'chat'];
 export const SITE_ONLY = { motion: ['speed', 'parallaxHover'], chat: ['compact', 'showAvatars', 'spacing', 'jumbo'] };
-const NEVER = new Set(['bg.library', 'motion.reduce']);
+const NEVER = new Set(['bg.library', 'motion.reduce', 'fonts.custom']);
 
 /** Keeps only valid settings of `data` (`sections`, and within a section only `only[section]` when given). Anything wrong is dropped, numbers are clamped. */
 export function checkLook(data, { sections = CARD_SECTIONS, only = {} } = {}) {
@@ -112,9 +113,12 @@ export const sanitizeTheme = (kind, data) => (kind === 'site' ? sanitizeSiteLook
 /** A theme's name: one line, at most THEME_NAME_MAX characters ('' when there is none). */
 export const cleanThemeName = (name) => String(name ?? '').replace(/[\u0000-\u001f\u007f<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, THEME_NAME_MAX);
 
-/** Where a theme keeps pictures of this server's: a site theme's wallpaper; a profile theme's card picture and banner. [{ get, set }] on the (cloned) data. */
+/** Where a theme keeps files of this server's: a site theme's wallpaper and uploaded fonts; a profile theme's card picture and banner. [{ get, set }] on the (cloned) data. */
 function pictureSlots(kind, data) {
-  if (kind === 'site') return isObj(data?.bg) ? [{ get: () => data.bg.image, set: (v) => { data.bg.image = v; } }] : [];
+  if (kind === 'site') {
+    const fonts = isObj(data?.fonts) ? ['ui', 'chat', 'code'].map((k) => ({ get: () => data.fonts[k], set: (v) => { data.fonts[k] = v; } })) : [];
+    return [...(isObj(data?.bg) ? [{ get: () => data.bg.image, set: (v) => { data.bg.image = v; } }] : []), ...fonts];
+  }
   const slots = [];
   if (isObj(data?.colors)) slots.push({ get: () => data.colors.image, set: (v) => { data.colors.image = v; } });
   if (isObj(data?.banner)) slots.push({ get: () => data.banner.image, set: (v) => { data.banner.image = v; } });

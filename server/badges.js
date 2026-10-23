@@ -14,12 +14,14 @@ const BUILTIN = [
   { id: 'verified', name: 'Verified', icon: 'check-circle', color: '#3b82f6' },
   { id: 'artist', name: 'Artist', icon: 'palette', color: '#f97316' },
   { id: 'partner', name: 'Partner', icon: 'award', color: '#a78bfa' },
-  { id: 'creator', name: 'Creator', icon: 'paintbrush', color: '#ec4899' },   // may post themes on Discovery (themes.js, with Orata staff and developers); given in Edit Badges like any badge
 ];
 const before = JSON.stringify(db.badges || null);
 db.badges ||= {};
 for (const b of BUILTIN) db.badges[b.id] = { ...b, builtin: true };
 let seeded = false;
+// The Creator badge is gone (anyone can send a theme to Discovery now, and Orata staff approve each one): off the catalog and off everyone who had it
+if (db.badges.creator?.builtin) delete db.badges.creator;
+for (const u of Object.values(db.users)) if (u.badges?.includes('creator') && !db.badges.creator) { u.badges = u.badges.filter((b) => b !== 'creator'); seeded = true; }
 if (!db.badgeSeedV1) {   // once: the first two developers
   for (const id of [byUsername.get('oratedev'), ORATE_DEV_ID]) { const u = db.users[id]; if (u && !u.badges?.includes('dev')) (u.badges ||= []).push('dev'); }
   db.badgeSeedV1 = true; seeded = true;

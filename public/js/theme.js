@@ -19,9 +19,19 @@ export function fontUrl(family, { weights = '400,500,600,700', text = null } = {
   const fam = encodeURIComponent(family).replace(/%20/g, '+');
   return `https://fonts.googleapis.com/css?family=${fam}${text ? '' : ':' + weights}${text ? '&text=' + encodeURIComponent(text) : ''}&display=swap`;
 }
+/** A font someone uploaded (its /uploads address: WOFF2, WOFF, TTF or OTF) rather than a Google font or one on the computer. */
+export const isUploadedFont = (f) => typeof f === 'string' && /^\/uploads\/[\w.-]+\.(woff2?|ttf|otf)$/i.test(f);
+/** The name CSS knows a font by (an uploaded one gets a name made from its file). */
+export const fontFamilyName = (f) => (isUploadedFont(f) ? `Orata Font ${f.slice(9).replace(/\.[^.]+$/, '').replace(/[^\w-]/g, '')}` : f);
+/** What a font is called on screen: its family, or the name an uploaded one was given in Settings → Fonts. */
+export const fontLabel = (f) => (isUploadedFont(f) ? (state.settings.fonts?.custom || []).find((x) => x.url === f)?.name || 'Uploaded font' : f);
 export function loadFont(family) {
   if (!family || SYSTEM_FONTS[family] || loadedFonts.has(family)) return;
   loadedFonts.add(family);
+  if (isUploadedFont(family)) {   // straight from this server: no stylesheet to fetch
+    new FontFace(fontFamilyName(family), `url("${family}")`).load().then((ff) => document.fonts.add(ff), () => loadedFonts.delete(family));
+    return;
+  }
   const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = fontUrl(family); l.dataset.font = family;
   l.onerror = () => loadedFonts.delete(family);
   document.head.appendChild(l);
@@ -30,7 +40,7 @@ const stack = (family, kind) => {
   if (!family) return null;
   if (SYSTEM_FONTS[family]) return SYSTEM_FONTS[family];
   const fall = kind === 'code' ? 'ui-monospace, "Cascadia Code", Consolas, monospace' : 'system-ui, "Segoe UI", sans-serif';
-  return `"${family}", ${fall}`;
+  return `"${fontFamilyName(family)}", ${fall}`;
 };
 
 /* ------------------------------------------------------------------ wallpapers */

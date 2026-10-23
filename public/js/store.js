@@ -188,6 +188,7 @@ export function parseRoute(path) {
   if (p === '/staff') return { view: 'staff', serverId: '@me', channelId: null };   // Orata staff tools (staff.js)
   if (p === '/themes' || p === '/themes/discover') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'discover' };   // Discovery and your theme library (themes.js)
   if (p === '/themes/library') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'library' };
+  if (p === '/themes/review') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'review' };   // Orata staff: themes waiting for approval
   if (p === '/login' || p === '/register') return { view: p.slice(1), serverId: '@me', channelId: null };
   if (p === '/verify') return { view: 'verify', serverId: '@me', channelId: null };   // the link in the verification email (the token is read from the query string)
   return { view: 'friends', serverId: '@me', channelId: null };
@@ -198,7 +199,7 @@ export function routePath(r) {
     case 'friends': return '/channels/@me';
     case 'music': return r.musicView && r.musicId ? `/music/${r.musicView}/${r.musicId}` : '/music';
     case 'staff': return '/staff';
-    case 'themes': return r.themesView === 'library' ? '/themes/library' : '/themes';
+    case 'themes': return r.themesView === 'library' ? '/themes/library' : r.themesView === 'review' ? '/themes/review' : '/themes';
     case 'channel': return r.channelId ? `/channels/${r.serverId}/${r.channelId}` : `/channels/${r.serverId}`;
     default: return '/channels/@me';
   }
