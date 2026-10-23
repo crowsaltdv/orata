@@ -285,6 +285,7 @@ async function main() {
   const hh = new Set(r.body.tracks.map((x) => x.id)); offset = 100;
   while (true) { r = await api('GET', `/music/charts/g-hip-hop?offset=${offset}&limit=100`, A3); for (const x of r.body.tracks) hh.add(x.id); offset += r.body.tracks.length; if (!r.body.hasMore) break; }
   ok(offset === 200 && hh.size === 200, 'all 200 songs of its playlists, a song in two of them only once', `${offset} ${hh.size}`);
+  r = await api('GET', '/music/charts/trending?limit=60', A3); ok(r.body.tracks.length === 50 && new Set(r.body.tracks.map((x) => x.id)).size === 50 && !r.body.hasMore, 'Trending goes on past its first 20 into the playlist behind them');
   r = await api('GET', '/music/charts/g-hip-hop?offset=50&limit=10', A3); ok(r.body.tracks[0].id === 'h0000000050' && helperCalls('category').filter((x) => x.key === 'g-hip-hop').length === 4, 'pages already fetched come from the cache');
 
   console.log('\nPlaylists: order, library, sharing');

@@ -237,6 +237,9 @@ def mood_table():
     return _moods
 
 
+_more = {}  # "top" / "trending" -> (when, playlist ids): the playlists their later pages come from
+
+
 def top_songs():
     lists = yt.get_charts(COUNTRY).get("videos") or []
     pick = next((p for p in lists if str(p.get("title", "")).lower().startswith("top 100 music videos")), None) or (lists[0] if lists else None)
@@ -247,6 +250,43 @@ def top_songs():
 
 def trending():
     return with_covers(tracks_of((yt.get_explore().get("trending") or {}).get("items") or [], 40))
+
+
+def more_lists(key):
+    # After the first page, Top Songs goes on through the country's other chart playlists (daily, weekly, the genre charts) and Trending through
+    # the full trending playlists behind its first 20. Kept for an hour; songs already shown are dropped by the server.
+    import time
+
+    hit = _more.get(key)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    ids = []
+    try:
+        charts = yt.get_charts(COUNTRY) or {}
+        if key == "top":
+            vids = [p for p in charts.get("videos") or [] if isinstance(p, dict) and p.get("playlistId")]
+            first = next((p for p in vids if str(p.get("title", "")).lower().startswith("top 100 music videos")), None) or (vids[0] if vids else None)   # page 0's (top_songs)
+            ids = [p["playlistId"] for p in vids + [g for g in charts.get("genres") or [] if isinstance(g, dict) and g.get("playlistId")] if p is not first]
+        else:
+            for shelf in ((yt.get_explore() or {}).get("trending"), charts.get("trending")):
+                if isinstance(shelf, dict) and shelf.get("playlist"):
+                    ids.append(shelf["playlist"])
+    except Exception:  # noqa: BLE001 - then it is just its first page
+        pass
+    ids = list(dict.fromkeys(ids))[:30]
+    _more[key] = (time.time(), ids)
+    return ids
+
+
+def playlist_page(ids, page):
+    # page 1 is the first of `ids`, page 2 the second…: up to 100 songs from one playlist
+    if page > len(ids):
+        return {"tracks": [], "more": False}
+    try:
+        found = tracks_of(yt.get_playlist(ids[page - 1], limit=100).get("tracks") or [], 100)
+    except Exception:  # noqa: BLE001 - one playlist gone: the next page goes on
+        found = []
+    return {"tracks": with_covers(found, 4.0), "more": page < len(ids)}
 
 
 def songs_shelf(raw):
@@ -316,14 +356,7 @@ def category_page(entry, page):
     if page == 0:
         tracks = category_tracks(entry)
         return {"tracks": tracks, "more": bool(mood_playlists(entry))}
-    lists = mood_playlists(entry)
-    if page > len(lists):
-        return {"tracks": [], "more": False}
-    try:
-        found = tracks_of(yt.get_playlist(lists[page - 1], limit=100).get("tracks") or [], 100)
-    except Exception:  # noqa: BLE001 - one playlist gone: the next page goes on
-        found = []
-    return {"tracks": with_covers(found, 4.0), "more": page < len(lists)}
+    return playlist_page(mood_playlists(entry), page)
 
 
 def op_search(p):
@@ -356,7 +389,9 @@ def op_category(p):
     key = str(p.get("key") or "")
     page = clamp(p.get("page"), 0, 60, 0)
     if key in ("top", "trending"):
-        return {"tracks": (top_songs() if key == "top" else trending()) if page == 0 else [], "more": False}
+        if page == 0:
+            return {"tracks": top_songs() if key == "top" else trending(), "more": bool(more_lists(key))}
+        return playlist_page(more_lists(key), page)
     entry = mood_table()["table"].get(key)
     if not entry:
         raise Problem("Unknown category", "not_found")

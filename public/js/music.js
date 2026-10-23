@@ -1,7 +1,7 @@
 // Orata — music: the Music page (/music, opened from the note icon above Home) with search, categories and a full-song player, a mini player, and the "Listening to" card shown on profiles.
 // The server finds the songs (see server/music.js); the browser plays them in an embedded player that is kept out of sight (see youtube-player.js).
-// Long lists (a genre, a search) come a page at a time as you scroll. The library shows as Grid (three columns of song cards) or List (covers),
-// your pick kept with your account (settings.music.layout).
+// Long lists (a genre, a search) come a page at a time as you scroll. The library shows as List (three columns of song cards, the default) or Grid
+// (covers), your pick kept with your account (settings.music.view).
 import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
 import { state, set, useSel, toast, setSetting, updateSettings, go, closePopover, openContext } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -283,14 +283,14 @@ function QueuePanel() {
   </section>`;
 }
 
-/* ------------------------------------------------------------------ the library: Grid (three columns of song cards) or List (covers) */
-const useLayout = () => useSel((s) => (s.settings.music?.layout === 'list' ? 'list' : 'grid'));
+/* ------------------------------------------------------------------ the library: List (three columns of song cards) or Grid (covers) */
+const useLayout = () => useSel((s) => (s.settings.music?.view === 'covers' ? 'covers' : 'cards'));
 function LayoutSwitch() {
   const layout = useLayout();
-  const opt = (v, icon, label) => html`<button type="button" role="radio" aria-checked=${layout === v} class=${cx(layout === v && 'on')} onClick=${() => updateSettings({ music: { layout: v } })} data-tip=${label} aria-label=${label}><${Icon} name=${icon} size=${16} /><span>${label}</span></button>`;
-  return html`<div class=${cx('lay-switch', layout === 'list' && 'second')} role="radiogroup" aria-label=${t('Layout')}><span class="lay-thumb" aria-hidden="true"></span>${opt('grid', 'grid', t('Grid'))}${opt('list', 'list', t('List'))}</div>`;
+  const opt = (v, icon, label) => html`<button type="button" role="radio" aria-checked=${layout === v} class=${cx(layout === v && 'on')} onClick=${() => updateSettings({ music: { view: v } })} data-tip=${label} aria-label=${label}><${Icon} name=${icon} size=${16} /><span>${label}</span></button>`;
+  return html`<div class=${cx('lay-switch', layout === 'covers' && 'second')} role="radiogroup" aria-label=${t('Layout')}><span class="lay-thumb" aria-hidden="true"></span>${opt('cards', 'list', t('List'))}${opt('covers', 'grid', t('Grid'))}</div>`;
 }
-/** Grid: a card per song, cover on the left, title and artist, length on the right. */
+/** List: a card per song in three columns, cover on the left, title and artist, length on the right. */
 function TrackCard({ tr, list, cur, playing }) {
   const play = () => (cur ? music.toggle() : music.play(tr, list));
   return html`<div class=${cx('trk', cur && 'cur')} role="button" tabindex="0" onClick=${play} onKeyDown=${(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); play(); } }} onContextMenu=${(e) => { e.preventDefault(); openSongMenu(e, tr); }} title=${`${tr.title} — ${tr.artist}`}>
@@ -300,7 +300,7 @@ function TrackCard({ tr, list, cur, playing }) {
     <button type="button" class="trk-more" aria-label=${t('More options')} onClick=${(e) => { e.stopPropagation(); openSongMenu(e, tr); }}><${Icon} name="more-h" size=${18} /></button>
   </div>`;
 }
-/** List: the covers grid the library always had; clicking one plays it (and queues the rest after it). */
+/** Grid: the covers the library always had; clicking one plays it (and queues the rest after it). */
 function TrackGrid({ tracks, cur, playing }) {
   return html`<div class="mpg-grid">${tracks.map((tr) => html`<div class="mpg-cell" key=${tr.id}>
     <button type="button" class=${cx('mpg-card', cur === tr.id && 'cur')} onClick=${() => (cur === tr.id ? music.toggle() : music.play(tr, tracks))} onContextMenu=${(e) => { e.preventDefault(); openSongMenu(e, tr); }} title=${`${tr.title} — ${tr.artist}`}>
@@ -310,7 +310,7 @@ function TrackGrid({ tracks, cur, playing }) {
   </div>`)}</div>`;
 }
 function Skeletons({ layout, n = 6 }) {
-  return html`<div class=${layout === 'grid' ? 'mpg-cards' : 'mpg-grid'} aria-hidden="true">${Array.from({ length: n }, (_, i) => (layout === 'grid'
+  return html`<div class=${layout === 'cards' ? 'mpg-cards' : 'mpg-grid'} aria-hidden="true">${Array.from({ length: n }, (_, i) => (layout === 'cards'
     ? html`<div key=${i} class="trk skel"><span class="sk-art"></span><span class="sk-lines"><i></i><i></i></span></div>`
     : html`<div key=${i} class="mpg-card skel"><span class="sk-art"></span><span class="sk-lines"><i></i><i></i></span></div>`))}</div>`;
 }
@@ -323,7 +323,7 @@ function Tracks({ tracks, hasMore, loading, onMore }) {
     const io = new IntersectionObserver((es) => { if (es[0].isIntersecting) onMore(); }, { root: end.current.closest('.mpg-scroll'), rootMargin: '700px 0px' });
     io.observe(end.current); return () => io.disconnect();
   }, [hasMore, tracks.length]);
-  return html`${layout === 'grid' ? html`<div class="mpg-cards">${tracks.map((tr) => html`<${TrackCard} key=${tr.id} tr=${tr} list=${tracks} cur=${cur === tr.id} playing=${cur === tr.id && playing} />`)}</div>`
+  return html`${layout === 'cards' ? html`<div class="mpg-cards">${tracks.map((tr) => html`<${TrackCard} key=${tr.id} tr=${tr} list=${tracks} cur=${cur === tr.id} playing=${cur === tr.id && playing} />`)}</div>`
     : html`<${TrackGrid} tracks=${tracks} cur=${cur} playing=${playing} />`}
     ${loading ? html`<${Skeletons} layout=${layout} />` : null}
     ${hasMore ? html`<div class="mpg-end" ref=${end}></div>` : null}`;

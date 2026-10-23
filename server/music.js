@@ -184,6 +184,7 @@ function chartList(key, want) {
 async function pageOf(req, load, size) {
   const offset = clamp(req.query.offset, 0, 5000, 0); const n = clamp(req.query.limit, 1, 100, size);
   const L = await load(offset + n);
+  if (L.more && L.tracks.length < offset + 2 * n) load(offset + 2 * n).catch(() => {});   // the next page, fetched while this one is looked at, so scrolling on doesn't wait
   return { tracks: L.tracks.slice(offset, offset + n), hasMore: L.tracks.length > offset + n || L.more };
 }
 async function trackInfo(id) {

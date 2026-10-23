@@ -35,6 +35,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     ]);
   }
   if (req.op === 'categories') return reply(CATEGORIES);
+  if (req.op === 'category' && req.key === 'trending') return reply(req.page ? { tracks: many('w', 10, 40), more: false } : { tracks: many('w', 0, 20), more: true });   // 20 first, then the trending playlist behind them (10 of them again)
   if (req.op === 'category' && req.key === 'g-hip-hop') {   // four pages of 50 (the last song of a page comes again at the start of the next)
     const p = req.page || 0; return reply({ tracks: [...(p ? many('h', p * 50 - 1, 1) : []), ...many('h', p * 50, 50)], more: p < 3 });
   }
