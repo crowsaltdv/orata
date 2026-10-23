@@ -18,7 +18,7 @@ export const state = {
   settings: deepMerge(DEFAULT_SETTINGS, migrateSettings(ls('settings', {}))),
   local: deepMerge(DEFAULT_LOCAL, ls('local', {})),
   focused: document.hasFocus(), idle: false, width: window.innerWidth, mobileNav: false,
-  music: { genres: null, category: 'top', charts: {}, chartLoading: false, chartError: null, recent: ls('musicRecentYT', []) || [], playlists: null, artists: [], query: '', results: null, searching: false, error: null, queue: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7 }, musicOk: null, postIndex: {}, postLists: {},
+  music: { genres: null, category: 'top', charts: {}, chartLoading: false, chartError: null, recent: ls('musicRecentYT', []) || [], playlists: null, artists: [], query: '', results: null, searching: false, error: null, queue: [], orig: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7, muted: false, shuffle: ['off', 'playlist', 'library'].includes(ls('musicShuffle', 'off')) ? ls('musicShuffle', 'off') : 'off', repeat: ['off', 'all', 'one'].includes(ls('musicRepeat', 'off')) ? ls('musicRepeat', 'off') : 'off', library: [], showQueue: false, chartMore: {}, loadingMore: false, resultsMore: false }, musicOk: null, postIndex: {}, postLists: {},
   gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, themesRev: 0, replyTo: null, editing: null, searchQuery: '', speaking: {},
 };
 state.panel = state.local.panel;
@@ -35,11 +35,16 @@ export function useSel(sel, eq = Object.is) {
   const ref = useRef(null);
   const val = sel(state);
   ref.current = { sel, eq, val };
-  useEffect(() => subscribe(() => {
-    const r = ref.current; let nv;
-    try { nv = r.sel(state); } catch { nv = r.val; }
-    if (!r.eq(nv, r.val)) { r.val = nv; force(); }
-  }), []);
+  useEffect(() => {
+    const check = () => {
+      const r = ref.current; let nv;
+      try { nv = r.sel(state); } catch { nv = r.val; }
+      if (!r.eq(nv, r.val)) { r.val = nv; force(); }
+    };
+    const off = subscribe(check);
+    check();   // a change between the render and this subscription would otherwise be missed for good
+    return off;
+  }, []);
   return val;
 }
 /** Re-render on any store change (use sparingly). */
@@ -178,7 +183,7 @@ export function parseRoute(path) {
   if ((m = p.match(/^\/channels\/(\d+)\/(\d+)$/))) return { view: 'channel', serverId: m[1], channelId: m[2] };
   if ((m = p.match(/^\/channels\/(\d+)$/))) return { view: 'channel', serverId: m[1], channelId: null };
   if ((m = p.match(/^\/invite\/([\w-]+)$/))) return { view: 'invite', serverId: '@me', channelId: null, param: m[1] };
-  if ((m = p.match(/^\/music\/(artist|album|playlist)\/([\w-]+)$/))) return { view: 'music', serverId: '@me', channelId: null, musicView: m[1], musicId: m[2] };   // an artist's, an album's or one of your playlists' page
+  if ((m = p.match(/^\/music\/(artist|album|playlist|shared)\/([\w-]+)$/))) return { view: 'music', serverId: '@me', channelId: null, musicView: m[1], musicId: m[2] };   // an artist's, an album's or one of your playlists' page
   if (p === '/music') return { view: 'music', serverId: '@me', channelId: null, musicView: null, musicId: null };
   if (p === '/staff') return { view: 'staff', serverId: '@me', channelId: null };   // Orata staff tools (staff.js)
   if (p === '/themes' || p === '/themes/discover') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'discover' };   // Discovery and your theme library (themes.js)

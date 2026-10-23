@@ -1,4 +1,5 @@
-// Orata — forwarding a message to another channel or DM (message menu → Forward). The server makes the copy; see forwardCopy in server/api.js.
+// Orata — forwarding a message to another channel or DM (message menu → Forward), or sharing one of your playlists there (a playlist page → Share).
+// The server makes the copy; see forwardCopy in server/api.js (and playlistCard in server/music.js).
 import { html, useState, useMemo, cx, cmpId } from '/js/lib.js';
 import { state, closeModal, toast, hasChannelPerm, dmName, dmUserId } from '/js/store.js';
 import { Modal, Btn, TextInput, Avatar, MODALS } from '/js/ui.js';
@@ -16,7 +17,7 @@ function destinations() {
   return [...dms, ...chans];
 }
 
-MODALS.forward = function Forward({ id, channelId, messageId }) {
+MODALS.forward = function Forward({ id, channelId, messageId, playlist }) {
   const all = useMemo(destinations, []);
   const [q, setQ] = useState(''); const [to, setTo] = useState(null); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
   const shown = all.filter((d) => !q.trim() || `${d.label} ${d.sub}`.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 60);
@@ -24,11 +25,11 @@ MODALS.forward = function Forward({ id, channelId, messageId }) {
   const send = async () => {
     const ch = state.channelIndex[to]; if (!ch) return;
     setBusy(true);
-    try { await api.post(`/channels/${to}/messages`, { content: note.trim() ? encodeMentions(note.trim(), ch) : '', forward: { channelId, messageId } }); toast(t('Forwarded'), 'success', 1800); close(); }
+    try { await api.post(`/channels/${to}/messages`, { content: note.trim() ? encodeMentions(note.trim(), ch) : '', ...(playlist ? { playlist: { id: playlist.id } } : { forward: { channelId, messageId } }) }); toast(playlist ? t('Playlist shared') : t('Forwarded'), 'success', 1800); close(); }
     catch (e) { toast(errMsg(e), 'error'); setBusy(false); }
   };
-  return html`<${Modal} title=${t('Forward to')} subtitle=${t('Pick where it goes. You can add a message of your own.')} width=${460} onClose=${close}
-    footer=${html`<${Btn} variant="ghost" onClick=${close}>${t('Cancel')}<//><${Btn} variant="primary" icon="send" loading=${busy} disabled=${!to} onClick=${send}>${t('Forward')}<//>`}>
+  return html`<${Modal} title=${playlist ? `${t('Share')} “${playlist.name}”` : t('Forward to')} subtitle=${t('Pick where it goes. You can add a message of your own.')} width=${460} onClose=${close}
+    footer=${html`<${Btn} variant="ghost" onClick=${close}>${t('Cancel')}<//><${Btn} variant="primary" icon="send" loading=${busy} disabled=${!to} onClick=${send}>${playlist ? t('Share') : t('Forward')}<//>`}>
     <${TextInput} value=${q} onInput=${setQ} placeholder=${t('Search channels and DMs')} icon="search" autofocus />
     <div class="pick-list fwd-list">${shown.length ? shown.map((d) => html`<label class=${cx('pick-row', to === d.id && 'sel')} key=${d.id}>
       ${d.user ? html`<${Avatar} user=${d.user} size=${32} />` : html`<i class="fwd-ic"><${Icon} name=${d.icon || 'users'} size=${18} /></i>`}

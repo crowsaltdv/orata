@@ -1,22 +1,24 @@
 // Orata — the commands Orbit answers in a server (shared by the server, which runs them, and the message box, which suggests them).
 // `perm` is the permission a command needs by default; Orbit's /settings can narrow any command to chosen roles. `only` = the reply only shows to whoever used it.
 // `discord` = only there when the Orata server has a Discord bot set up (DISCORD_BOT_TOKEN).
+// `args` = the boxes the message box shows for it (public/js/commands.js), in the order the server reads them; a command without `args` but with an
+// `arg` hint gets one text box. Whatever is typed, the server parses and checks it again.
 // No browser or server APIs in here on purpose.
 
 export const ORBIT_COMMANDS = [
   { name: 'help', desc: 'Everything Orbit can do for you', only: true },
   { name: 'ping', desc: 'Check that Orbit is awake', only: true },
-  { name: 'roll', desc: 'Roll dice', arg: '2d6' },
+  { name: 'roll', desc: 'Roll dice', arg: '2d6', args: [{ name: 'dice', type: 'text', optional: true, placeholder: '2d6' }] },
   { name: 'flip', desc: 'Flip a coin' },
-  { name: '8ball', desc: 'Ask the magic 8-ball', arg: 'question' },
-  { name: 'choose', desc: 'Let Orbit pick for you', arg: 'pizza | tacos | sushi' },
+  { name: '8ball', desc: 'Ask the magic 8-ball', arg: 'question', args: [{ name: 'question', type: 'text' }] },
+  { name: 'choose', desc: 'Let Orbit pick for you', arg: 'pizza | tacos | sushi', args: [{ name: 'choices', type: 'text', placeholder: 'pizza | tacos | sushi' }] },
   { name: 'joke', desc: 'Hear a joke' },
-  { name: 'remind', desc: 'Orbit pings you here later', arg: '10m stretch' },
-  { name: 'say', desc: 'Make Orbit post a message', arg: 'message', perm: 'MANAGE_MESSAGES' },
-  { name: 'purge', desc: 'Delete the last messages in this channel (pinned ones stay)', arg: '20 [@member]', perm: 'MANAGE_MESSAGES', only: true },
-  { name: 'kick', desc: 'Kick a member', arg: '@member or ID [reason]', perm: 'KICK_MEMBERS' },
-  { name: 'ban', desc: 'Ban a member', arg: '@member or ID [reason]', perm: 'BAN_MEMBERS' },
-  { name: 'timeout', desc: 'Time a member out', arg: '@member or ID 10m [reason]', perm: 'MODERATE_MEMBERS' },
+  { name: 'remind', desc: 'Orbit pings you here later', arg: '10m stretch', args: [{ name: 'in', type: 'duration', choices: ['10m', '30m', '1h', '1d'], min: 60_000, max: 7 * 86400_000 }, { name: 'about', type: 'text', optional: true }] },
+  { name: 'say', desc: 'Make Orbit post a message', arg: 'message', perm: 'MANAGE_MESSAGES', args: [{ name: 'message', type: 'text' }] },
+  { name: 'purge', desc: 'Delete the last messages in this channel (pinned ones stay)', arg: '20 [@member]', perm: 'MANAGE_MESSAGES', only: true, args: [{ name: 'count', type: 'number', min: 1, max: 100, choices: ['10', '20', '50', '100'] }, { name: 'member', type: 'user', optional: true }] },
+  { name: 'kick', desc: 'Kick a member', arg: '@member or ID [reason]', perm: 'KICK_MEMBERS', args: [{ name: 'member', type: 'user' }, { name: 'reason', type: 'text', optional: true }] },
+  { name: 'ban', desc: 'Ban a member', arg: '@member or ID [reason]', perm: 'BAN_MEMBERS', args: [{ name: 'member', type: 'user' }, { name: 'reason', type: 'text', optional: true }] },
+  { name: 'timeout', desc: 'Time a member out', arg: '@member or ID 10m [reason]', perm: 'MODERATE_MEMBERS', args: [{ name: 'member', type: 'user' }, { name: 'duration', type: 'duration', choices: ['60s', '5m', '10m', '1h', '1d', '1w'], max: 28 * 86400_000 }, { name: 'reason', type: 'text', optional: true }] },
   { name: 'reactionroles', desc: 'Post a message where reacting gives a role', perm: 'MANAGE_ROLES', only: true },
   { name: 'settings', desc: 'Change Orbit’s name, picture and who can use each command', perm: 'MANAGE_SERVER', only: true },
   { name: 'link', desc: 'Link this channel with a Discord channel', perm: 'MANAGE_SERVER', only: true, discord: true },
@@ -29,20 +31,20 @@ export const ORBIT_COMMANDS = [
   { name: 'goodbye', desc: 'Say something when people leave', arg: '[#channel] message with {name} | off', perm: 'MANAGE_SERVER', only: true },
   { name: 'autorole', desc: 'Give everyone who joins a role', arg: '@role | off', perm: 'MANAGE_ROLES', only: true },
   { name: 'levels', desc: 'XP and levels for chatting, and roles for reaching them', arg: 'on | off | channel #channel | reward 5 @role', perm: 'MANAGE_SERVER', only: true },
-  { name: 'rank', desc: 'Your level and XP (or someone else’s)', arg: '[@member]', only: true },
+  { name: 'rank', desc: 'Your level and XP (or someone else’s)', arg: '[@member]', only: true, args: [{ name: 'member', type: 'user', optional: true }] },
   { name: 'leaderboard', desc: 'Who has the most XP here' },
   { name: 'giveaway', desc: 'Start a giveaway people enter with 🎉 (or end one now)', arg: '1h [winners] prize | end', perm: 'MANAGE_MESSAGES' },
   { name: 'starboard', desc: 'Repost messages that get enough ⭐ reactions', arg: '[#channel] [stars] | off', perm: 'MANAGE_SERVER', only: true },
-  { name: 'ticket', desc: 'Open a private channel with the server’s staff', arg: '[what it’s about]', only: true },
+  { name: 'ticket', desc: 'Open a private channel with the server’s staff', arg: '[what it’s about]', only: true, args: [{ name: 'about', type: 'text', optional: true }] },
   { name: 'close', desc: 'Close this ticket', only: true },
-  { name: 'warn', desc: 'Warn a member', arg: '@member [reason]', perm: 'MODERATE_MEMBERS' },
-  { name: 'warnings', desc: 'See a member’s warnings', arg: '@member', perm: 'MODERATE_MEMBERS', only: true },
-  { name: 'clearwarnings', desc: 'Clear a member’s warnings', arg: '@member', perm: 'MODERATE_MEMBERS', only: true },
+  { name: 'warn', desc: 'Warn a member', arg: '@member [reason]', perm: 'MODERATE_MEMBERS', args: [{ name: 'member', type: 'user' }, { name: 'reason', type: 'text', optional: true }] },
+  { name: 'warnings', desc: 'See a member’s warnings', arg: '@member', perm: 'MODERATE_MEMBERS', only: true, args: [{ name: 'member', type: 'user' }] },
+  { name: 'clearwarnings', desc: 'Clear a member’s warnings', arg: '@member', perm: 'MODERATE_MEMBERS', only: true, args: [{ name: 'member', type: 'user' }] },
   { name: 'tag', desc: 'Post a saved reply (or add / remove one)', arg: 'name | add name text | remove name' },
-  { name: 'suggest', desc: 'Suggest an idea for people to vote on', arg: 'idea' },
+  { name: 'suggest', desc: 'Suggest an idea for people to vote on', arg: 'idea', args: [{ name: 'idea', type: 'text' }] },
   { name: 'suggestions', desc: 'Pick the channel suggestions go to', arg: '#channel | off', perm: 'MANAGE_SERVER', only: true },
   { name: 'membercount', desc: 'A channel that shows how many members there are', arg: '[off]', perm: 'MANAGE_CHANNELS', only: true },
-  { name: 'slowmode', desc: 'Slow this channel down', arg: '10s | off', perm: 'MANAGE_CHANNELS', only: true },
+  { name: 'slowmode', desc: 'Slow this channel down', arg: '10s | off', perm: 'MANAGE_CHANNELS', only: true, args: [{ name: 'delay', type: 'duration', choices: ['5s', '10s', '30s', '1m', '5m', 'off'], off: true, max: 6 * 3600_000 }] },
 ];
 export const orbitCommand = (name) => ORBIT_COMMANDS.find((c) => c.name === String(name || '').toLowerCase()) || null;
 

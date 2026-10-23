@@ -1,4 +1,4 @@
-// Orata — message composer: attachments, drag & drop, paste, autocomplete (@ # :), slash commands, replies, pickers.
+// Orata — message composer: attachments, drag & drop, paste, autocomplete (@ # :), slash commands (their argument boxes: commands.js), replies, pickers.
 import { html, useState, useEffect, useRef, useLayoutEffect, useMemo, cx, fileSize, uid, isImageType, throttle } from '/js/lib.js';
 import { state, set, useSel, getChannel, dmName, dmUserId, toast, hasChannelPerm, allCustomEmojis, customToken, openContext, openModal, closePopover, openPopover, getUser } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -10,10 +10,7 @@ import { searchEmoji, shortcodeEmoji, loadEmoji, noteEmojiUse } from '/js/emoji.
 import { openPicker } from '/js/pickers.js';
 import { t } from '/js/i18n.js';
 import { fx } from '/js/fx.js';
-import { shareTheme } from '/js/theme-card.js';
-import { cloakAsDesmos } from '/js/cloak.js';
-import { orbitCommand, ORBIT_COMMANDS } from '/js/orbit-commands.js';
-import { mayUseOrbit, orbitSays } from '/js/orbit.js';
+import { commandsFor, findCommand, runTyped, argHint, CommandBox, commandContext } from '/js/commands.js';
 import '/js/onboarding.js';   // the rules screen
 
 const drafts = new Map(); // channelId -> text
@@ -38,19 +35,6 @@ function audioLength(f) {
     a.src = u;
   });
 }
-
-const COMMANDS = [
-  { name: 'shrug', desc: 'Appends ¯\\_(ツ)_/¯ to your message', arg: 'message' },
-  { name: 'tableflip', desc: 'Appends (╯°□°）╯︵ ┻━┻ to your message', arg: 'message' },
-  { name: 'unflip', desc: 'Appends ┬─┬ ノ( ゜-゜ノ) to your message', arg: 'message' },
-  { name: 'me', desc: 'Show action text in italics', arg: 'action' },
-  { name: 'spoiler', desc: 'Hide your message behind a spoiler', arg: 'message' },
-  { name: 'gif', desc: 'Search for a GIF', arg: 'query' },
-  { name: 'poll', desc: 'Ask everybody a question', arg: 'question' },
-  { name: 'theme', desc: 'Share your theme so others can try it', arg: 'name (optional)' },
-  { name: 'cloak', desc: 'Open Orata in about:blank, disguised as Desmos', noArg: true },
-  { name: 'nick', desc: 'Change your nickname in this server', arg: 'name', server: true },
-];
 
 function TypingBar({ chId }) {
   const names = useSel((s) => {
@@ -85,6 +69,7 @@ export function Composer({ chId }) {
   const [media, setMedia] = useState(null);       // a GIF or sticker waiting to be sent with the next message
   const [drag, setDrag] = useState(false);
   const [ac, setAc] = useState(null); const [acIdx, setAcIdx] = useState(0);
+  const [cmd, setCmd] = useState(null); const boxApi = useRef({});   // a slash command being filled in: { def, prefill }
   const [ping, setPing] = useState(true);
   const ta = useRef(null); const file = useRef(null); const dragDepth = useRef(0);
   const [rec, setRec] = useState(null); const recRef = useRef(null);   // an audio message being recorded
@@ -95,12 +80,11 @@ export function Composer({ chId }) {
   const canSend = (!server || hasChannelPerm(ch, 'SEND_MESSAGES')) && !lockedPost;
   const canAttach = !server || hasChannelPerm(ch, 'ATTACH_FILES');
   const canGif = !server || hasChannelPerm(ch, 'SEND_GIFS');
-  const orbitOn = !!server?.orbitId;
   const pending = !!server?.onboarding?.enabled && !!server.members.find((m) => m.id === state.me.id)?.pending;   // hasn't accepted this server's rules yet
   useEffect(() => { if (pending && !onboardShown.has(server.id)) { onboardShown.add(server.id); openModal('onboarding', { serverId: server.id }); } }, [server?.id, pending]);
 
   // swap drafts when the channel changes
-  useEffect(() => { setText(drafts.get(chId) || ''); setAtts([]); setMedia(null); setAc(null); setPing(true); if (matchMedia('(pointer:fine)').matches) setTimeout(() => ta.current?.focus(), 30); }, [chId]);
+  useEffect(() => { setText(drafts.get(chId) || ''); setAtts([]); setMedia(null); setAc(null); setCmd(null); setPing(true); if (matchMedia('(pointer:fine)').matches) setTimeout(() => ta.current?.focus(), 30); }, [chId]);
   useEffect(() => { drafts.set(chId, text); }, [text, chId]);
   useEffect(() => { if (replyTo) { setPing(true); ta.current?.focus(); } }, [replyTo]);
   useLayoutEffect(() => { const el = ta.current; if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, Math.round(innerHeight * 0.45)) + 'px'; } }, [text, chId]);
@@ -167,13 +151,9 @@ export function Composer({ chId }) {
   };
   useEffect(() => () => stopRec(false), [chId]);   // leaving the channel throws a recording away
 
-  /* ---- Orbit's commands (when this server has Orbit): run by the server; replies meant only for you appear here and nowhere else ---- */
-  const runOrbit = async (name, arg) => {
-    if (name === 'settings') { if (mayUseOrbit(server, orbitCommand('settings'))) openModal('orbit-settings', { serverId: server.id }); else orbitSays(chId, server, '❌ You can’t change Orbit’s settings here.'); return; }
-    if (name === 'reactionroles') { if (mayUseOrbit(server, orbitCommand('reactionroles'))) openModal('reaction-roles', { channelId: chId }); else orbitSays(chId, server, '❌ You can’t set up reaction roles here.'); return; }
-    try { const r = await api.post(`/channels/${chId}/command`, { name, args: encodeMentions(arg, ch) }); if (r?.ephemeral) orbitSays(chId, server, r.ephemeral); }
-    catch (e) { orbitSays(chId, server, `❌ ${e.message}`); }
-  };
+  /* ---- slash commands (commands.js): Orbit's are run by the server, replies meant only for you appear here and nowhere else ---- */
+  const cmdCtx = () => commandContext({ chId, ch, server, canGif, openGif: (q) => { if (!canGif) { toast('You don’t have permission to send GIFs or stickers here', 'error'); return; } openPickerFor(document.querySelector('.emoji-btn'), 'gif', q); } });
+  const doneCmd = () => { setCmd(null); requestAnimationFrame(() => ta.current?.focus()); };
 
   /* ---- sending ---- */
   const submit = async () => {
@@ -181,23 +161,15 @@ export function Composer({ chId }) {
     let v = text.replace(/\s+$/, '');
     const ready = atts.filter((a) => a.status !== 'error');
     if (!v.trim() && !ready.length && !media) return;
-    // slash commands
-    const cm = /^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/i.exec(v);
-    if (cm && orbitOn && orbitCommand(cm[1]) && !COMMANDS.some((c) => c.name === cm[1].toLowerCase())) {
-      setText(''); drafts.delete(chId); setAc(null); await runOrbit(cm[1].toLowerCase(), (cm[2] || '').trim()); return;
-    }
-    if (cm && COMMANDS.some((c) => c.name === cm[1].toLowerCase())) {
-      const cmd = cm[1].toLowerCase(); const arg = (cm[2] || '').trim();
-      if (cmd === 'shrug') v = `${arg} ¯\\_(ツ)_/¯`.trim();
-      else if (cmd === 'tableflip') v = `${arg} (╯°□°）╯︵ ┻━┻`.trim();
-      else if (cmd === 'unflip') v = `${arg} ┬─┬ ノ( ゜-゜ノ)`.trim();
-      else if (cmd === 'me') { if (!arg) return; v = `_${arg}_`; }
-      else if (cmd === 'spoiler') { if (!arg) return; v = `||${arg}||`; }
-      else if (cmd === 'poll') { setText(''); openModal('create-poll', { channelId: chId }); return; }
-      else if (cmd === 'cloak') { setText(''); drafts.delete(chId); if (cloakAsDesmos() === 'blocked') toast('Your browser blocked the new tab. Allow pop-ups for this site and type /cloak again.', 'error', 6000); else toast('Opened in about:blank as Desmos', 'success', 2200); return; }
-      else if (cmd === 'theme') { setText(''); await shareTheme(chId, arg); return; }
-      else if (cmd === 'gif') { if (!canGif) { toast('You don’t have permission to send GIFs or stickers here', 'error'); return; } setText(''); const el = document.querySelector('.emoji-btn'); openPickerFor(el, 'gif', arg); return; }
-      else if (cmd === 'nick') { if (!server) { toast('Nicknames only work in servers', 'error'); return; } setText(''); await act(api.patch(`/servers/${server.id}/members/${state.me.id}`, { nick: arg }), { success: arg ? 'Nickname updated' : 'Nickname cleared' }); return; }
+    // a slash command typed out in full: runs when its words fill its boxes, otherwise its boxes open
+    const cm = !ready.length && !media && /^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/i.exec(v);
+    const def = cm && findCommand(cmdCtx(), cm[1].toLowerCase());
+    if (def) {
+      const rest = (cm[2] || '').trim(); setText(''); drafts.delete(chId); setAc(null);
+      const ctx = cmdCtx(); const r = runTyped(def, rest, ctx);
+      if (r === 'box') setCmd({ def, prefill: rest });
+      else try { await r; } catch (e) { ctx.say(`❌ ${e.message}`); }
+      return;
     }
     v = encodeMentions(v.replace(/:([a-z0-9_+-]+):/gi, (all, code) => (customToken(code, server?.id) ? all : shortcodeEmoji(code.toLowerCase()) || all)), ch);
     const pending = ready.filter((a) => a.status === 'uploading');
@@ -232,14 +204,14 @@ export function Composer({ chId }) {
     } else if (trig.kind === ':') {
       const cust = allCustomEmojis().filter((e) => e.name.toLowerCase().includes(q)).sort((a, b) => (b.serverId === server?.id) - (a.serverId === server?.id)).slice(0, 5).map((e) => ({ type: 'cemoji', id: e.id, label: `:${e.name}:`, sub: e.serverName, insert: emojiText(e, server?.id) + ' ', emoji: e }));
       items = [...cust, ...searchEmoji(q, 8).map((e) => ({ type: 'emoji', id: e.char, label: `:${e.code || e.label}:`, sub: '', insert: e.char + ' ', char: e.char }))].slice(0, 8);
-    } else if (trig.kind === '/') {
-      items = COMMANDS.filter((c) => c.name.startsWith(q) && (!c.server || server)).map((c) => ({ type: 'cmd', id: c.name, label: '/' + c.name, sub: c.desc, insert: '/' + c.name + ' ' }));
-      if (orbitOn) items = [...ORBIT_COMMANDS.filter((c) => c.name.startsWith(q) && mayUseOrbit(server, c) && (!c.discord || state.discordOk) && !COMMANDS.some((x) => x.name === c.name)).map((c) => ({ type: 'cmd', id: 'orbit-' + c.name, label: '/' + c.name, sub: c.arg ? `${c.desc} · ${c.arg}` : c.desc, insert: '/' + c.name + ' ', icon: 'sparkles', user: state.users[server.orbitId] })), ...items];   // this server's Orbit first, with Orbit's own picture beside each command
+    } else if (trig.kind === '/') {   // this server's Orbit first, with Orbit's own picture beside each command
+      items = commandsFor(cmdCtx()).filter((c) => c.name.startsWith(q)).slice(0, 25).map((c) => ({ type: 'cmd', id: c.name, label: '/' + c.name, sub: c.desc, hint: argHint(c), icon: c.icon || 'bolt', user: c.orbit ? state.users[server.orbitId] : null, def: c }));
     }
     if (!items.length) { setAc(null); return; }
     setAc({ items, trig }); setAcIdx(0);
   };
   const pick = (it) => {
+    if (it.type === 'cmd') { setText(''); setAc(null); setCmd({ def: it.def, prefill: '' }); return; }   // its boxes take over the message box
     const el = ta.current; const caret = el.selectionStart; const trig = ac.trig;
     const next = text.slice(0, trig.start) + it.insert + text.slice(caret); setText(next); setAc(null);
     if (it.type === 'emoji') noteEmojiUse(it.char);
@@ -265,8 +237,6 @@ export function Composer({ chId }) {
     if (ac) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setAcIdx((acIdx + 1) % ac.items.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setAcIdx((acIdx - 1 + ac.items.length) % ac.items.length); return; }
-      // a command with nothing to fill in (/cloak) runs as soon as it is typed out; otherwise Enter completes the highlighted suggestion
-      if (e.key === 'Enter' && !e.shiftKey && ac.trig.kind === '/' && (COMMANDS.some((c) => c.noArg && text.trim().toLowerCase() === '/' + c.name) || (orbitOn && orbitCommand(text.trim().slice(1)) && !orbitCommand(text.trim().slice(1)).arg))) { e.preventDefault(); setAc(null); submit(); return; }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); pick(ac.items[acIdx]); return; }
       if (e.key === 'Escape') { e.preventDefault(); setAc(null); return; }
     }
@@ -316,7 +286,7 @@ export function Composer({ chId }) {
       <div class="ac-head">${ac.trig.kind === '@' ? t('Members') : ac.trig.kind === '#' ? t('Channels') : ac.trig.kind === ':' ? t('Emoji matching') + ' :' + ac.trig.query : t('Commands')}</div>
       ${ac.items.map((it, i) => html`<button type="button" class=${cx('ac-item', i === acIdx && 'sel')} onMouseEnter=${() => setAcIdx(i)} onMouseDown=${(e) => { e.preventDefault(); pick(it); }} role="option">
         ${it.user ? html`<${Avatar} user=${it.user} size=${24} />` : it.type === 'cemoji' ? html`<img class="ac-cemoji" src=${it.emoji.url} alt="" />` : it.type === 'emoji' ? html`<span class="ac-emoji">${it.char}</span>` : it.type === 'role' ? html`<span class="ac-role" style=${{ background: it.color || 'var(--accent)' }}></span>` : html`<${Icon} name=${it.icon || (it.type === 'cmd' ? 'bolt' : 'at')} size=${18} />`}
-        <span class="ac-label" style=${it.color ? { color: it.color } : null}>${it.label}</span><span class="ac-sub">${it.sub}</span></button>`)}
+        <span class="ac-label" style=${it.color ? { color: it.color } : null}>${it.label}</span>${it.hint ? html`<span class="ac-hint">${it.hint}</span>` : null}<span class="ac-sub">${it.sub}</span></button>`)}
     </div>` : null}
     ${replyTo ? html`<div class="reply-bar slide-up"><span>${t('Replying to')} <b>${replyName || '…'}</b></span><span class="reply-ctl"><button type="button" class=${cx('ping-toggle', ping && 'on')} onClick=${() => setPing(!ping)} data-tip=${ping ? 'Mention on' : 'Mention off'}><${Icon} name="at" size=${14} sw=${2.4} />${ping ? 'ON' : 'OFF'}</button><button type="button" class="icon-btn" onClick=${() => set({ replyTo: null })} aria-label="Cancel reply"><${Icon} name="x" size=${15} /></button></span></div>` : null}
     <div class=${cx('composer glass glass-composer', replyTo && 'has-reply')}>
@@ -338,13 +308,14 @@ export function Composer({ chId }) {
       <div class="composer-row" hidden=${!!rec}>
         <button type="button" class="comp-btn plus" data-tip=${t('Upload a File')} data-tip-pos="top" aria-label="Upload a file" onClick=${(e) => { const r = e.currentTarget.getBoundingClientRect(); openContext({ clientX: r.left, clientY: r.top - 4 }, [{ label: t('Upload a File'), icon: 'upload', onClick: () => file.current?.click(), disabled: !canAttach }, { label: t('Create Poll'), icon: 'bar-chart', onClick: () => openModal('create-poll', { channelId: chId }) }]); }}><${Icon} name="plus" size=${22} sw=${2.4} /></button>
         <input type="file" multiple hidden ref=${file} onChange=${(e) => { addFiles(e.target.files); e.target.value = ''; }} />
-        <textarea ref=${ta} class="composer-input" rows="1" value=${text} placeholder=${placeholder} maxlength="4000" spellcheck="true" aria-label=${placeholder} onInput=${onInput} onKeyDown=${onKeyDown} onPaste=${onPaste} onBlur=${() => setTimeout(() => setAc(null), 120)} onClick=${(e) => computeAc(text, e.target.selectionStart)}></textarea>
+        ${cmd ? html`<${CommandBox} key=${cmd.def.name} cmd=${cmd.def} prefill=${cmd.prefill} ctx=${cmdCtx()} api=${boxApi.current} onDone=${doneCmd} onCancel=${() => { setText(''); doneCmd(); }} />` : null}
+        <textarea ref=${ta} class="composer-input" hidden=${!!cmd} rows="1" value=${text} placeholder=${placeholder} maxlength="4000" spellcheck="true" aria-label=${placeholder} onInput=${onInput} onKeyDown=${onKeyDown} onPaste=${onPaste} onBlur=${() => setTimeout(() => setAc(null), 120)} onClick=${(e) => computeAc(text, e.target.selectionStart)}></textarea>
         <div class="comp-right">
           ${canGif ? html`<button type="button" class="comp-btn gif-btn" data-tip="GIF" data-tip-pos="top" aria-label="Open GIF picker" onClick=${(e) => openPickerFor(e.currentTarget, 'gif')}><span>GIF</span></button>` : null}
           ${canGif ? html`<button type="button" class="comp-btn hide-sm" data-tip="Stickers" data-tip-pos="top" aria-label="Open sticker picker" onClick=${(e) => openPickerFor(e.currentTarget, 'stickers')}><${Icon} name="sticker" size=${22} /></button>` : null}
           <button type="button" class="comp-btn emoji-btn" data-tip="Emoji" data-tip-pos="top" aria-label="Open emoji picker" onClick=${(e) => openPickerFor(e.currentTarget, 'emoji')} onMouseEnter=${(e) => e.currentTarget.classList.add('wiggle')} onMouseLeave=${(e) => e.currentTarget.classList.remove('wiggle')}><${Icon} name="smile" size=${22} /></button>
           ${canAttach ? html`<button type="button" class="comp-btn mic-btn" data-tip=${t('Record an audio message')} data-tip-pos="top" aria-label=${t('Record an audio message')} onClick=${startRec}><${Icon} name="mic" size=${21} /></button>` : null}
-          <button type="button" class=${cx('comp-btn send', hasContent && 'ready')} data-tip=${t('Send')} data-tip-pos="top" aria-label="Send message" onClick=${submit}><${Icon} name="send" size=${20} /></button>
+          <button type="button" class=${cx('comp-btn send', (hasContent || cmd) && 'ready')} data-tip=${cmd ? t('Run command') : t('Send')} data-tip-pos="top" aria-label=${cmd ? t('Run command') : 'Send message'} onClick=${() => (cmd ? boxApi.current.run?.() : submit())}><${Icon} name="send" size=${20} /></button>
         </div>
       </div>
     </div>

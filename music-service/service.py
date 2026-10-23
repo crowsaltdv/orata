@@ -242,7 +242,7 @@ def top_songs():
     pick = next((p for p in lists if str(p.get("title", "")).lower().startswith("top 100 music videos")), None) or (lists[0] if lists else None)
     if not pick or not pick.get("playlistId"):
         raise Problem("There is no chart for this country right now.", "unavailable")
-    return with_covers(tracks_of(yt.get_playlist(pick["playlistId"], limit=60).get("tracks") or [], 40))
+    return with_covers(tracks_of(yt.get_playlist(pick["playlistId"], limit=100).get("tracks") or [], 100))   # the whole chart (YouTube keeps 100)
 
 
 def trending():
@@ -279,11 +279,39 @@ def category_tracks(entry):
     return with_covers(found)
 
 
+_mood_lists = {}  # a genre's params -> the ids of its playlists
+
+
+def mood_playlists(entry):
+    if entry["params"] not in _mood_lists:
+        ids = []
+        try:
+            ids = [pl["playlistId"] for pl in yt.get_mood_playlists(entry["params"]) or [] if pl.get("playlistId")]
+        except Exception:  # noqa: BLE001 - then the genre is just its own page
+            pass
+        _mood_lists[entry["params"]] = ids[:40]
+    return _mood_lists[entry["params"]]
+
+
+def category_page(entry, page):
+    # page 0: the songs on the genre's own page; then one of its playlists per page (a genre has 10 to 40), so a genre runs to hundreds of songs
+    lists = mood_playlists(entry)
+    if page == 0:
+        return {"tracks": category_tracks(entry), "more": bool(lists)}
+    if page > len(lists):
+        return {"tracks": [], "more": False}
+    try:
+        found = tracks_of(yt.get_playlist(lists[page - 1], limit=100).get("tracks") or [], 100)
+    except Exception:  # noqa: BLE001 - one playlist gone: the next page goes on
+        found = []
+    return {"tracks": with_covers(found, 4.0), "more": page < len(lists)}
+
+
 def op_search(p):
     q = str(p.get("q") or "").strip()[:100]
     if not q:
         raise Problem("Type something to search for", "bad_request")
-    limit = clamp(p.get("limit"), 1, 50, 24)
+    limit = clamp(p.get("limit"), 1, 200, 24)   # ytmusicapi follows YouTube's "more results" itself up to the limit
     songs = yt.search(q, filter="songs", limit=limit)
     found = tracks_of(songs, limit)
     if len(found) < 8:  # few official songs: add music videos
@@ -305,15 +333,15 @@ def op_categories(_):
 
 
 def op_category(p):
+    # -> {"tracks": [...], "more": bool}, one page at a time (the charts are a single page)
     key = str(p.get("key") or "")
-    if key == "top":
-        return top_songs()
-    if key == "trending":
-        return trending()
+    page = clamp(p.get("page"), 0, 60, 0)
+    if key in ("top", "trending"):
+        return {"tracks": (top_songs() if key == "top" else trending()) if page == 0 else [], "more": False}
     entry = mood_table()["table"].get(key)
     if not entry:
         raise Problem("Unknown category", "not_found")
-    return category_tracks(entry)
+    return category_page(entry, page)
 
 
 def op_song(p):

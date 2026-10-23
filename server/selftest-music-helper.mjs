@@ -19,11 +19,13 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   let req; try { req = JSON.parse(line); } catch { return; }
   const reply = (result) => out({ id: req.id, ok: true, result });
   const refuse = (error, code) => out({ id: req.id, ok: false, error, code });
-  log({ op: req.op, q: req.q, key: req.key, videoId: req.videoId, limit: req.limit });
+  log({ op: req.op, q: req.q, key: req.key, videoId: req.videoId, limit: req.limit, page: req.page });
+  const many = (prefix, from, n) => Array.from({ length: n }, (_, i) => song(`${prefix}${String(from + i).padStart(11 - prefix.length, '0')}`, `${prefix} song ${from + i}`, { duration: 150000 + i * 1000 }));
   if (req.op === 'search') {
     if (req.q === 'crash') process.exit(1);                                   // the helper dying must not take Orata down
     if (req.q === 'broken') return refuse('YTMusicServerError: boom', 'upstream');
     if (req.q === 'empty') return reply([]);
+    if (req.q === 'many') return reply(many('m', 0, Math.min(150, req.limit || 24)));   // a search with 150 results in all
     return reply([
       song('nightdrive1', 'Night Drive'),
       song('rainsounds2', 'Rain Sounds', { duration: 187000, explicit: true, artwork: 'https://yt3.googleusercontent.com/abc=w400-h400-l90-rj' }),
@@ -33,6 +35,9 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     ]);
   }
   if (req.op === 'categories') return reply(CATEGORIES);
+  if (req.op === 'category' && req.key === 'g-hip-hop') {   // four pages of 50 (the last song of a page comes again at the start of the next)
+    const p = req.page || 0; return reply({ tracks: [...(p ? many('h', p * 50 - 1, 1) : []), ...many('h', p * 50, 50)], more: p < 3 });
+  }
   if (req.op === 'category') return reply(req.key === 'g-pop' ? [song('popsong0001', 'Pop Hit')] : req.key === 'top' ? [song('overallhit0', 'Overall Hit')] : []);
   if (req.op === 'song') return req.videoId === 'deepcut0001' ? reply(song('deepcut0001', 'Deep Cut', { duration: 187000 })) : refuse('YouTube Music has no such track.', 'unavailable');
   if (req.op === 'artist') {

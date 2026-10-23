@@ -142,7 +142,7 @@ const songView = (d) => {
   };
 };
 const known = new Map();   // id → song: what the server itself got from YouTube Music (what is shown as "listening to" comes from here, never from a client)
-const remember = (t) => { known.delete(t.id); known.set(t.id, t); if (known.size > 1500) known.delete(known.keys().next().value); return t; };
+const remember = (t) => { known.delete(t.id); known.set(t.id, t); if (known.size > 8000) known.delete(known.keys().next().value); return t; };
 const views = (list) => (Array.isArray(list) ? list : []).map(songView).filter(Boolean).map(remember);
 
 const cached = new Map();
@@ -153,13 +153,38 @@ async function memo(key, ttl, load) {
   cached.set(key, { at: Date.now(), value });
   return value;
 }
-const search = (q) => memo(`s:${q.toLowerCase()}`, 10 * 60_000, async () => views(await upstream('search', { q, limit: 24 })));
+/* Long lists, a page at a time: what has been fetched of a chart or a search so far is kept, and only asking past its end fetches more.
+ * Songs already in the list are dropped, so pages never repeat one. */
+const lists = new Map();   // key → { tracks, seen, more, page, at, busy }
+async function grow(key, ttl, want, fetchPage) {
+  let L = lists.get(key);
+  if (!L || Date.now() - L.at > ttl) { if (lists.size > 80) lists.delete(lists.keys().next().value); L = { tracks: [], seen: new Set(), more: true, page: 0, at: Date.now(), busy: null }; lists.set(key, L); }
+  while (L.tracks.length < want && L.more) {
+    L.busy ||= fetchPage(L.page).then(({ tracks, more }) => {
+      for (const t of views(tracks)) if (!L.seen.has(t.id)) { L.seen.add(t.id); L.tracks.push(t); }
+      L.page++; L.more = !!more && L.page < 50;
+    }).finally(() => { L.busy = null; });
+    await L.busy;
+  }
+  return L;
+}
+const SEARCH_TIERS = [40, 200];   // YouTube Music has no "next page" for a search: the second ask is a longer one (the repeats are dropped)
+const searchList = (q, want) => grow(`s:${q.toLowerCase()}`, 10 * 60_000, want, async (page) => {
+  const found = await upstream('search', { q, limit: SEARCH_TIERS[page] });
+  return { tracks: found, more: page + 1 < SEARCH_TIERS.length && found.length >= SEARCH_TIERS[page] * 0.8 };
+});
 const searchArtists = (q) => memo(`sa:${q.toLowerCase()}`, 10 * 60_000, async () => (await upstream('artists', { q })).filter((a) => a && REF_ID.test(String(a.id))).slice(0, 5).map((a) => ({ id: String(a.id), name: String(a.name || '').slice(0, 100), avatar: artUrl(a.avatar) })));
 const KEY = /^[a-z0-9-]{1,60}$/;
 const categories = () => memo('categories', 6 * 3600_000, async () => (await upstream('categories')).filter((c) => c && KEY.test(c.key)).map((c) => ({ key: c.key, name: String(c.name || c.key).slice(0, 40), group: c.group === 'genre' || c.group === 'mood' ? c.group : 'chart' })));
-async function chart(key) {
+function chartList(key, want) {
   if (!KEY.test(key)) throw notFound('Unknown category');
-  return memo(`c:${key}`, 30 * 60_000, async () => views(await upstream('category', { key })));
+  return grow(`c:${key}`, 30 * 60_000, want, async (page) => { const r = await upstream('category', { key, page }); return Array.isArray(r) ? { tracks: r, more: false } : { tracks: r?.tracks, more: !!r?.more }; });
+}
+/** `?offset=&limit=` of a growing list → the page, and whether there is more after it. */
+async function pageOf(req, load, size) {
+  const offset = clamp(req.query.offset, 0, 5000, 0); const n = clamp(req.query.limit, 1, 100, size);
+  const L = await load(offset + n);
+  return { tracks: L.tracks.slice(offset, offset + n), hasMore: L.tracks.length > offset + n || L.more };
 }
 async function trackInfo(id) {
   if (known.has(id)) return known.get(id);
@@ -189,11 +214,17 @@ const album = (id) => memo(`album:${id}`, 30 * 60_000, async () => {
 });
 
 /* ------------------------------------------------------------ playlists (private to their owner, kept with the account) */
-const MAX_PLAYLISTS = 30; const MAX_PLAYLIST_TRACKS = 300;
+const MAX_PLAYLISTS = 50; const MAX_PLAYLIST_TRACKS = 500;
 const playlistsOf = (u) => (u.playlists ||= []);
 const playlistName = (v) => { const n = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 60); if (!n) throw bad('Give the playlist a name'); return n; };
 const findPlaylist = (u, id) => { const p = playlistsOf(u).find((x) => x.id === String(id)); if (!p) throw notFound('That playlist doesn’t exist'); return p; };
-const playlistSummary = (p) => ({ id: p.id, name: p.name, count: p.tracks.length, covers: p.tracks.map((t) => t.artwork).filter(Boolean).slice(0, 4), updatedAt: p.updatedAt });
+const playlistSummary = (p) => ({ id: p.id, name: p.name, count: p.tracks.length, duration: p.tracks.reduce((n, t) => n + (t.duration || 0), 0), covers: p.tracks.map((t) => t.artwork).filter(Boolean).slice(0, 4), updatedAt: p.updatedAt });
+/** What a playlist shared in a chat shows (a snapshot; opening it loads the playlist as it is now, through the message). */
+export function playlistCard(u, id) {
+  const p = playlistsOf(u).find((x) => x.id === String(id ?? '')); if (!p) throw notFound('That playlist doesn’t exist');
+  if (!p.tracks.length) throw bad('That playlist is empty');
+  return { ...playlistSummary(p), ownerId: u.id, preview: p.tracks.slice(0, 3).map(({ id: tid, title, artist, artwork, duration }) => ({ id: tid, title, artist, artwork, duration })) };
+}
 /** A playlist keeps its own copy of each song's details (from the server's own lookup, never from the client), so it shows without asking YouTube again. */
 const keep = ({ id, title, artist, artists, album, albumId, artwork, duration, explicit }) => ({ id, title, artist, artists, album, albumId, artwork, duration, explicit });
 async function addToPlaylist(p, trackId) {
@@ -223,20 +254,21 @@ export function setListening(u, value) {
 }
 
 /* ------------------------------------------------------------ routes */
-export function mountMusic(r, { h, limit }) {
-  r.get('/music/search', limit('musicq', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
+export function mountMusic(r, { h, limit, getChannel }) {
+  r.get('/music/search', limit('musicq', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
     needEnabled();
     const q = String(req.query.q || '').trim().slice(0, 100);
     if (!q) throw bad('Type something to search for');
-    const [tracks, artists] = await Promise.all([search(q), searchArtists(q).catch(() => [])]);   // artists are a bonus: a hiccup there never hides the songs
-    res.json({ tracks, artists });
+    const first = !Number(req.query.offset);
+    const [page, artists] = await Promise.all([pageOf(req, (want) => searchList(q, want), 30), first ? searchArtists(q).catch(() => []) : []]);   // artists are a bonus: a hiccup there never hides the songs
+    res.json({ ...page, artists });
   }));
   r.get('/music/charts', h(async (req, res) => { needEnabled(); res.json({ genres: await categories() }); }));
   r.get('/music/charts/:key', limit('musicchart', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
     needEnabled();
     const key = String(req.params.key);
     if (key !== 'top' && key !== 'trending' && !(await categories()).some((c) => c.key === key)) throw notFound('Unknown category');
-    res.json({ key, tracks: await chart(key) });
+    res.json({ key, ...await pageOf(req, (want) => chartList(key, want), 60) });
   }));
   r.get('/music/artists/:id', limit('musicpage', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
     needEnabled();
@@ -252,6 +284,11 @@ export function mountMusic(r, { h, limit }) {
   /* ---- your playlists */
   const lim = limit('playlists', 120, 60_000, (req) => req.user.id);
   r.get('/me/playlists', h(async (req, res) => { res.json({ playlists: playlistsOf(req.user).map(playlistSummary) }); }));
+  /** Every song in your playlists once (what "Shuffle library" plays from). */
+  r.get('/me/library', h(async (req, res) => {
+    const all = new Map(); for (const p of playlistsOf(req.user)) for (const t of p.tracks) if (!all.has(t.id)) all.set(t.id, t);
+    res.json({ tracks: [...all.values()].slice(0, 3000).map(songView).filter(Boolean) });
+  }));
   r.post('/me/playlists', lim, h(async (req, res) => {
     const list = playlistsOf(req.user); if (list.length >= MAX_PLAYLISTS) throw bad(`You can have up to ${MAX_PLAYLISTS} playlists`);
     const p = { id: newId(), name: playlistName(req.body?.name), tracks: [], createdAt: Date.now(), updatedAt: Date.now() };
@@ -276,6 +313,31 @@ export function mountMusic(r, { h, limit }) {
     const p = findPlaylist(req.user, req.params.id);
     const added = await addToPlaylist(p, req.body?.trackId); if (added) save();
     res.json({ added, playlist: playlistSummary(p) });
+  }));
+  r.put('/me/playlists/:id/order', lim, h(async (req, res) => {   // drag and drop: the same songs in a new order
+    const p = findPlaylist(req.user, req.params.id); const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    const byId = new Map(p.tracks.map((t) => [t.id, t]));
+    if (ids.length !== p.tracks.length || new Set(ids).size !== ids.length || !ids.every((id) => byId.has(id))) throw bad('That isn’t this playlist’s songs');
+    p.tracks = ids.map((id) => byId.get(id)); p.updatedAt = Date.now(); save();
+    res.json({ playlist: playlistSummary(p) });
+  }));
+  /* ---- playlists shared in a chat (/playlist): anyone who can see the message can open, play or copy it, never change it */
+  const shared = (req) => {
+    const ch = getChannel(req, req.params.id); const m = (db.messages[ch.id] || []).find((x) => x.id === String(req.params.mid));
+    const owner = m?.playlist && db.users[m.playlist.ownerId]; const p = owner && playlistsOf(owner).find((x) => x.id === m.playlist.id);
+    if (!p) throw new ApiError(404, 'This playlist was deleted or isn’t available anymore.', 'playlist_gone');
+    return { p, owner };
+  };
+  r.get('/channels/:id/messages/:mid/playlist', h(async (req, res) => {
+    const { p, owner } = shared(req);
+    res.json({ playlist: { ...playlistSummary(p), ownerId: owner.id, tracks: p.tracks.map(songView).filter(Boolean) }, users: [publicUser(owner)] });
+  }));
+  r.post('/channels/:id/messages/:mid/playlist/save', lim, h(async (req, res) => {   // your own copy: changing it never touches theirs
+    const { p, owner } = shared(req);
+    const list = playlistsOf(req.user); if (list.length >= MAX_PLAYLISTS) throw bad(`You can have up to ${MAX_PLAYLISTS} playlists`);
+    const copy = { id: newId(), name: p.name, tracks: p.tracks.map((t) => ({ ...t })), createdAt: Date.now(), updatedAt: Date.now(), savedFrom: owner.id === req.user.id ? undefined : { ownerId: owner.id, playlistId: p.id } };
+    list.push(copy); save();
+    res.json({ playlist: playlistSummary(copy) });
   }));
   r.delete('/me/playlists/:id/tracks/:trackId', lim, h(async (req, res) => {
     const p = findPlaylist(req.user, req.params.id); const before = p.tracks.length;

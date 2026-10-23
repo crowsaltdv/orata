@@ -212,7 +212,7 @@ async function main() {
   ok(t0.title === 'Night Drive' && t0.artist === 'Test Artist' && t0.album === 'Test Album' && t0.artwork === 'https://i.ytimg.com/vi/nightdrive1/hqdefault.jpg' && t0.url === 'https://music.youtube.com/watch?v=nightdrive1' && t0.duration === 215000 && t0.explicit === false && r.body.tracks[1].explicit === true && r.body.tracks[1].artwork.startsWith('https://yt3.googleusercontent.com/'), 'titles, artwork, the YouTube Music link and the song length come through');
   ok(r.body.tracks[2].artwork === null, 'artwork from any other website is dropped');
   ok(r.body.artists.length === 1 && r.body.artists[0].id === 'UCtestartist000000001' && r.body.artists[0].name === 'Test Artist' && r.body.artists[0].avatar.startsWith('https://yt3.googleusercontent.com/'), 'a search also finds matching artists (with their picture; unusable ones are left out)');
-  const s1 = helperCalls('search'); ok(s1.length === 1 && s1[0].q === 'night' && s1[0].limit === 24, 'one search was sent to the helper');
+  const s1 = helperCalls('search'); ok(s1.length === 1 && s1[0].q === 'night' && s1[0].limit === 40, 'one search was sent to the helper');
   await api('GET', '/music/search?q=night', A3); ok(helperCalls('search').length === 1, 'repeat searches are served from a cache');
   r = await api('GET', '/music/search?q=empty', A3); ok(r.status === 200 && r.body.tracks.length === 0, 'an empty result is an empty list');
   r = await api('GET', '/music/search?q=', A3); ok(r.status === 400, 'blank searches are rejected');
@@ -268,11 +268,48 @@ async function main() {
   r = await api('PATCH', `/me/playlists/${pl.id}`, A3, { name: '' }); ok(r.status === 400, '… but not to nothing');
   r = await api('DELETE', `/me/playlists/${pl.id}/tracks/rainsounds2`, A3); ok(r.status === 200 && r.body.playlist.count === 2, 'remove a song');
   r = await api('GET', '/me/playlists', A3); ok(r.body.playlists.length === 1 && r.body.playlists[0].name === 'Summer' && r.body.playlists[0].count === 2, 'the list shows it with its new name and size');
-  const filler = []; for (let i = 0; i < 29; i++) filler.push((await api('POST', '/me/playlists', A3, { name: `Filler ${i}` })).status);
-  ok(filler.every((c) => c === 200), 'you can have 30 playlists');
+  const filler = []; for (let i = 0; i < 49; i++) filler.push((await api('POST', '/me/playlists', A3, { name: `Filler ${i}` })).status);
+  ok(filler.every((c) => c === 200), 'you can have 50 playlists');
   r = await api('POST', '/me/playlists', A3, { name: 'One too many' }); ok(r.status === 400, '… and no more');
   for (const x of (await api('GET', '/me/playlists', A3)).body.playlists.filter((x) => x.name.startsWith('Filler'))) await api('DELETE', `/me/playlists/${x.id}`, A3);
   r = await api('GET', '/me/playlists', A3); ok(r.body.playlists.length === 1, 'deleting playlists frees the room again');
+
+  console.log('\nBig music lists, page by page');
+  r = await api('GET', '/music/search?q=many', A3); const sp1 = r.body;
+  ok(r.status === 200 && sp1.tracks.length === 30 && sp1.hasMore === true, 'a search comes 30 songs at a time and says there is more');
+  const seenIds = new Set(sp1.tracks.map((x) => x.id)); let offset = 30; let pages = 1;
+  while (true) { r = await api('GET', `/music/search?q=many&offset=${offset}`, A3); for (const x of r.body.tracks) seenIds.add(x.id); offset += r.body.tracks.length; pages++; if (!r.body.hasMore || pages > 10) break; }
+  ok(offset === 150 && seenIds.size === 150, 'scrolling on reaches all 150 results, none twice', `${offset} ${seenIds.size}`);
+  ok(helperCalls('search').filter((x) => x.q === 'many').length === 2, '… with just two asks to YouTube Music');
+  r = await api('GET', '/music/charts/g-hip-hop?limit=100', A3); ok(r.body.tracks.length === 100 && r.body.hasMore, 'a genre comes page after page');
+  const hh = new Set(r.body.tracks.map((x) => x.id)); offset = 100;
+  while (true) { r = await api('GET', `/music/charts/g-hip-hop?offset=${offset}&limit=100`, A3); for (const x of r.body.tracks) hh.add(x.id); offset += r.body.tracks.length; if (!r.body.hasMore) break; }
+  ok(offset === 200 && hh.size === 200, 'all 200 songs of its playlists, a song in two of them only once', `${offset} ${hh.size}`);
+  r = await api('GET', '/music/charts/g-hip-hop?offset=50&limit=10', A3); ok(r.body.tracks[0].id === 'h0000000050' && helperCalls('category').filter((x) => x.key === 'g-hip-hop').length === 4, 'pages already fetched come from the cache');
+
+  console.log('\nPlaylists: order, library, sharing');
+  await api('POST', `/me/playlists/${pl.id}/tracks`, A3, { trackId: 'rainsounds2' });
+  r = await api('GET', `/me/playlists/${pl.id}`, A3); const order = r.body.playlist.tracks.map((x) => x.id);
+  ok(r.body.playlist.duration === r.body.playlist.tracks.reduce((n, x) => n + x.duration, 0), 'a playlist says how long it is');
+  r = await api('PUT', `/me/playlists/${pl.id}/order`, A3, { ids: [...order].reverse() }); ok(r.status === 200, 'drag a song somewhere else');
+  r = await api('GET', `/me/playlists/${pl.id}`, A3); ok(r.body.playlist.tracks.map((x) => x.id).join() === [...order].reverse().join(), '… and the new order is kept');
+  r = await api('PUT', `/me/playlists/${pl.id}/order`, A3, { ids: [order[0], order[0], order[1]] }); ok(r.status === 400, 'an order has to be exactly the playlist’s songs');
+  r = await api('PUT', `/me/playlists/${pl.id}/order`, D.token, { ids: order }); ok(r.status === 404, 'nobody else can reorder it');
+  r = await api('GET', '/me/library', A3); ok(r.status === 200 && r.body.tracks.length === order.length, '“Shuffle library” plays from every song in your playlists, once each');
+  const textCh = (await api('GET', '/ready', A3)).body.servers.find((x) => x.id === S.id).channels.find((c) => c.type === 'text');
+  r = await api('POST', `/channels/${textCh.id}/messages`, D.token, { playlist: { id: pl.id } }); ok(r.status === 404, 'you can only share your own playlists');
+  const empty = (await api('POST', '/me/playlists', A3, { name: 'Nothing yet' })).body.playlist;
+  r = await api('POST', `/channels/${textCh.id}/messages`, A3, { playlist: { id: empty.id } }); ok(r.status === 400, '… and not an empty one');
+  r = await api('POST', `/channels/${textCh.id}/messages`, A3, { playlist: { id: pl.id } }); const card = r.body;
+  ok(r.status === 200 && card.playlist?.name === 'Summer' && card.playlist.count === order.length && card.playlist.preview.length === order.length && card.playlist.duration > 0 && card.playlist.covers, 'share a playlist as a card in a channel');
+  r = await api('GET', `/channels/${textCh.id}/messages?limit=5`, D.token); ok(r.body.messages.some((m) => m.id === card.id && m.playlist?.name === 'Summer'), 'the card is kept with the channel’s messages');
+  r = await api('GET', `/channels/${textCh.id}/messages/${card.id}/playlist`, D.token); ok(r.status === 200 && r.body.playlist.tracks.length === order.length && r.body.users[0].id === r.body.playlist.ownerId, 'someone in the channel opens all its songs');
+  r = await api('GET', `/channels/${textCh.id}/messages/${card.id}/playlist`, E.token); ok(r.status === 404, 'someone who can’t see the channel can’t');
+  r = await api('POST', `/channels/${textCh.id}/messages/${card.id}/playlist/save`, D.token); const copy = r.body.playlist;
+  ok(r.status === 200 && copy.name === 'Summer' && copy.count === order.length, 'save a copy of it');
+  await api('DELETE', `/me/playlists/${copy.id}/tracks/${order[0]}`, D.token);
+  r = await api('GET', `/me/playlists/${pl.id}`, A3); ok(r.body.playlist.tracks.length === order.length, '… changing the copy never touches the original');
+  await api('DELETE', `/me/playlists/${empty.id}`, A3);
 
   console.log('\nListening status');
   const w1 = await connect(A3); const w2 = await connect(D.token);
@@ -309,7 +346,7 @@ async function main() {
 
   console.log('\nMusic helper trouble');
   await stopServer(); startServer(); await ready();
-  r = await api('GET', '/me/playlists', A3); ok(r.body.playlists.length === 1 && r.body.playlists[0].name === 'Summer' && r.body.playlists[0].count === 2, 'playlists survive a restart');
+  r = await api('GET', '/me/playlists', A3); ok(r.body.playlists.length === 1 && r.body.playlists[0].name === 'Summer' && r.body.playlists[0].count === 3, 'playlists survive a restart');
   r = await api('GET', '/music/search?q=crash', A3); ok(r.status === 502 && r.body.code === 'music_upstream', 'if the helper dies in the middle of a request the person gets an error, not a hang');
   r = await api('GET', '/music/search?q=afterwards', A3); ok(r.status === 200 && r.body.tracks.length === 3, '… and the next search starts it again');
   await stopServer(); startServer({ MUSIC_HELPER: JSON.stringify(['no-such-program-for-orata-tests']) }); await ready();
