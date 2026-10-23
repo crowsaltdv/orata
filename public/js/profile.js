@@ -60,10 +60,6 @@ export function userMenu(userId, serverId) {
     void mine;
   }
   if (isDev(me) && !u.bot) items.push({ type: 'sep' }, { label: t('Edit Badges'), icon: 'award', onClick: () => openModal('badges', { userId }) });
-  if (me.badges?.some((b) => b.id === 'staff' || b.id === 'dev') && !u.bot) {   // staff and developers hand out the Creator badge (it lets someone publish themes on Discovery)
-    const has = u.badges?.some((b) => b.id === 'creator');
-    items.push({ label: has ? t('Take away Creator badge') : t('Give Creator badge'), icon: 'paintbrush', onClick: () => act(api.put(`/users/${userId}/creator`, { creator: !has }), { success: has ? t('Creator badge taken away') : t('Creator badge given') }) });
-  }
   items.push({ type: 'sep' }, { label: t('Copy User ID'), icon: 'copy', onClick: async () => { await copyText(userId); toast('Copied', 'success', 1400); } });
   if (userId !== me.id && !u.bot) items.push({ label: t('Report to Orata staff'), icon: 'flag', danger: true, onClick: () => openModal('report', { userId }) });
   return items.filter(Boolean);

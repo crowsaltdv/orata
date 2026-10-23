@@ -1,6 +1,6 @@
 // Orata self-test for the theme library and Discovery:  npm test
 // The library (25 profile + 25 site themes per account, enforced here), everything a site / profile theme keeps, pictures that keep working, the
-// preview pictures, who may publish (the creator badge) and unpublish, installing from Discovery, sorting, and the sweep of theme files nobody uses.
+// preview pictures, who may post (the creator badge, and staff and developers) and remove, installing from Discovery, upvotes and Featured sorting, and the sweep of theme files nobody uses.
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -93,15 +93,14 @@ async function main() {
   console.log('\nThe creator badge');
   let r = await api('GET', '/badges', N.token); const creator = r.body.find((b) => b.id === 'creator');
   ok(creator?.name === 'Creator' && creator.icon === 'paintbrush' && creator.builtin, 'there is a built-in Creator badge with a paintbrush');
-  r = await api('PUT', `/users/${C.user.id}/creator`, N.token, { creator: true }); ok(r.status === 403, 'an ordinary account can’t give it');
-  r = await api('PUT', `/users/${C.user.id}/creator`, C.token, { creator: true }); ok(r.status === 403, '… not even to itself');
-  r = await api('PUT', `/users/${C.user.id}/creator`, S.token, { creator: 'yes' }); ok(r.status === 400, 'it has to be a clear yes or no');
-  r = await api('PUT', `/users/${C.user.id}/creator`, S.token, { creator: true }); ok(r.status === 200 && r.body.badges.some((b) => b.id === 'creator'), 'staff can give it');
-  r = await api('PUT', `/users/${D.user.id}/creator`, X.token, { creator: true }); ok(r.status === 200 && r.body.badges.some((b) => b.id === 'creator' && b.icon === 'paintbrush'), 'a developer can too');
-  r = await api('PUT', `/users/${C.user.id}/creator`, S.token, { creator: true }); ok(r.status === 200 && r.body.badges.filter((b) => b.id === 'creator').length === 1, 'giving it twice doesn’t double it');
-  r = await api('PUT', `/users/${E.user.id}/badges`, X.token, { badges: ['creator'] }); ok(r.status === 200 && r.body.badges.some((b) => b.id === 'creator'), 'the developers’ badge editor can hand it out as well');
-  r = await api('PUT', `/users/${E.user.id}/creator`, S.token, { creator: false }); ok(r.status === 200 && !r.body.badges.some((b) => b.id === 'creator'), 'and staff can take it away again');
-  r = await api('PUT', '/users/999/creator', S.token, { creator: true }); ok(r.status === 404, 'it can only go to a real account');
+  r = await api('PUT', `/users/${C.user.id}/creator`, X.token, { creator: true }); ok(r.status === 404, 'there is no separate way to hand it out: only Edit Badges does');
+  r = await api('PUT', `/users/${C.user.id}/badges`, N.token, { badges: ['creator'] }); ok(r.status === 403, 'an ordinary account can’t give it');
+  r = await api('PUT', `/users/${C.user.id}/badges`, C.token, { badges: ['creator'] }); ok(r.status === 403, '… not even to itself');
+  r = await api('PUT', `/users/${C.user.id}/badges`, S.token, { badges: ['creator'] }); ok(r.status === 403, 'staff who aren’t developers can’t (Edit Badges is the developers’)');
+  r = await api('PUT', `/users/${C.user.id}/badges`, X.token, { badges: ['creator'] }); ok(r.status === 200 && r.body.badges.some((b) => b.id === 'creator' && b.icon === 'paintbrush'), 'a developer gives it in Edit Badges');
+  r = await api('PUT', `/users/${D.user.id}/badges`, X.token, { badges: ['creator'] }); ok(r.status === 200 && r.body.badges.some((b) => b.id === 'creator'), '… to anyone');
+  r = await api('PUT', `/users/${E.user.id}/badges`, X.token, { badges: ['creator'] }); ok(r.status === 200, '… and takes it away again the same way');
+  r = await api('PUT', `/users/${E.user.id}/badges`, X.token, { badges: [] }); ok(r.status === 200 && !r.body.badges.some((b) => b.id === 'creator'), '(it is gone)');
 
   /* ---------------------------------------------------------------- the library */
   console.log('\nThe library');
@@ -191,7 +190,7 @@ async function main() {
 
   /* ---------------------------------------------------------------- publishing */
   console.log('\nPublishing on Discovery');
-  r = await api('POST', '/themes/discover', N.token, { id: T2.id }); ok(r.status === 403, 'without the Creator badge nobody can publish');
+  r = await api('POST', '/themes/discover', N.token, { id: T2.id }); ok(r.status === 403 && /creators and Orata staff/i.test(r.body.error), 'without the Creator badge (or a staff or developer badge) nobody can post');
   r = await api('POST', '/themes/library', C.token, { kind: 'site', name: 'Sunset Glass', data: siteLook() }); const CT1 = r.body;
   r = await api('POST', '/themes/discover', C.token, { id: CT1.id }); ok(r.status === 400 && r.body.code === 'no_preview', 'a creator’s theme needs its preview first');
   await sendBytes('PUT', `/themes/library/${CT1.id}/preview`, C.token, prev);
@@ -222,6 +221,30 @@ async function main() {
   ok(orders.size > 1 && [...orders].every((o) => o.split(',').sort().join() === alphaOrder.split(',').sort().join()), '… and a different seed shuffles it, always with the same themes');
   r = await api('GET', '/themes/discover?kind=site&sort=alpha&limit=2&offset=2', N.token); ok(r.body.themes.map((t) => t.name).join() === 'cherry,mango' && r.body.total === 5, 'it pages');
   r = await api('GET', '/themes/discover?kind=site', C.token); ok(r.body.themes.every((t) => t.mine), 'the creator sees their own themes marked as theirs');
+
+  /* ---------------------------------------------------------------- upvotes and Featured */
+  console.log('\nUpvotes and Featured');
+  const named = Object.fromEntries((await api('GET', '/themes/discover?kind=site&sort=alpha', N.token)).body.themes.map((x) => [x.name, x]));
+  const vote = (tok, tid, v = true) => api('PUT', `/themes/discover/${tid}/vote`, tok, { vote: v });
+  r = await vote(N.token, named.cherry.id); ok(r.status === 200 && r.body.votes === 1 && r.body.voted === true, 'a theme can be upvoted');
+  r = await vote(N.token, named.cherry.id); ok(r.body.votes === 1, '… once per person');
+  r = await vote(E.token, named.cherry.id); ok(r.body.votes === 2, '… and by anyone else');
+  r = await vote(E.token, named.mango.id); ok(r.body.votes === 1, 'each theme has its own count');
+  r = await vote(C.token, named.cherry.id); ok(r.status === 400 && r.body.code === 'own_theme', 'but not your own theme');
+  r = await api('PUT', `/themes/discover/${named.cherry.id}/vote`, N.token, { vote: 'yes' }); ok(r.status === 400, 'an upvote is a clear yes or no');
+  r = await vote(N.token, '1234'); ok(r.status === 404, 'a theme that isn’t there can’t be upvoted');
+  r = await api('PUT', `/themes/discover/${named.cherry.id}/vote`, null, { vote: true }); ok(r.status === 401, 'you have to be signed in to upvote');
+  const avatar = await upload(C.token, await png(40, 40, '#ff00aa')); await api('PATCH', '/me', C.token, { avatar });
+  r = await api('GET', '/themes/discover?kind=site', N.token); const featured = r.body.themes;
+  ok(featured[0].id === named.cherry.id && featured[1].id === named.mango.id && featured[0].votes === 2 && featured[0].voted === true && featured[1].voted === false, 'by default the most upvoted themes come first (Featured), and each says if you upvoted it');
+  ok(featured.slice(2).every((x) => x.votes === 0), '… then the ones nobody has upvoted');
+  ok(featured.slice(2).map((x) => x.id).join() === [...featured.slice(2)].sort((x, y) => (BigInt(y.id) > BigInt(x.id) ? 1 : -1)).map((x) => x.id).join(), '(newest first among the ones nobody upvoted)');
+  r = await api('GET', '/themes/discover?kind=site&sort=featured', N.token); ok(r.body.themes.map((x) => x.id).join() === featured.map((x) => x.id).join(), '“featured” is the same order, asked for by name');
+  ok(featured[0].author.avatar === avatar && featured[0].author.displayName === 'Cora', 'each theme carries its poster’s name and picture');
+  r = await api('GET', '/themes/discover?kind=site&sort=alpha', N.token); ok(r.body.themes[0].name === 'Apple', 'the other sorts are not affected by upvotes');
+  r = await vote(N.token, named.cherry.id, false); ok(r.body.votes === 1 && r.body.voted === false, 'an upvote can be taken back');
+  r = await api('GET', '/themes/discover?kind=site', N.token); ok(r.body.themes[0].id === named.cherry.id && r.body.themes[1].id === named.mango.id, 'equal votes: the newer theme first');
+  await vote(E.token, named.cherry.id, false); await vote(E.token, named.mango.id, false);
 
   /* ---------------------------------------------------------------- installing */
   console.log('\nInstalling');
@@ -255,12 +278,21 @@ async function main() {
   r = await api('DELETE', `/themes/discover/${stray.id}`, S.token); ok(r.status === 200, 'staff can take any theme down');
   r = await api('DELETE', `/themes/discover/${stray.id}`, S.token); ok(r.status === 404, 'once');
   r = await api('POST', '/themes/discover', C.token, { id: CT1.id }); ok(r.status === 200, 'an unpublished theme can be published again');
-  r = await api('GET', '/staff/log', S.token); ok(r.body?.log?.some((e) => e.action === 'unpublish_theme' && e.by === S.user.id && e.target === C.user.id) && r.body.log.some((e) => e.action === 'give_creator' && e.target === C.user.id), 'a staff takedown and the badges staff give go in the staff log');
-  r = await api('PUT', `/users/${C.user.id}/creator`, S.token, { creator: false });
+  r = await api('GET', '/staff/log', S.token); ok(r.body?.log?.some((e) => e.action === 'unpublish_theme' && e.by === S.user.id && e.target === C.user.id), 'a staff takedown goes in the staff log');
+  r = await api('PUT', `/users/${C.user.id}/badges`, X.token, { badges: [] });
   r = await api('POST', '/themes/library', C.token, { kind: 'site', name: 'After', data: siteLook() }); const AFTER = r.body; await sendBytes('PUT', `/themes/library/${AFTER.id}/preview`, C.token, prev);
   r = await api('POST', '/themes/discover', C.token, { id: AFTER.id }); ok(r.status === 403, 'lose the badge and publishing stops');
   r = await api('GET', '/themes/discover?kind=site', N.token); ok(r.body.themes.some((t) => t.author.id === C.user.id), '… while what was already published stays up until it is taken down');
-  await api('PUT', `/users/${C.user.id}/creator`, S.token, { creator: true });
+  await api('PUT', `/users/${C.user.id}/badges`, X.token, { badges: ['creator'] });
+
+  /* ---------------------------------------------------------------- staff and developers post too */
+  console.log('\nWho may post');
+  const staffTheme = (await api('POST', '/themes/library', S.token, { kind: 'site', name: 'Staff Look', data: siteLook() })).body; await sendBytes('PUT', `/themes/library/${staffTheme.id}/preview`, S.token, prev);
+  r = await api('POST', '/themes/discover', S.token, { id: staffTheme.id }); const staffPub = r.body; ok(r.status === 200 && staffPub.author.id === S.user.id, 'Orata staff can post a theme without the Creator badge');
+  const devTheme = (await api('POST', '/themes/library', X.token, { kind: 'site', name: 'Dev Look', data: siteLook() })).body; await sendBytes('PUT', `/themes/library/${devTheme.id}/preview`, X.token, prev);
+  r = await api('POST', '/themes/discover', X.token, { id: devTheme.id }); const devPub = r.body; ok(r.status === 200, 'so can a developer');
+  r = await api('POST', '/themes/discover', N.token, { id: (await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Nope', data: siteLook() })).body.id }); ok(r.status === 403, 'an ordinary account still can’t');
+  await api('DELETE', `/themes/discover/${staffPub.id}`, S.token); await api('DELETE', `/themes/discover/${devPub.id}`, X.token);
 
   /* ---------------------------------------------------------------- syncing between devices */
   console.log('\nSyncing');

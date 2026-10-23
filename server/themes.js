@@ -1,6 +1,7 @@
 // Orata — the theme library and Discovery. The screens are public/js/themes.js; what a theme is (and how it is checked) is public/js/theme-data.js.
 // Library: every account keeps its own themes on the server (so they follow you to other devices): up to 25 profile themes and 25 site themes.
-// Discovery: people with the "creator" badge publish a theme of their own there; anyone installs one, which copies it into their library.
+// Discovery: people with the "creator" badge (and Orata staff and developers) post a theme of their own there; anyone installs one, which copies it into their library,
+// and anyone can upvote one (the most upvoted are shown first, "Featured").
 // Pictures: a theme's wallpaper / card picture is copied into files the theme owns (th_<id>.<ext> in the uploads, checked to be a real picture), so it keeps
 // working after the original upload is replaced; a sweep removes theme files nothing uses any more. Every theme also has a preview picture the browser draws
 // from the theme itself (public/js/theme-preview.js) and uploads here.
@@ -23,6 +24,9 @@ const FORMATS = { png: 'png', jpeg: 'jpg', webp: 'webp', gif: 'gif', heif: 'avif
 const BIG_BYTES = 3 * 1024 * 1024; const BIG_PIXELS = 2600; const MAX_ANIMATED = 8 * 1024 * 1024; const MAX_DATA = 12_000;
 const kindName = (k) => (k === 'site' ? 'site' : 'profile');
 export const hasCreator = (u) => !!u?.badges?.includes('creator');
+/** Who may post a theme on Discovery: people with the creator badge, and Orata staff and developers. */
+export const canPost = (u) => hasCreator(u) || isStaff(u);
+const votesOf = (t) => (Array.isArray(t.votes) ? t.votes.length : 0);
 
 /** A theme's picture, copied into a file of its own. Resolves the new file name. */
 async function ownCopy(name) {
@@ -88,7 +92,8 @@ const libView = (t) => ({ id: t.id, kind: t.kind, name: t.name, data: t.data, pr
 const alive = (t) => { const a = db.users[t.authorId]; return !!a && !a.deleted && !a.terminated; };
 function pubView(t, viewer) {
   const a = db.users[t.authorId];
-  return { id: t.id, kind: t.kind, name: t.name, preview: t.preview || null, createdAt: t.createdAt, installs: t.installs || 0, author: { id: a.id, displayName: a.displayName, username: a.username },
+  return { id: t.id, kind: t.kind, name: t.name, preview: t.preview || null, createdAt: t.createdAt, installs: t.installs || 0, votes: votesOf(t), voted: !!t.votes?.includes(viewer.id),
+    author: { id: a.id, displayName: a.displayName, username: a.username, avatar: a.avatar || null, avatarBg: a.avatarBg || null },
     mine: t.authorId === viewer.id, installed: (viewer.themes || []).some((x) => x.from === t.id) };
 }
 /** The same shuffle for the same seed (so scrolling through a random order doesn't reshuffle between pages). */
@@ -144,16 +149,18 @@ export function mountThemes(r, { h, limit }) {
   r.get('/themes/discover', h(async (req, res) => {
     const kind = THEME_KINDS.includes(req.query.kind) ? req.query.kind : 'site';
     let list = Object.values(db.themes).filter((t) => t.kind === kind && alive(t));
-    list = req.query.sort === 'alpha' ? list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || cmpId(a.id, b.id)) : shuffled(list, req.query.seed);
+    // Featured (the default): the most upvoted first, newest first among equals; or alphabetical; or a shuffle
+    list = req.query.sort === 'alpha' ? list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || cmpId(a.id, b.id))
+      : req.query.sort === 'random' ? shuffled(list, req.query.seed) : list.sort((a, b) => votesOf(b) - votesOf(a) || cmpId(b.id, a.id));
     const off = Math.max(0, Math.floor(Number(req.query.offset)) || 0); const lim = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit)) || 48));
     res.json({ total: list.length, themes: list.slice(off, off + lim).map((t) => pubView(t, req.user)) });
   }));
-  /** Publish one of your own library themes. Only people with the creator badge; a theme you installed from someone else can't be published again. */
+  /** Post one of your own library themes. Only people with the creator badge, and Orata staff and developers; a theme you installed from someone else can't be posted again. */
   r.post('/themes/discover', limit('themepub', 20, 60_000, (req) => req.user.id), h(async (req, res) => {
-    if (!hasCreator(req.user)) throw forbidden('Only people with the Creator badge can publish themes.');
+    if (!canPost(req.user)) throw forbidden('Only creators and Orata staff can post themes.');
     const t = find({ ...req, params: { id: String(req.body?.id || '') } });
-    if (t.from) throw bad('You can only publish themes you made yourself, not ones you installed.', 'not_yours');
-    if (t.published && db.themes[t.published]) throw bad('This theme is already published. Unpublish it first to publish it again.', 'already_published');
+    if (t.from) throw bad('You can only post themes you made yourself, not ones you installed.', 'not_yours');
+    if (t.published && db.themes[t.published]) throw bad('This theme is already posted. Remove it from Discovery first to post it again.', 'already_published');
     if (!t.preview) throw bad('This theme has no preview picture yet. Open it in your library and try again.', 'no_preview');
     const name = cleanThemeName(req.body?.name ?? t.name); if (!name) throw bad('Give the theme a name');
     if (hasProfanity(name)) throw bad('That name isn’t allowed.', 'name');
@@ -171,7 +178,16 @@ export function mountThemes(r, { h, limit }) {
     save(); changed(t.authorId, req);
     res.json({ ok: true });
   }));
-  /** Copies a published theme into your library, if there is room for it. */
+  /** Upvote a theme (or take your upvote back): { vote: true | false }. Not your own. Resolves the theme's votes and whether you voted. */
+  r.put('/themes/discover/:id/vote', limit('themevote', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
+    const t = db.themes[req.params.id]; if (!t || !alive(t)) throw notFound('That theme isn’t on Discovery any more');
+    if (typeof req.body?.vote !== 'boolean') throw bad('Say whether to upvote or take the upvote back');
+    if (t.authorId === req.user.id) throw bad('You can’t upvote your own theme.', 'own_theme');
+    const votes = (t.votes ||= []); const at = votes.indexOf(req.user.id);
+    if (req.body.vote && at < 0) votes.push(req.user.id); else if (!req.body.vote && at >= 0) votes.splice(at, 1);
+    save(); res.json({ votes: votes.length, voted: votes.includes(req.user.id) });
+  }));
+  /** Copies a posted theme into your library, if there is room for it. */
   r.post('/themes/discover/:id/install', pace, h(async (req, res) => {
     const pub = db.themes[req.params.id]; if (!pub || !alive(pub)) throw notFound('That theme isn’t on Discovery any more');
     const have = mine(req).find((x) => x.from === pub.id);
