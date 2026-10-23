@@ -94,7 +94,15 @@ async function main() {
   const j = JSON.parse(fs.readFileSync(path.join(data, 'db.json'), 'utf8'));
   j.users[A.user.id].username = 'oratedev'; j.users[A.user.id].badges = ['dev']; j.users[X.user.id].badges = ['dev']; j.users[S.user.id].badges = ['staff'];
   j.users[C.user.id].badges = ['creator', 'early'];   // the old Creator badge: taken off at start
+  delete j.earlySeedV1;   // as if these accounts were here before the Early Supporter badge went out
   fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(j)); startServer(); await ready();
+
+  console.log('\nEarly Supporter for everyone');
+  let eb = await api('GET', `/users/${N.user.id}`, E.token);
+  ok(((eb.body.user || eb.body).badges || []).some((b) => b.id === 'early'), 'everyone who had an account got the Early Supporter badge');
+  ok(((eb = await api('GET', `/users/${C.user.id}`, E.token)).body.user || eb.body).badges.filter((b) => b.id === 'early').length === 1, '… once (someone who had it already doesn’t get two)');
+  const late = await register('latecomer'); eb = await api('GET', `/users/${late.user.id}`, E.token);
+  ok(!((eb.body.user || eb.body).badges || []).some((b) => b.id === 'early'), '… and accounts made afterwards don’t get it by themselves');
 
   /* ---------------------------------------------------------------- the Creator badge is gone */
   console.log('\nNo more Creator badge');

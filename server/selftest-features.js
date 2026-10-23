@@ -381,6 +381,31 @@ async function main() {
     ok(byId[2]?.ok === false && byId[2].code === 'bad_request' && byId[3]?.code === 'bad_request' && byId[4]?.code === 'bad_request', 'blank searches, malformed track ids and unknown operations are refused politely');
   }
 
+  /* ---------------------------------------------------------------- read states, "seen" faces, who is looking */
+  console.log('\nRead states, "seen" faces and who is looking');
+  const P = await register('pia', 'p@feat.dev'); const Q = await register('quinn', 'q@feat.dev'); const W = await register('wren', 'w@feat.dev'); const Z = await register('zed', 'z@feat.dev');
+  r = await api('POST', '/dms', P.token, { recipientIds: [Q.user.id, W.user.id] }); const grp = r.body;
+  ok(r.status === 200 && grp.type === 'group', 'a group DM to test with');
+  r = await api('POST', `/channels/${grp.id}/messages`, P.token, { content: 'anyone here?' }); const m1 = r.body;
+  r = await api('GET', '/ready', P.token); const grpView = r.body.dms.find((d) => d.id === grp.id);
+  ok(r.body.readStates[grp.id]?.lastRead === m1.id && !r.body.readStates[grp.id].mentions, 'your own message counts as read (no phantom unread badge when you open the site)');
+  ok(grpView?.reads?.[P.user.id] === m1.id && !grpView.reads[Q.user.id], 'a DM or group carries how far each member has read');
+  const gp = await connect(P.token); const gq = await connect(Q.token); const gz = await connect(Z.token);
+  await api('POST', `/channels/${grp.id}/ack`, Q.token, { messageId: m1.id });
+  let ev = await gp.wait('dm_read', (d) => d.channelId === grp.id && d.userId === Q.user.id).catch(() => null);
+  ok(ev?.lastRead === m1.id, 'when someone reads it, the others are told (their face moves to that message)');
+  const view = (g, channelId) => g.ws.send(JSON.stringify({ op: 'view', d: { channelId } }));
+  const viewers = (g, n) => g.wait('viewers', (d) => d.channelId === grp.id && d.users.length === n).then((d) => d.users.map((u) => u.id).sort().join()).catch(() => null);
+  view(gp, grp.id); ok(await viewers(gp, 1) === P.user.id, 'opening a channel: you are told who is looking at it');
+  gp.events.length = 0; view(gq, grp.id); ok(await viewers(gp, 2) === [P.user.id, Q.user.id].sort().join(), '… and told again when someone else opens it');
+  gp.events.length = 0; gq.ws.send(JSON.stringify({ op: 'idle', d: { idle: true } })); ok(await viewers(gp, 1) === P.user.id, 'someone gone idle isn’t looking any more');
+  gp.events.length = 0; gq.ws.send(JSON.stringify({ op: 'idle', d: { idle: false } })); ok(await viewers(gp, 2) !== null, '… until they are back');
+  gp.events.length = 0; view(gq, null); ok(await viewers(gp, 1) === P.user.id, 'leaving the channel (or hiding the tab) takes them off');
+  view(gq, grp.id); await viewers(gp, 2); gp.events.length = 0; gq.ws.close(); ok(await viewers(gp, 1) === P.user.id, 'so does closing the tab');
+  gp.events.length = 0; view(gz, grp.id); await sleep(400);
+  ok(!gz.events.some((e) => e.op === 'viewers') && !gp.events.some((e) => e.op === 'viewers'), 'someone who can’t see the channel can’t look at it');
+  gp.ws.close(); gz.ws.close();
+
   console.log(`\n${pass} passed, ${fail} failed`);
 }
 main().catch((e) => { console.error(e); fail++; }).finally(async () => { await stopServer(); setTimeout(() => { fs.rmSync(data, { recursive: true, force: true }); process.exit(fail ? 1 : 0); }, 300); });

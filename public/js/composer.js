@@ -2,7 +2,7 @@
 import { html, useState, useEffect, useRef, useLayoutEffect, useMemo, cx, fileSize, uid, isImageType, throttle } from '/js/lib.js';
 import { state, set, useSel, getChannel, dmName, dmUserId, toast, hasChannelPerm, allCustomEmojis, customToken, openContext, openModal, closePopover, openPopover, getUser } from '/js/store.js';
 import { Icon } from '/js/icons.js';
-import { Avatar, IconBtn, Spinner } from '/js/ui.js';
+import { Avatar, IconBtn, Spinner, Faces } from '/js/ui.js';
 import { sendMessage, sendTyping, act, getEntry } from '/js/actions.js';
 import { upload, api } from '/js/api.js';
 import { encodeMentions, decodeMentions } from '/js/markdown.js';
@@ -46,6 +46,12 @@ function TypingBar({ chId }) {
   return html`<div class=${cx('typing-bar', list.length && 'on')} aria-live="polite">
     ${list.length ? html`<span class="dots"><i></i><i></i><i></i></span><span class="typing-text">${list.length === 1 ? html`<b>${list[0]}</b> ${t('is typing…')}` : list.length === 2 ? html`<b>${list[0]}</b> ${t('and')} <b>${list[1]}</b> ${t('are typing…')}` : list.length === 3 ? html`<b>${list[0]}</b>, <b>${list[1]}</b>, ${t('and')} <b>${list[2]}</b> ${t('are typing…')}` : t('Several people are typing…')}</span>` : null}
   </div>`;
+}
+
+/** Who else has this channel open right now (events.js keeps the list): up to 5 faces above the message box, then +N. */
+function ViewersBar({ chId, serverId }) {
+  const ids = useSel((s) => (s.viewers[chId] || []).filter((id) => id !== s.me.id && s.relationships[id] !== 'blocked').join());
+  return ids ? html`<div class="viewers-bar"><${Icon} name="eye" size=${14} /><${Faces} ids=${ids.split(',')} max=${5} serverId=${serverId} tip=${(n) => `${n} ${t('is here')}`} /></div>` : null;
 }
 
 function getTrigger(text, caret) {
@@ -281,6 +287,7 @@ export function Composer({ chId }) {
   if (!canSend) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name=${timedOut ? 'clock' : 'lock'} size=${18} /> ${lockedPost ? t('This post is locked.') : timedOut ? `${t('You are timed out until')} ${new Date(timeoutUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : t('You do not have permission to send messages in this channel.')}</div></div>`;
 
   return html`<div class="composer-wrap" ref=${dropdownRef}>
+    <${ViewersBar} chId=${chId} serverId=${ch?.serverId} />
     ${drag ? html`<div class="drop-overlay"><div class="drop-card"><${Icon} name="upload" size=${48} sw=${1.6} /><h3>${t('Upload to')} ${ch.serverId ? '#' + ch.name : dmName(ch)}</h3><p>${t('You can add comments before uploading.')}</p></div></div>` : null}
     ${ac ? html`<div class="autocomplete pop-in" role="listbox">
       <div class="ac-head">${ac.trig.kind === '@' ? t('Members') : ac.trig.kind === '#' ? t('Channels') : ac.trig.kind === ':' ? t('Emoji matching') + ' :' + ac.trig.query : t('Commands')}</div>

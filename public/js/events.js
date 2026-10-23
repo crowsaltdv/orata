@@ -1,5 +1,5 @@
 // Orata — gateway event handlers, session lifecycle (login / logout / bootstrap).
-import { state, set, rebuildIndex, addUsers, getChannel, toast, go, parseRoute, resolveRoute, updateSettings, dmName, nameOf, isMuted, notify } from '/js/store.js';
+import { state, set, rebuildIndex, addUsers, getChannel, toast, go, parseRoute, resolveRoute, updateSettings, dmName, nameOf, isMuted, notify, subscribe } from '/js/store.js';
 import { api, gateway, hooks } from '/js/api.js';
 import { ls, lsRemove, cmpId } from '/js/lib.js';
 import { DEFAULT_SETTINGS, deepMerge, migrateSettings } from '/js/defaults.js';
@@ -35,7 +35,7 @@ function clearSession() {
   stopMusic({ silent: true });
   gateway.disconnect(); lsRemove('token');
   set({
-    token: null, phase: 'auth', gated: false, verifyDismissed: false, me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {}, msgs: {}, reads: {}, lastMsg: {}, typing: {},
+    token: null, phase: 'auth', gated: false, verifyDismissed: false, me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {}, msgs: {}, reads: {}, lastMsg: {}, typing: {}, viewers: {},
     voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel, musicOk: null, musicWhy: null, postIndex: {}, postLists: {},
   });
 }
@@ -165,6 +165,7 @@ function notifyMessage(m, ch, mentioned) {
 gateway.on('message_create', ({ message: m, users }) => {
   addUsers(users);
   const ch = getChannel(m.channelId); if (!ch) return;
+  if (state.dms[ch.id]) setDmRead(ch.id, m.authorId, m.id);   // whoever writes has read everything before it
   const prevLast = state.lastMsg[ch.id];
   if (!prevLast || cmpId(m.id, prevLast) > 0) state.lastMsg = { ...state.lastMsg, [ch.id]: m.id };
   const e = state.msgs[ch.id];
@@ -201,6 +202,21 @@ gateway.on('typing', ({ channelId, userId }) => {
   set({ typing: { ...state.typing, [channelId]: { ...cur, [userId]: Date.now() + 9000 } } });
 });
 gateway.on('read_ack', ({ channelId, lastRead, mentions }) => set({ reads: { ...state.reads, [channelId]: { lastRead, mentions } } }));
+/* how far each member of a DM or group has read (messagelist.js puts their faces on the newest message they've seen) */
+function setDmRead(chId, userId, id) {
+  const d = state.dms[chId]; const cur = d?.reads?.[userId]; if (!d || (cur && cmpId(cur, id) >= 0)) return;
+  state.dms = { ...state.dms, [chId]: { ...d, reads: { ...d.reads, [userId]: id } } };
+}
+gateway.on('dm_read', ({ channelId, userId, lastRead }) => { if (lastRead) { setDmRead(channelId, userId, lastRead); notify(); } });
+/* who else is looking at the channel you have open (composer.js shows their faces): the gateway is told which channel this tab shows */
+let viewSent;
+function sendView() {
+  const r = state.route; const id = document.visibilityState === 'visible' && (r.view === 'dm' || r.view === 'channel') ? r.channelId || null : null;
+  if (id !== viewSent && gateway.send('view', { channelId: id })) { viewSent = id; state.viewers = {}; }
+}
+subscribe(sendView); document.addEventListener('visibilitychange', sendView);
+gateway.on('ready', () => { viewSent = undefined; sendView(); });
+gateway.on('viewers', ({ channelId, users }) => { addUsers(users); set({ viewers: { ...state.viewers, [channelId]: users.map((u) => u.id) } }); });
 setInterval(() => {
   const now = Date.now(); let changed = false; const next = {};
   for (const [ch, users] of Object.entries(state.typing)) {

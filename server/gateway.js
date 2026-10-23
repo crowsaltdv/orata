@@ -10,6 +10,15 @@ import { isStage, isVoiceLike, isStageMod, stageJoinState, peersFor, mayLink, se
 
 const offlineTimers = new Map();
 
+/** Who is looking at a channel right now (the faces above the message box): a visible tab with it open, not idle, not invisible. Sent to each of them.
+ *  ponytail: walks every connection on each change; keep a per-channel index if that ever shows up in a profile. */
+function sendViewers(channelId) {
+  const ids = new Set(); const to = [];
+  for (const set of conns.values()) for (const c of set) if (c.viewing === channelId) { to.push(c); if (!c.idle && db.users[c.userId]?.status !== 'invisible') ids.add(c.userId); }
+  const users = [...ids].map((id) => publicUser(db.users[id]));
+  for (const c of to) send(c, 'viewers', { channelId, users });
+}
+
 export function attachGateway(server) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
   server.on('upgrade', (req, socket, head) => {
@@ -96,7 +105,16 @@ export function attachGateway(server) {
       if (conn.gated) { if (op === 'ping') send(conn, 'pong', { t: d.t }); return; }
       switch (op) {
         case 'ping': send(conn, 'pong', { t: d.t }); break;
-        case 'idle': { const v = !!d.idle; if (conn.idle !== v) { conn.idle = v; broadcastPresence(conn.userId); } break; }
+        case 'idle': { const v = !!d.idle; if (conn.idle !== v) { conn.idle = v; broadcastPresence(conn.userId); if (conn.viewing) sendViewers(conn.viewing); } break; }
+        case 'view': {   // the channel this tab shows (null: none, or the tab is hidden)
+          const ch = d.channelId ? db.channels[String(d.channelId)] : null;
+          const next = ch && canView(conn.userId, ch) ? ch.id : null; const prev = conn.viewing || null;
+          if (next === prev) break;
+          conn.viewing = next;
+          if (prev) sendViewers(prev);
+          if (next) sendViewers(next);
+          break;
+        }
         case 'voice_join': joinVoice(d); break;
         case 'voice_leave': conn.leaveVoice('left'); break;
         case 'voice_update': {
@@ -139,6 +157,7 @@ export function attachGateway(server) {
       conn.leaveVoice?.('disconnected');
       const set = conns.get(conn.userId);
       set?.delete(conn);
+      if (conn.viewing) sendViewers(conn.viewing);
       if (set && !set.size) {
         conns.delete(conn.userId);
         // short grace period so a page reload doesn't flash the user offline

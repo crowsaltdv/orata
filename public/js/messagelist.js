@@ -2,7 +2,7 @@
 import { html, useState, useEffect, useRef, useLayoutEffect, useMemo, cx, sameDay, formatDay, cmpId, formatStamp } from '/js/lib.js';
 import { state, useSel, set, getChannel, dmName, dmUserId } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
-import { Avatar, Spinner } from '/js/ui.js';
+import { Avatar, Spinner, Faces } from '/js/ui.js';
 import { Message } from '/js/message.js';
 import { loadMessages, loadOlder, loadNewer, jumpToLatest, ackChannel, getEntry } from '/js/actions.js';
 import { t } from '/js/i18n.js';
@@ -21,6 +21,20 @@ function buildRows(list, lastRead, meId) {
     prev = m;
   }
   return rows;
+}
+
+/** DMs and groups: the newest loaded message each other member has seen → their ids. Never you, and never on their own message (writing it says enough). */
+function seenBy(list, reads, meId) {
+  if (!reads) return null; const out = {};
+  for (const [uid, last] of Object.entries(reads)) {
+    if (uid === meId || !last || state.relationships[uid] === 'blocked') continue;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i]; if (m.id.startsWith('n:') || cmpId(m.id, last) > 0) continue;
+      if (m.authorId !== uid) (out[m.id] ||= []).push(uid);
+      break;
+    }
+  }
+  return out;
 }
 
 function ChannelIntro({ ch }) {
@@ -52,6 +66,11 @@ export function MessageList({ chId }) {
   useEffect(() => { setUnreadAnchor(state.reads[chId]?.lastRead || null); loadMessages(chId); atBottom.current = true; setShowJump(false); prevLen.current = 0; }, [chId]);
   const list = entry?.list || [];
   const rows = useMemo(() => buildRows(list, unreadAnchor, state.me.id), [list, unreadAnchor]);
+  const reads = useSel((s) => s.dms[chId]?.reads);
+  const shown = useMemo(() => {   // the rows with the "seen" faces under the messages they belong to
+    const seen = entry?.hasNewer ? null : seenBy(list, reads, state.me.id); if (!seen) return rows;
+    return rows.flatMap((r) => (r.type === 'msg' && seen[r.m.id] ? [r, { type: 'seen', key: 'seen' + r.m.id, ids: seen[r.m.id] }] : [r]));
+  }, [rows, reads, entry?.hasNewer]);
   const firstNewIndex = rows.findIndex((r) => r.type === 'new');
   const newCount = firstNewIndex >= 0 ? rows.slice(firstNewIndex).filter((r) => r.type === 'msg').length : 0;
 
@@ -112,8 +131,9 @@ export function MessageList({ chId }) {
       ${entry?.loading && !list.length ? html`<div class="msg-loading">${[0, 1, 2, 3, 4].map((i) => html`<div class="sk-msg" key=${i}><span class="skeleton sk-av"></span><div><span class="skeleton" style=${{ width: 90 + i * 22 + 'px', height: '12px', display: 'block', marginBottom: '8px' }}></span><span class="skeleton" style=${{ width: 180 + ((i * 53) % 220) + 'px', height: '12px', display: 'block' }}></span></div></div>`)}</div>` : null}
       ${entry?.loaded && !entry.hasMore ? html`<${ChannelIntro} ch=${ch} />` : null}
       ${entry?.loading && list.length ? html`<div class="msg-loading-more"><${Spinner} size=${22} /></div>` : null}
-      ${grouped.map((r) => r.type === 'date' ? html`<div class="date-divider" key=${r.key}><span>${formatDay(r.ts)}</span></div>`
+      ${shown.map((r) => r.type === 'date' ? html`<div class="date-divider" key=${r.key}><span>${formatDay(r.ts)}</span></div>`
         : r.type === 'new' ? html`<div class="new-divider" key=${r.key}><span>${t('NEW')}</span></div>`
+        : r.type === 'seen' ? html`<${Faces} key=${r.key} ids=${r.ids} max=${8} size=${16} tip=${(n) => `${t('Seen by')} ${n}`} class="seen-row" />`
           : html`<${Message} key=${r.key} m=${r.m} head=${r.head} chId=${chId} editing=${editing === r.m.id} replyingTo=${replyTo === r.m.id} hour12=${hour12} showEmbeds=${embeds} compact=${compact} />`)}
       ${entry?.error ? html`<div class="msg-error"><${Icon} name="alert-circle" size=${18} /> ${entry.error} <button type="button" class="link-btn" onClick=${() => loadMessages(chId, { force: true })}>Retry</button></div>` : null}
       <div class="msg-end"></div>

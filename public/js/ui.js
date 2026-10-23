@@ -1,7 +1,7 @@
 // Orata — shared UI primitives: avatars, buttons, form controls, modals, menus, popovers, toasts, tooltips.
 import { html, cx, useState, useEffect, useRef, useLayoutEffect, useCallback, memo, clamp, hexToHsv, hsvToHex, avatarColor, uid } from '/js/lib.js';
 import { thumb } from '/js/lite.js';
-import { state, set, useSel, closeModal, closeContext, closePopover, dismissToast, openModal, toast } from '/js/store.js';
+import { state, set, useSel, closeModal, closeContext, closePopover, dismissToast, openModal, toast, nameOf } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
 import { STATUS_META } from '/js/defaults.js';
 import { t } from '/js/i18n.js';
@@ -51,6 +51,14 @@ export function useEscape(fn, active = true) { useKey('Escape', fn, active); }
 export function StatusDot({ status = 'offline', size = 10, class: c, ring = true }) {
   const meta = STATUS_META[status] || STATUS_META.offline;
   return html`<span class=${cx('status-dot', `st-${status}`, ring && 'ring', c)} style=${{ width: size + 'px', height: size + 'px', '--sc': meta.color }}>${status === 'dnd' ? html`<i class="bar"></i>` : status === 'idle' ? html`<i class="cut"></i>` : null}</span>`;
+}
+/** A row of small overlapping profile pictures: at most `max`, then "+N". Each has a tip, `tip(name)`. */
+export function Faces({ ids, max = 5, size = 22, tip = (n) => n, serverId, class: c }) {
+  const shown = ids.slice(0, max); const more = ids.length - shown.length;
+  return html`<div class=${cx('faces', c)} style=${{ '--face': size + 'px' }}>
+    ${shown.map((id) => html`<span class="face" key=${id} data-tip=${tip(nameOf(id, serverId))}><${Avatar} userId=${id} size=${size} /></span>`)}
+    ${more > 0 ? html`<span class="face-more" data-tip=${ids.slice(max).map((id) => nameOf(id, serverId)).join(', ')}>+${more}</span>` : null}
+  </div>`;
 }
 export function Avatar({ user, userId, src, name, size = 40, status, class: c, onClick, onContextMenu, speaking, title, square, children }) {
   const u = user || (userId ? state.users[userId] : null);

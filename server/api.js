@@ -1526,8 +1526,11 @@ export function createApi() {
     const mid = String((req.body || {}).messageId || lastMessageId(ch.id) || '');
     req.user.reads ||= {};
     const cur = req.user.reads[ch.id]?.lastRead;
-    if (mid && (!cur || cmpId(mid, cur) > 0)) { req.user.reads[ch.id] = { lastRead: mid }; save(); }
-    emitTo([req.user.id], 'read_ack', { channelId: ch.id, ...readStateFor(req.user, ch) });
+    const moved = mid && (!cur || cmpId(mid, cur) > 0);
+    if (moved) { req.user.reads[ch.id] = { lastRead: mid }; save(); }
+    const rs = readStateFor(req.user, ch);
+    emitTo([req.user.id], 'read_ack', { channelId: ch.id, ...rs });
+    if (moved && !ch.serverId) emitTo(ch.recipients.filter((id) => id !== req.user.id), 'dm_read', { channelId: ch.id, userId: req.user.id, lastRead: rs.lastRead });   // the "seen" faces in DMs and groups
     res.json({ ok: true });
   }));
 

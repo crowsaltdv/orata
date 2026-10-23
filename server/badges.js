@@ -26,6 +26,10 @@ if (!db.badgeSeedV1) {   // once: the first two developers
   for (const id of [byUsername.get('oratedev'), ORATE_DEV_ID]) { const u = db.users[id]; if (u && !u.badges?.includes('dev')) (u.badges ||= []).push('dev'); }
   db.badgeSeedV1 = true; seeded = true;
 }
+if (!db.earlySeedV1) {   // once: everyone with an account now is an Early Supporter (accounts made later don't get it by themselves)
+  for (const u of Object.values(db.users)) if (!u.bot && !u.deleted && !u.badges?.includes('early')) (u.badges ||= []).push('early');
+  db.earlySeedV1 = true; seeded = true;
+}
 if (seeded || JSON.stringify(db.badges) !== before) save();
 
 export const isDev = (u) => !!u?.badges?.includes('dev');

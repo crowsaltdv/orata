@@ -10,7 +10,7 @@ export const state = {
   phase: 'boot', // boot | auth | loading | ready
   connection: 'connecting', // connecting | online | offline
   me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {},
-  msgs: {}, reads: {}, lastMsg: {}, typing: {}, pinsCount: {},
+  msgs: {}, reads: {}, lastMsg: {}, typing: {}, viewers: {}, pinsCount: {},
   voice: { states: {}, conn: null, speaking: {}, rev: 0 }, calls: {}, // incoming rings: channelId -> { from, at }
   route: { view: 'friends', serverId: '@me', channelId: null, tab: 'online', param: null },
   panel: null, panelData: null, // right-hand panel

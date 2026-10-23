@@ -493,7 +493,7 @@ export function channelView(c, userId) {
       if (ows.length) v.cperms = [...p];
       if (p.has('MANAGE_ROLES')) v.overwrites = ows;
     }
-  }
+  } else if (c.recipients) v.reads = Object.fromEntries(c.recipients.map((id) => [id, db.users[id] ? readStateFor(db.users[id], c).lastRead : null]));   // how far each member has read (the "seen" faces)
   return v;
 }
 /* ---- custom emoji ---- */
@@ -558,12 +558,12 @@ export function messageView(m) {
 export function readStateFor(user, ch) {
   const rs = user.reads?.[ch.id];
   const list = db.messages[ch.id] || [];
-  const lastRead = rs?.lastRead || null;
+  let lastRead = rs?.lastRead || null;
   let mentions = 0;
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
     if (lastRead && cmpId(m.id, lastRead) <= 0) break;
-    if (m.authorId === user.id) continue;
+    if (m.authorId === user.id) { lastRead = m.id; break; }   // you've seen everything up to your own message (sending one never acks, so a DM you spoke last in came back "unread")
     if (m.mentions?.includes(user.id) || m.mentionEveryone || (ch.serverId && m.mentionRoles?.some((r) => db.servers[ch.serverId]?.members[user.id]?.roles.includes(r)))) mentions++;
     if (mentions >= 99) break;
   }
