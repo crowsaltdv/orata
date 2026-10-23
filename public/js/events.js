@@ -109,7 +109,7 @@ function bootstrap(d) {
   // an account that has never saved a look (a brand-new sign-up) starts from the default theme, not from whatever this browser had left over
   if (Object.keys(remote).length) settings = deepMerge(DEFAULT_SETTINGS, migrateSettings(remote));
   else if (!reconnect) settings = deepMerge(DEFAULT_SETTINGS, {});
-  rememberAccount(d.user);
+  rememberAccount(d.user); ls('returning', null, true);   // this browser has had an account: from now on the first screen is Log In
   set({
     me: d.user, users, servers, dms, relationships: rel, reads: d.readStates, lastMsg, voice: { ...state.voice, states: voiceStates }, botId: d.botId, settings,
     sessionId: d.connId, phase: 'ready', typing: {}, gated: !!d.gated,

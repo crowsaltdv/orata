@@ -37,6 +37,11 @@
 .pick-row.disabled { opacity: .5; pointer-events: none; }
 .tcard-by { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tcard-by .avatar { flex: none; }
+.tcard-who { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--text-3); }
+.tcard-poster { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 0; color: inherit; font: inherit; border-radius: 6px; cursor: pointer; }
+.tcard-poster span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcard-poster:hover, .tcard-poster:focus-visible { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.tcard-dl { flex: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .tcard-btn { width: 100%; }
 .tcard-badge { position: absolute; left: 8px; top: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px 3px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: var(--accent-grad); color: var(--on-accent); box-shadow: 0 2px 8px rgb(0 0 0 / .35); }
 .tcard-more { position: absolute; right: 8px; top: 8px; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgb(0 0 0 / .55); color: #fff; backdrop-filter: blur(6px); opacity: 0; transition: opacity var(--t-fast, .12s), background var(--t-fast, .12s); }

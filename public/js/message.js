@@ -154,10 +154,11 @@ function ReactionEmoji({ emoji, m }) {
 function Reactions({ m, ch }) {
   const entries = Object.entries(m.reactions || {}); const me = state.me.id;
   if (!entries.length) return null;
+  const canAdd = hasChannelPerm(ch, 'ADD_REACTIONS'); const canJoin = canAdd || hasChannelPerm(ch, 'USE_REACTIONS');   // (taking your own back needs nothing)
   const names = (ids) => { const s = ids.slice(0, 10).map((id) => nameOf(id, ch.serverId)); return s.join(', ') + (ids.length > 10 ? ` and ${ids.length - 10} more` : ''); };
   return html`<div class="reactions">
-    ${entries.map(([emoji, ids]) => html`<button type="button" key=${emoji} class=${cx('reaction', ids.includes(me) && 'mine')} data-tip=${`${names(ids)} reacted with ${emoji.replace(CUSTOM_KEY, ':$2:')}`} onClick=${() => toggleReaction(ch, m, emoji)}><${ReactionEmoji} emoji=${emoji} m=${m} /><span class="r-count">${ids.length}</span></button>`)}
-    <button type="button" class="reaction add" data-tip=${t('Add Reaction')} onClick=${(e) => openPicker(e.currentTarget, (emoji) => toggleReaction(ch, m, emoji), { emojiOnly: true })}><${Icon} name="smile-plus" size=${16} /></button>
+    ${entries.map(([emoji, ids]) => html`<button type="button" key=${emoji} class=${cx('reaction', ids.includes(me) && 'mine')} disabled=${!canJoin && !ids.includes(me)} data-tip=${`${names(ids)} reacted with ${emoji.replace(CUSTOM_KEY, ':$2:')}`} onClick=${() => toggleReaction(ch, m, emoji)}><${ReactionEmoji} emoji=${emoji} m=${m} /><span class="r-count">${ids.length}</span></button>`)}
+    ${canAdd ? html`<button type="button" class="reaction add" data-tip=${t('Add Reaction')} onClick=${(e) => openPicker(e.currentTarget, (emoji) => toggleReaction(ch, m, emoji), { emojiOnly: true })}><${Icon} name="smile-plus" size=${16} /></button>` : null}
   </div>`;
 }
 export function openPicker(anchor, onPick, opts = {}) {
@@ -185,7 +186,7 @@ export function messageMenu(m, ch) {
   const canManage = serverId ? hasChannelPerm(ch, 'MANAGE_MESSAGES') : false;
   const plain = m.content;
   return [
-    { label: t('Add Reaction'), icon: 'smile-plus', submenu: [{ type: 'custom', render: () => html`<div class="quick-react">${['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '👀'].map((e) => html`<button type="button" onClick=${() => { set({ ctx: null }); toggleReaction(ch, m, e); }}>${e}</button>`)}</div>` }] },
+    hasChannelPerm(ch, 'ADD_REACTIONS') && { label: t('Add Reaction'), icon: 'smile-plus', submenu: [{ type: 'custom', render: () => html`<div class="quick-react">${['👍', '❤️', '😂', '😮', '😢', '🔥', '🎉', '👀'].map((e) => html`<button type="button" onClick=${() => { set({ ctx: null }); toggleReaction(ch, m, e); }}>${e}</button>`)}</div>` }] },
     { label: t('Reply'), icon: 'reply', onClick: () => set({ replyTo: { channelId: ch.id, id: m.id } }) },
     m.type === 'default' && (m.content || m.forward || m.gif || m.sticker || m.attachments?.some((a) => !a.voice)) && { label: t('Forward'), icon: 'arrow-right', onClick: () => openModal('forward', { channelId: ch.id, messageId: m.id }) },
     mine && m.type === 'default' && { label: t('Edit Message'), icon: 'edit', onClick: () => set({ editing: m.id }) },
@@ -269,8 +270,8 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
   const onCtx = (e) => { if (m.ephemeral || e.target.closest('a, .mention')) return; openContext(e, messageMenu(m, ch)); };
   const timeEl = html`<time class="msg-time" title=${formatFull(m.createdAt)}>${formatStamp(m.createdAt, hour12)}</time>`;
   const toolbar = !m.pending && !m.failed && !m.ephemeral ? html`<div class="msg-toolbar glass glass-toolbar">
-      ${frequentEmoji().slice(0, 2).concat(frequentEmoji().length < 2 ? ['👍', '😂'].slice(frequentEmoji().length) : []).map((e) => html`<button type="button" class="tb-emoji" data-tip=${`React with ${e}`} onClick=${() => toggleReaction(ch, m, e)}>${e}</button>`)}
-      <${IconBtn} icon="smile-plus" label=${t('Add Reaction')} size=${18} glass=${null} onClick=${(e) => openPicker(e.currentTarget, (emoji) => toggleReaction(ch, m, emoji), { emojiOnly: true })} />
+      ${!hasChannelPerm(ch, 'ADD_REACTIONS') ? null : frequentEmoji().slice(0, 2).concat(frequentEmoji().length < 2 ? ['👍', '😂'].slice(frequentEmoji().length) : []).map((e) => html`<button type="button" class="tb-emoji" data-tip=${`React with ${e}`} onClick=${() => toggleReaction(ch, m, e)}>${e}</button>`)}
+      ${hasChannelPerm(ch, 'ADD_REACTIONS') ? html`<${IconBtn} icon="smile-plus" label=${t('Add Reaction')} size=${18} glass=${null} onClick=${(e) => openPicker(e.currentTarget, (emoji) => toggleReaction(ch, m, emoji), { emojiOnly: true })} />` : null}
       <${IconBtn} icon="reply" label=${t('Reply')} size=${18} glass=${null} onClick=${() => set({ replyTo: { channelId: ch.id, id: m.id } })} />
       ${m.authorId === me ? html`<${IconBtn} icon="edit" label=${t('Edit')} size=${18} glass=${null} onClick=${() => set({ editing: m.id })} />` : null}
       <${IconBtn} icon="more-h" label=${t('More')} size=${18} glass=${null} onClick=${(e) => { const r = e.currentTarget.getBoundingClientRect(); openContext({ clientX: r.left, clientY: r.bottom + 4 }, messageMenu(m, ch)); }} />

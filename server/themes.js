@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import sharp from 'sharp';
-import { db, save, newId, cmpId, ENV, UPLOAD_DIR, pg, ApiError, bad, forbidden, notFound, conns, emitTo, storeUpload, restoreUpload, removeUpload } from './core.js';
+import { db, save, newId, cmpId, publicUser, ENV, UPLOAD_DIR, pg, ApiError, bad, forbidden, notFound, conns, emitTo, storeUpload, restoreUpload, removeUpload } from './core.js';
 import { isSafeFileName } from './storage.js';
 import { isStaff } from './names.js';
 import { hasProfanity } from './profanity.js';
@@ -117,7 +117,7 @@ const alive = (t) => { const a = db.users[t.authorId]; return !!a && !a.deleted 
 function pubView(t, viewer) {
   const a = db.users[t.authorId];
   return { id: t.id, kind: t.kind, name: t.name, preview: t.preview || null, createdAt: t.createdAt, installs: t.installs || 0, votes: votesOf(t), voted: !!t.votes?.includes(viewer.id),
-    author: { id: a.id, displayName: a.displayName, username: a.username, avatar: a.avatar || null, avatarBg: a.avatarBg || null },
+    author: publicUser(a),   // (name, picture and style: what clicking their name on a card shows as their profile)
     mine: t.authorId === viewer.id, installed: (viewer.themes || []).some((x) => x.from === t.id) };
 }
 /** The same shuffle for the same seed (so scrolling through a random order doesn't reshuffle between pages). */
@@ -174,9 +174,11 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
   r.get('/themes/discover', h(async (req, res) => {
     const kind = THEME_KINDS.includes(req.query.kind) ? req.query.kind : 'site';
     let list = Object.values(db.themes).filter((t) => t.kind === kind && alive(t));
-    // Featured (the default): the most upvoted first, newest first among equals; or alphabetical; or a shuffle
+    // Featured (the default): the most upvoted first, newest first among equals; Most downloaded (installed); alphabetical; or a shuffle
     list = req.query.sort === 'alpha' ? list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || cmpId(a.id, b.id))
-      : req.query.sort === 'random' ? shuffled(list, req.query.seed) : list.sort((a, b) => votesOf(b) - votesOf(a) || cmpId(b.id, a.id));
+      : req.query.sort === 'random' ? shuffled(list, req.query.seed)
+        : req.query.sort === 'downloads' ? list.sort((a, b) => (b.installs || 0) - (a.installs || 0) || votesOf(b) - votesOf(a) || cmpId(b.id, a.id))
+          : list.sort((a, b) => votesOf(b) - votesOf(a) || cmpId(b.id, a.id));
     const off = Math.max(0, Math.floor(Number(req.query.offset)) || 0); const lim = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit)) || 48));
     res.json({ total: list.length, themes: list.slice(off, off + lim).map((t) => pubView(t, req.user)) });
   }));

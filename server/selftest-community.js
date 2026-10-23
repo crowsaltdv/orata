@@ -244,6 +244,33 @@ async function main() {
   await api('PATCH', `/servers/${S.id}/roles/${S.id}`, A.token, { permissions: everyoneRole.permissions });
   ok((await api('GET', '/ready', W.token)).body.servers.find((s) => s.id === S.id).perms.includes('SEND_GIFS'), 'members can see whether they have it (the picker buttons hide without it)');
 
+  /* ---------------------------------------------------------------- reaction permissions */
+  console.log('\nReaction permissions');
+  const basePerms = everyoneRole.permissions;
+  const reactTo = (tok, mid, emoji, method = 'PUT') => api(method, `/channels/${text.id}/messages/${mid}/reactions/${encodeURIComponent(emoji)}/@me`, tok);
+  const target = (await say(A.token, 'react to me')).body;
+  ok(basePerms.includes('ADD_REACTIONS') && basePerms.includes('USE_REACTIONS'), 'a new server gives everybody both: Add New Reactions and React to Messages');
+  r = await reactTo(W.token, target.id, '🔥'); ok(r.status === 200, 'with both (the default) a member can start a reaction');
+  r = await reactTo(A.token, target.id, '🔥'); ok(r.status === 200, '… and the owner joins it');
+  await api('PATCH', `/servers/${S.id}/roles/${S.id}`, A.token, { permissions: basePerms.filter((p) => p !== 'ADD_REACTIONS') });
+  r = await reactTo(W.token, target.id, '🎉'); ok(r.status === 403 && r.body.code === 'no_new_react', 'without Add New Reactions a member can’t start a new reaction');
+  r = await reactTo(W.token, target.id, '🔥', 'DELETE'); ok(r.status === 200, '… but taking their own reaction back is always fine');
+  r = await reactTo(W.token, target.id, '🔥'); ok(r.status === 200, '… and with React to Messages they can join one that is already there');
+  await api('PATCH', `/servers/${S.id}/roles/${S.id}`, A.token, { permissions: basePerms.filter((p) => p !== 'ADD_REACTIONS' && p !== 'USE_REACTIONS') });
+  r = await reactTo(W.token, target.id, '🔥', 'DELETE'); ok(r.status === 200, 'with neither, they can still take a reaction back');
+  r = await reactTo(W.token, target.id, '🔥'); ok(r.status === 403 && r.body.code === 'no_react', 'but can’t join one');
+  r = await reactTo(W.token, target.id, '🎉'); ok(r.status === 403, '… or start one');
+  r = await reactTo(A.token, target.id, '🎉'); ok(r.status === 200, 'the owner is unaffected');
+  r = await api('POST', `/servers/${S.id}/roles`, A.token, { name: 'Joiners', permissions: ['USE_REACTIONS'] }); const joiners = r.body;
+  await api('PUT', `/servers/${S.id}/members/${W.user.id}/roles/${joiners.id}`, A.token);
+  r = await reactTo(W.token, target.id, '🎉'); ok(r.status === 200, 'a role with only React to Messages lets them join a reaction');
+  r = await reactTo(W.token, target.id, '🐢'); ok(r.status === 403 && r.body.code === 'no_new_react', '… but not start a new one');
+  await api('PUT', `/servers/${S.id}/members/${W.user.id}/roles/${(await api('POST', `/servers/${S.id}/roles`, A.token, { name: 'Adders', permissions: ['ADD_REACTIONS'] })).body.id}`, A.token);
+  r = await reactTo(W.token, target.id, '🐢'); ok(r.status === 200, 'Add New Reactions starts one (and includes joining them)');
+  await api('DELETE', `/servers/${S.id}/members/${W.user.id}/roles/${joiners.id}`, A.token);
+  await api('PATCH', `/servers/${S.id}/roles/${S.id}`, A.token, { permissions: basePerms });
+  ok((await api('GET', '/ready', W.token)).body.servers.find((x) => x.id === S.id).perms.includes('USE_REACTIONS'), 'members can see whether they have it (the reaction buttons hide without it)');
+
   /* ---------------------------------------------------------------- GIF icons and banners */
   console.log('\nGIF server icon and banner');
   const gifUp = await upload(A.token, GIF, 'image/gif', 'icon.gif');

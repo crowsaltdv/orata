@@ -1369,13 +1369,15 @@ export function createApi() {
 
   const reaction = (add) => h(async (req, res) => {
     const ch = getChannel(req, req.params.id); const m = findMsg(ch, req.params.mid);
-    const s = ch.serverId && db.servers[ch.serverId]; if (s) needIn(req.user.id, ch, 'ADD_REACTIONS');
+    const s = ch.serverId && db.servers[ch.serverId];
     const emoji = decodeURIComponent(req.params.emoji);
     const custom = /^<a?:[A-Za-z0-9_]{2,32}:\d{6,20}>$/.test(emoji);
     if (!emoji || emoji.length > (custom ? 64 : 40) || (!custom && /[<>]/.test(emoji))) throw bad('Invalid emoji');
     if (custom) { const e = findEmoji(emoji.match(/:(\d{6,20})>$/)[1], req.user.id); if (!e) throw bad('You can only use emoji from servers you are in'); m.emojis = customEmojisIn(emoji, req.user.id, m.emojis || []); }
     m.reactions ||= {};
     const arr = m.reactions[emoji] || [];
+    // Taking your own reaction back needs no permission. Starting a reaction nobody has used on the message needs "Add New Reactions"; joining one that is already there needs "React to Messages" (or "Add New Reactions", which includes it).
+    if (add && s && !canIn(req.user.id, ch, 'ADD_REACTIONS') && (!arr.length || !canIn(req.user.id, ch, 'USE_REACTIONS'))) throw new ApiError(403, arr.length ? 'You can’t react to messages here.' : 'You can’t add new reactions here — you can only join the ones already there.', arr.length ? 'no_react' : 'no_new_react');
     if (add) {
       if (!arr.includes(req.user.id)) { if (!m.reactions[emoji] && Object.keys(m.reactions).length >= 20) throw bad('Too many reactions'); m.reactions[emoji] = [...arr, req.user.id]; }
       else return res.json({ ok: true });

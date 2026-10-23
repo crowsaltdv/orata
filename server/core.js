@@ -243,10 +243,10 @@ export function emitTo(userIds, op, d, exceptConn) {
 }
 
 /* -------------------------------------------------------- permissions */
-export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES', 'VIEW_CHANNEL', 'MODERATE_MEMBERS', 'MANAGE_EXPRESSIONS', 'SEND_GIFS', 'ACCESS_APPLICATIONS'];
-export const DEFAULT_PERMS = ['VIEW_CHANNEL', 'CREATE_INVITE', 'SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
+export const PERMS = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'USE_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME', 'MANAGE_NICKNAMES', 'VIEW_CHANNEL', 'MODERATE_MEMBERS', 'MANAGE_EXPRESSIONS', 'SEND_GIFS', 'ACCESS_APPLICATIONS'];
+export const DEFAULT_PERMS = ['VIEW_CHANNEL', 'CREATE_INVITE', 'SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'USE_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
 /** The permissions a channel (or category) can override per role / member — MANAGE_ROLES doubles as "Manage Permissions" there. */
-export const CHANNEL_PERMS = ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK'];
+export const CHANNEL_PERMS = ['VIEW_CHANNEL', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'CREATE_INVITE', 'SEND_MESSAGES', 'ATTACH_FILES', 'ADD_REACTIONS', 'USE_REACTIONS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK'];
 const CHANNEL_PERM_SET = new Set(CHANNEL_PERMS);
 
 export function memberOf(server, userId) { return server?.members?.[userId] || null; }
@@ -355,6 +355,11 @@ function migrateDb() {
     if (s.permsV < 3) {   // v3: "Send GIFs & Stickers" is its own permission — everybody who could already send messages keeps being able to
       for (const role of s.roles) if (role.permissions.includes('SEND_MESSAGES') && !role.permissions.includes('SEND_GIFS')) role.permissions.push('SEND_GIFS');
       s.permsV = 3; changed = true;
+    }
+    if (s.permsV < 4) {   // v4: "React to Messages" (joining a reaction that is already there) is its own permission, apart from "Add New Reactions" — whoever could react keeps being able to, and a channel that denied reactions keeps denying them
+      for (const role of s.roles) if (role.permissions.includes('ADD_REACTIONS') && !role.permissions.includes('USE_REACTIONS')) role.permissions.push('USE_REACTIONS');
+      for (const c of Object.values(db.channels)) if (c.serverId === s.id) for (const o of c.overwrites || []) for (const k of ['allow', 'deny']) if (o[k]?.includes('ADD_REACTIONS') && !o[k].includes('USE_REACTIONS')) o[k].push('USE_REACTIONS');
+      s.permsV = 4; changed = true;
     }
   }
   for (const c of Object.values(db.channels)) {
@@ -589,7 +594,7 @@ export function ensureBot() {
 export function createServer(owner, { name, icon = null, template = 'default' }) {
   const id = newId();
   const everyone = { id, name: '@everyone', color: null, position: 0, permissions: [...DEFAULT_PERMS], hoist: false };
-  const server = { id, name: String(name).slice(0, 100), icon, banner: null, description: '', ownerId: owner.id, createdAt: Date.now(), permsV: 3, roles: [everyone], members: { [owner.id]: { roles: [], joinedAt: Date.now() } }, bans: [], accent: null };
+  const server = { id, name: String(name).slice(0, 100), icon, banner: null, description: '', ownerId: owner.id, createdAt: Date.now(), permsV: 4, roles: [everyone], members: { [owner.id]: { roles: [], joinedAt: Date.now() } }, bans: [], accent: null };
   db.servers[id] = server;
   const mk = (type, nm, parentId, position, extra = {}) => {
     const cid = newId();

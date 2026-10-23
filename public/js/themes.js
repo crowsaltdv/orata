@@ -4,7 +4,8 @@
 // developers, post a theme of their own (the + in Discovery, or the + on a saved theme); everyone installs and upvotes. What a theme holds is
 // public/js/theme-data.js; the picture each one shows is drawn by theme-preview.js; the server side is server/themes.js.
 import { html, useState, useEffect, useMemo, useRef, cx, ls } from '/js/lib.js';
-import { state, set, useSel, go, closeModal, openModal, openContext, updateSettings, toast } from '/js/store.js';
+import { state, set, useSel, go, closeModal, openModal, openContext, updateSettings, toast, addUsers } from '/js/store.js';
+import { openProfile } from '/js/sidebar.js';
 import { Icon } from '/js/icons.js';
 import { Modal, Btn, IconBtn, Avatar, Segmented, Dropdown, Spinner, Empty, Field, TextInput, MODALS, confirmDialog } from '/js/ui.js';
 import { api } from '/js/api.js';
@@ -147,8 +148,10 @@ function Picture({ src, busy, children }) {
 function More({ items }) {
   return html`<button type="button" class="tcard-more" aria-label=${t('More')} onClick=${(e) => openContext(e, items)}><${Icon} name="more-h" size=${18} /></button>`;
 }
-/** The poster: their picture and name, in gray. */
-const Poster = ({ user }) => html`<span class="tcard-by"><${Avatar} user=${user} size=${20} /><span>${user.displayName}</span></span>`;
+/** The poster: their picture and name, in gray (click them to see their profile), and how many times the theme was downloaded (installed). */
+const Poster = ({ user, downloads }) => html`<div class="tcard-who">
+  <button type="button" class="tcard-poster" data-tip=${t('View profile')} onClick=${(e) => { addUsers([user]); openProfile(user.id, e.currentTarget); }}><${Avatar} user=${user} size=${20} /><span>${user.displayName}</span></button>
+  <span class="tcard-dl" data-tip=${t(`${downloads} downloads`)} aria-label=${t(`${downloads} downloads`)}><${Icon} name="download" size=${13} sw=${2.4} />${downloads}</span></div>`;
 function DiscoverCard({ th, onInstall, onRemove, onVote }) {
   const [busy, setBusy] = useState(false);
   const menu = isStaffMe() && !th.mine ? [{ label: t('Take down (staff)'), icon: 'trash', danger: true, onClick: () => onRemove(th) }] : null;
@@ -158,7 +161,7 @@ function DiscoverCard({ th, onInstall, onRemove, onVote }) {
     <div class="tcard-meta">
       <div class="tcard-top"><b class="tcard-name" title=${th.name}>${th.name}</b>
         <button type="button" class=${cx('tcard-vote', th.voted && 'on')} disabled=${th.mine} aria-pressed=${th.voted} data-tip=${th.mine ? t('Your own theme') : th.voted ? t('Take back your upvote') : t('Upvote')} aria-label=${t('Upvote')} onClick=${() => onVote(th)}><${Icon} name="arrow-up" size=${14} sw=${2.8} />${th.votes}</button></div>
-      <${Poster} user=${th.author} />
+      <${Poster} user=${th.author} downloads=${th.installs} />
     </div>
     ${th.mine ? html`<${Btn} class="tcard-btn" onClick=${() => onRemove(th)}>${t('Remove')}<//>`
       : th.installed ? html`<${Btn} class="tcard-btn" icon="check" disabled=${true}>${t('Installed')}<//>`
@@ -196,7 +199,7 @@ const shuffle = (list, seed) => {
   const a = [...list]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a;
 };
 const newSeed = () => Math.floor(Math.random() * 2147483647);
-const SORTS = { discover: [['featured', 'Featured'], ['random', 'Random'], ['alpha', 'Alphabetical']], library: [['alpha', 'Alphabetical'], ['random', 'Random']] };
+const SORTS = { discover: [['featured', 'Featured'], ['downloads', 'Most downloaded'], ['random', 'Random'], ['alpha', 'Alphabetical']], library: [['alpha', 'Alphabetical'], ['random', 'Random']] };
 
 export function ThemesPage() {
   const me = useSel((s) => s.me); const rev = useSel((s) => s.themesRev); const view = useSel((s) => s.route.themesView || 'discover'); const settings = useSel((s) => s.settings); void settings;

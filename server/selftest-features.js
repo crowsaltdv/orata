@@ -154,8 +154,9 @@ async function main() {
   const dbFile = path.join(data, 'db.json'); const dbj = JSON.parse(fs.readFileSync(dbFile, 'utf8'));
   const legacy = Object.values(dbj.channels).find((c) => c.name === 'own-rules');
   legacy.private = true; legacy.allowedRoles = [vip.id]; delete legacy.overwrites; legacy.synced = false;
+  Object.assign(dbj.channels[general.id], { synced: false, overwrites: [{ type: 'role', id: S.id, allow: [], deny: ['ADD_REACTIONS'] }, { type: 'role', id: vip.id, allow: ['ADD_REACTIONS'], deny: [] }] });   // an old channel: one role denied reacting, another allowed it
   for (const u of Object.values(dbj.users)) delete u.avatarBg; dbj.avatarBgDone = undefined;   // an old database: nobody has a default-avatar gradient yet
-  for (const s of Object.values(dbj.servers)) { s.permsV = undefined; for (const role of s.roles) { role.permissions = role.permissions.filter((p) => p !== 'SEND_GIFS'); if (role.id === s.id) role.permissions = role.permissions.filter((p) => p !== 'VIEW_CHANNEL'); } }   // (an old server has neither View Channel on @everyone nor the GIFs permission)
+  for (const s of Object.values(dbj.servers)) { s.permsV = undefined; for (const role of s.roles) { role.permissions = role.permissions.filter((p) => p !== 'SEND_GIFS' && p !== 'USE_REACTIONS'); if (role.id === s.id) role.permissions = role.permissions.filter((p) => p !== 'VIEW_CHANNEL'); } }   // (an old server has neither View Channel on @everyone nor the GIFs permission)
   fs.writeFileSync(dbFile, JSON.stringify(dbj));
   wb.ws.close(); wc.ws.close();
   startServer(); await ready();
@@ -165,7 +166,9 @@ async function main() {
   r = await api('GET', '/me', A.token); const bgA = r.body.avatarBg; r = await api('GET', '/me', C.token);
   ok(/^#[0-9a-f]{6}$/.test(bgA?.a) && /^#[0-9a-f]{6}$/.test(bgA?.b) && typeof bgA.angle === 'number' && /^#[0-9a-f]{6}$/.test(r.body.avatarBg?.a) && JSON.stringify(bgA) !== JSON.stringify(r.body.avatarBg), 'existing accounts each got their own random default-avatar gradient when they upgraded');
   r = await api('GET', '/ready', A.token); ok(r.body.servers.every((sv) => sv.roles.filter((ro) => ro.permissions.includes('SEND_MESSAGES')).every((ro) => ro.permissions.includes('SEND_GIFS'))), 'and everybody who could send messages keeps being able to send GIFs & stickers (the new permission)');
-
+  r = await api('GET', '/ready', A.token); ok(r.body.servers.every((sv) => sv.roles.filter((ro) => ro.permissions.includes('ADD_REACTIONS')).every((ro) => ro.permissions.includes('USE_REACTIONS'))), 'and everybody who could react keeps being able to (React to Messages, a permission of its own now, comes with Add Reactions)');
+  await sleep(900); const upgraded = JSON.parse(fs.readFileSync(dbFile, 'utf8')); const rules = upgraded.channels[general.id].overwrites || [];
+  ok(rules.find((o) => o.id === S.id)?.deny.join() === 'ADD_REACTIONS,USE_REACTIONS' && rules.find((o) => o.id === vip.id)?.allow.join() === 'ADD_REACTIONS,USE_REACTIONS', 'a channel that denied (or allowed) reactions still does: the new permission follows the old one in its overwrites', JSON.stringify(rules));
   /* ---------------------------------------------------------------- sessions */
   console.log('\nSessions');
   r = await api('GET', '/me/sessions', A.token);

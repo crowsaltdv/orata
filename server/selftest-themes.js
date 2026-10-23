@@ -282,7 +282,7 @@ async function main() {
   ok(featured.slice(2).every((x) => x.votes === 0), '… then the ones nobody has upvoted');
   ok(featured.slice(2).map((x) => x.id).join() === [...featured.slice(2)].sort((x, y) => (BigInt(y.id) > BigInt(x.id) ? 1 : -1)).map((x) => x.id).join(), '(newest first among the ones nobody upvoted)');
   r = await api('GET', '/themes/discover?kind=site&sort=featured', N.token); ok(r.body.themes.map((x) => x.id).join() === featured.map((x) => x.id).join(), '“featured” is the same order, asked for by name');
-  ok(featured[0].author.avatar === avatar && featured[0].author.displayName === 'Cora', 'each theme carries its poster’s name and picture');
+  ok(featured[0].author.avatar === avatar && featured[0].author.displayName === 'Cora' && featured[0].author.id === C.user.id && featured[0].author.badges.some((b) => b.id === 'creator'), 'each theme carries its poster’s name, picture and badges (what clicking their name shows as their profile)');
   r = await api('GET', '/themes/discover?kind=site&sort=alpha', N.token); ok(r.body.themes[0].name === 'Apple', 'the other sorts are not affected by upvotes');
   r = await vote(N.token, named.cherry.id, false); ok(r.body.votes === 1 && r.body.voted === false, 'an upvote can be taken back');
   r = await api('GET', '/themes/discover?kind=site', N.token); ok(r.body.themes[0].id === named.cherry.id && r.body.themes[1].id === named.mango.id, 'equal votes: the newer theme first');
@@ -306,6 +306,12 @@ async function main() {
   const siteRoom = (await api('GET', '/themes/library', M.token)).body.themes.find((t) => t.kind === 'site');
   await api('DELETE', `/themes/library/${siteRoom.id}`, M.token);
   r = await api('POST', `/themes/discover/${PUB1.id}/install`, M.token); ok(r.status === 200, 'the limits are per kind: a free site slot takes a site theme although the profile ones are full');
+
+  /* ---------------------------------------------------------------- downloads */
+  console.log('\nDownloads');
+  r = await api('GET', '/themes/discover?kind=site&sort=downloads', N.token); const byDownloads = r.body.themes;
+  ok(byDownloads[0].id === PUB1.id && byDownloads[0].installs === 2 && byDownloads.every((x, i) => i === 0 || byDownloads[i - 1].installs >= x.installs), 'themes sort by downloads: the most installed first, and each card carries its count');
+  r = await api('GET', '/themes/discover?kind=site&sort=downloads&limit=1&offset=1', N.token); ok(r.body.themes[0].id === byDownloads[1].id, '(the download order pages like the others)');
 
   /* ---------------------------------------------------------------- unpublishing */
   console.log('\nUnpublishing');

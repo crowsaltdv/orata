@@ -246,7 +246,7 @@ const MOVE_TTL = 30 * 60_000;
 // Orata permission -> Discord's bit for it (Send GIFs follows Embed Links)
 const PERM_BITS = { ADMINISTRATOR: 3, MANAGE_SERVER: 5, MANAGE_CHANNELS: 4, MANAGE_ROLES: 28, MANAGE_MESSAGES: 13, KICK_MEMBERS: 1, BAN_MEMBERS: 2, CREATE_INVITE: 0, SEND_MESSAGES: 11, ATTACH_FILES: 15,
   ADD_REACTIONS: 6, MENTION_EVERYONE: 17, CONNECT: 20, SPEAK: 21, CHANGE_NICKNAME: 26, MANAGE_NICKNAMES: 27, VIEW_CHANNEL: 10, MODERATE_MEMBERS: 40, MANAGE_EXPRESSIONS: 30, SEND_GIFS: 14 };
-const permsOfBits = (v) => { const n = BigInt(v || 0); return Object.keys(PERM_BITS).filter((p) => n & (1n << BigInt(PERM_BITS[p]))); };
+const permsOfBits = (v) => { const n = BigInt(v || 0); const out = Object.keys(PERM_BITS).filter((p) => n & (1n << BigInt(PERM_BITS[p]))); if (out.includes('ADD_REACTIONS')) out.push('USE_REACTIONS'); return out; };   // (Discord has one reactions permission: both of Orata's follow it)
 const CHANNEL_TYPES = { 0: 'text', 5: 'text', 2: 'voice', 13: 'stage', 4: 'category', 15: 'forum', 16: 'forum' };   // announcement -> text, media -> forum; threads stay behind
 const CDN = ENV.DISCORD_API ? new URL(API).origin : 'https://cdn.discordapp.com';   // the self-test's fake Discord serves the pictures
 const WHAT = [['all', 'Whole server', 'Every role, channel and emoji, plus the name and icon'], ['roles', 'All roles'], ['channels', 'All channels'], ['emojis', 'All emoji'], ['identity', 'Server name and icon']];

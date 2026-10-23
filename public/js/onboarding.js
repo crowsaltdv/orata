@@ -10,7 +10,7 @@ import { renderMarkdown } from '/js/markdown.js';
 import { t } from '/js/i18n.js';
 
 // the same list as server/core.js: members may only pick roles that grant nothing beyond what everyone already has
-const DEFAULT_PERMS = ['VIEW_CHANNEL', 'CREATE_INVITE', 'SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
+const DEFAULT_PERMS = ['VIEW_CHANNEL', 'CREATE_INVITE', 'SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'USE_REACTIONS', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
 const pickable = (server, r) => r.id !== server.id && r.permissions.every((p) => DEFAULT_PERMS.includes(p));
 
 MODALS.onboarding = function Onboarding({ id, serverId }) {
