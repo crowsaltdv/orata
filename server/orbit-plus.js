@@ -38,7 +38,7 @@ function checkRole(s, uid, role) {
   if (role.permissions.includes('ADMINISTRATOR')) throw bad(`${role.name} has Administrator, so Orbit won’t hand it out`);
   if (!isOwner(s, uid) && role.position >= topRolePos(s, uid)) throw forbidden(`${role.name} is at or above your highest role`);
 }
-function giveRole(s, uid, rid) {
+export function giveRole(s, uid, rid) {
   const m = s.members[uid]; const role = s.roles.find((r) => r.id === rid);
   if (!m || !role || role.permissions.includes('ADMINISTRATOR') || m.roles.includes(rid)) return null;
   m.roles.push(rid); save(); emitTo(serverAudience(s), 'member_update', { serverId: s.id, member: memberView(uid, m) });

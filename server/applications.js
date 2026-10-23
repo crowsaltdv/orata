@@ -24,7 +24,7 @@ export function publicServerInfo(s, uid) {
 }
 
 /** Orbit tells `uid` something in their DM with it (opening the DM again if they had closed it). */
-function orbitTells(uid, content) {
+export function orbitTells(uid, content) {
   const bot = ensureBot();
   let dm = Object.values(db.channels).find((c) => c.type === 'dm' && c.recipients?.length === 2 && c.recipients.includes(bot.id) && c.recipients.includes(uid));
   if (!dm) {

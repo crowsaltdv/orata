@@ -121,7 +121,7 @@ const ChannelItem = memo(function ChannelItem({ ch, active, serverId, dragging, 
   const click = () => { if (isVoice) { if (!inCall) voice.join(ch.id); } goChannel(serverId, ch.id); };
   return html`<div data-dnd=${ch.id} data-kind="channel">
     <div class=${cx('ch-item', active && 'active', unread === '1' && muted === '0' && 'unread', muted === '1' && 'muted', inCall && 'in-call', dragging && 'dnd-placeholder')} role="button" tabindex="0" onClick=${click} onKeyDown=${(e) => e.key === 'Enter' && click()} onContextMenu=${(e) => openContext(e, channelMenu(ch))} onPointerDown=${onGrab ? (e) => onGrab(e, 'channel', ch.id) : null}>
-      ${ch.emoji ? html`<span class="ch-icon ch-emoji" aria-hidden="true">${ch.emoji}</span>` : html`<${Icon} name=${isVoice ? 'volume' : ch.type === 'stage' ? 'stage' : ch.type === 'forum' ? 'forum' : ch.private ? 'hash-lock' : 'hash'} size=${19} class="ch-icon" />`}
+      ${ch.emoji ? html`<span class="ch-icon ch-emoji" aria-hidden="true">${ch.emoji}</span>` : html`<${Icon} name=${isVoice ? 'volume' : ch.type === 'stage' ? 'stage' : ch.type === 'forum' ? (ch.apply ? 'file-text' : 'forum') : ch.private ? 'hash-lock' : 'hash'} size=${19} class="ch-icon" />`}
       <span class="ch-name">${ch.name}</span>
       ${Number(mentions) ? html`<${Badge} n=${Number(mentions)} />` : null}
       <span class="ch-actions">

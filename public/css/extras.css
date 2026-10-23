@@ -617,3 +617,12 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 .mode-card .mf .icon { color: var(--text-2); flex: none; } .mode-card .mf.no, .mode-card .mf.no .icon { color: #ff6b81; }
 .lite-note { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius); background: rgb(var(--accent-rgb) / .12); border: 1px solid rgb(var(--accent-rgb) / .35); font-size: 13px; color: var(--text); }
 .lite-note .icon { color: var(--accent); flex: none; }
+/* Application channels (forum.js) */
+.app-pill { display: inline-flex; align-items: center; gap: 4px; flex: none; padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 700; }
+.app-pill.wait { background: rgb(240 178 50 / .16); color: #f0b232; } .app-pill.no { background: rgb(255 107 129 / .15); color: #ff6b81; } .app-pill.ok { margin-left: 8px; background: rgb(59 165 93 / .16); color: #3ba55d; }
+.app-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 16px; padding: 10px 14px; border-radius: 12px; font-size: 13.5px; color: var(--text-2); }
+.app-bar b { color: var(--text); } .app-bar > .icon { flex: none; } .app-bar > span:first-of-type { flex: 1; min-width: 200px; }
+.app-bar.wait { background: rgb(240 178 50 / .1); border: 1px solid rgb(240 178 50 / .35); } .app-bar.wait > .icon { color: #f0b232; }
+.app-bar.no { background: rgb(255 107 129 / .08); border: 1px solid rgb(255 107 129 / .3); } .app-bar.no > .icon { color: #ff6b81; }
+.app-acts { display: flex; gap: 8px; }
+.np-theme { margin-top: 12px; }

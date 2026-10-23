@@ -13,7 +13,8 @@ import {
 } from './core.js';
 import { automodRule } from './automod.js';
 import { nameProblem } from './names.js';
-import { mountApplications, publicServerInfo } from './applications.js';
+import { mountApplications, publicServerInfo, canReview, orbitTells } from './applications.js';
+import { giveRole } from './orbit-plus.js';
 import { mountStaff, accountBlock, noteNewAccount } from './staff.js';
 import { formatDuration } from '../public/js/orbit-commands.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt, messageEdited, messagesDeleted, memberJoined, memberLeft, messageReacted } from './messages.js';
@@ -690,7 +691,8 @@ export function createApi() {
   r.post('/servers/:id/channels', h(async (req, res) => {
     const s = getServer(req, req.params.id); need(s, req.user.id, 'MANAGE_CHANNELS');
     const b = req.body || {};
-    const type = ['text', 'voice', 'stage', 'category', 'forum'].includes(b.type) ? b.type : 'text';
+    const apply = b.type === 'application';   // an Application channel is a forum whose posts wait for staff to accept them
+    const type = apply ? 'forum' : ['text', 'voice', 'stage', 'category', 'forum'].includes(b.type) ? b.type : 'text';
     let name = str(b.name, 1, 100, 'Channel name');
     name = channelName(name, type, 'new-channel'); const emoji = type === 'category' ? null : channelEmoji(b.emoji);
     const siblings = channelsOfServer(s.id);
@@ -698,13 +700,13 @@ export function createApi() {
     const parentId = b.parentId && db.channels[b.parentId]?.serverId === s.id && db.channels[b.parentId].type === 'category' ? b.parentId : null;
     const position = Math.max(0, ...siblings.filter((c) => (c.parentId || null) === parentId).map((c) => c.position || 0)) + 1;
     const id = newId();
-    const ch = { id, serverId: s.id, type, name, ...(emoji ? { emoji } : {}), ...(type === 'forum' ? { tags: sanitizeTags(b.tags), requireTag: !!b.requireTag } : {}), parentId: type === 'category' ? null : parentId, position: type === 'category' ? Math.max(0, ...siblings.filter((c) => c.type === 'category').map((c) => c.position)) + 1 : position, topic: String(b.topic || '').slice(0, 1024) };
+    const ch = { id, serverId: s.id, type, name, ...(emoji ? { emoji } : {}), ...(type === 'forum' ? { tags: sanitizeTags(b.tags), requireTag: !!b.requireTag } : {}), ...(apply ? { apply: { roleId: null } } : {}), parentId: type === 'category' ? null : parentId, position: type === 'category' ? Math.max(0, ...siblings.filter((c) => c.type === 'category').map((c) => c.position)) + 1 : position, topic: String(b.topic || '').slice(0, 1024) };
     let ows = sanitizeOverwrites(s, b.overwrites);
     if (b.private && !ows.length) ows = sanitizeOverwrites(s, [{ type: 'role', id: s.id, deny: ['VIEW_CHANNEL'] }, ...(Array.isArray(b.allowedRoles) ? b.allowedRoles : []).map((rid) => ({ type: 'role', id: rid, allow: ['VIEW_CHANNEL'] }))]);   // the "Private Channel" shortcut
     if (ows.length) { ch.overwrites = ows; if (ch.parentId) ch.synced = false; }   // a channel with its own rules no longer follows its category
     db.channels[id] = ch;
     if (!canView(req.user.id, ch)) ch.overwrites.push({ type: 'member', id: req.user.id, allow: ['VIEW_CHANNEL'], deny: [] });   // never lock yourself out of what you just made
-    db.messages[id] = []; audit(s, req.user.id, 'channel_create', { target: id, name: ch.name, type }); save();
+    db.messages[id] = []; audit(s, req.user.id, 'channel_create', { target: id, name: ch.name, type: apply ? 'application' : type }); save();
     pushChannelEvent('channel_create', ch);
     res.json(channelView(ch, req.user.id));
   }));
@@ -785,7 +787,7 @@ export function createApi() {
     if (ch.serverId) {
       const s = db.servers[ch.serverId]; const mine = permsIn(s, req.user.id, ch);
       const touchesPerms = b.overwrites !== undefined || b.synced !== undefined;
-      const touchesProps = ['name', 'topic', 'nsfw', 'slowmode', 'parentId', 'tags', 'requireTag', 'emoji'].some((k) => b[k] !== undefined);
+      const touchesProps = ['name', 'topic', 'nsfw', 'slowmode', 'parentId', 'tags', 'requireTag', 'emoji', 'applyRole'].some((k) => b[k] !== undefined);
       if ((touchesProps || !touchesPerms) && !mine.has('MANAGE_CHANNELS')) throw forbidden();
       if (touchesPerms && !mine.has('MANAGE_ROLES')) throw forbidden();
       if (b.name !== undefined && s.joinMode === 'apply' && s.applicationsChannelId === ch.id && channelName(str(b.name, 1, 100, 'Channel name'), ch.type, ch.name) !== ch.name) throw forbidden('The applications channel can’t be renamed while “Apply to join” is on.');
@@ -794,6 +796,14 @@ export function createApi() {
       if (b.topic !== undefined) ch.topic = String(b.topic).slice(0, 1024);
       if (b.nsfw !== undefined) ch.nsfw = !!b.nsfw;
       if (ch.type === 'forum') { if (b.tags !== undefined) ch.tags = sanitizeTags(b.tags); if (b.requireTag !== undefined) ch.requireTag = !!b.requireTag; }
+      if (ch.apply && b.applyRole !== undefined) {   // the role people get when their application is accepted: handing it out takes the right to give it yourself
+        const role = b.applyRole ? s.roles.find((x) => x.id === String(b.applyRole) && x.id !== s.id) : null;
+        if (b.applyRole && !role) throw bad('That role doesn’t exist');
+        if (role && !mine.has('MANAGE_ROLES')) throw forbidden('You need Manage Roles to hand out a role');
+        if (role?.permissions.includes('ADMINISTRATOR')) throw bad(`${role.name} has Administrator, so it can’t be given out automatically`);
+        if (role && !isOwner(s, req.user.id) && role.position >= topRolePos(s, req.user.id)) throw forbidden(`${role.name} is at or above your highest role`);
+        ch.apply.roleId = role?.id || null;
+      }
       if (b.slowmode !== undefined) ch.slowmode = clampInt(b.slowmode, 0, 21600, 0);
       if (b.parentId !== undefined && ch.type !== 'category') ch.parentId = b.parentId && db.channels[b.parentId]?.type === 'category' && db.channels[b.parentId].serverId === s.id ? b.parentId : null;
       if (touchesPerms) applyOverwrites(s, ch, b, req.user);
@@ -845,14 +855,17 @@ export function createApi() {
   r.get('/channels/:id/posts', h(async (req, res) => {
     const forum = getChannel(req, req.params.id); if (forum.type !== 'forum') throw bad('That is not a forum');
     const q = String(req.query.q || '').trim().toLowerCase().slice(0, 100); const tag = String(req.query.tag || '');
-    let posts = Object.values(db.channels).filter((c) => c.type === 'post' && c.forumId === forum.id);
+    let posts = Object.values(db.channels).filter((c) => c.type === 'post' && c.forumId === forum.id && canView(req.user.id, c));
+    const review = forum.apply && canReview(db.servers[forum.serverId], req.user.id);
+    const counts = review ? Object.fromEntries(['pending', 'accepted', 'denied'].map((st) => [st, posts.filter((p) => p.status === st).length])) : undefined;
+    if (forum.apply && ['pending', 'accepted', 'denied'].includes(req.query.status)) posts = posts.filter((p) => p.status === req.query.status);
     if (tag) posts = posts.filter((p) => (p.tagIds || []).includes(tag));
     if (q) posts = posts.filter((p) => p.name.toLowerCase().includes(q) || String((db.messages[p.id] || [])[0]?.content || '').toLowerCase().includes(q));
     const byNew = req.query.sort === 'new';
     posts.sort((a, b) => (Number(!!b.pinned) - Number(!!a.pinned)) || ((byNew ? b.createdAt - a.createdAt : (b.lastActivity || b.createdAt) - (a.lastActivity || a.createdAt))));
     const offset = clampInt(req.query.offset, 0, 100000, 0); const limitN = clampInt(req.query.limit, 1, 50, 25);
     const slice = posts.slice(offset, offset + limitN);
-    res.json({ posts: slice.map(postView), users: usersFor(slice.map((p) => p.ownerId)), total: posts.length, hasMore: offset + limitN < posts.length });
+    res.json({ posts: slice.map(postView), users: usersFor(slice.map((p) => p.ownerId)), total: posts.length, hasMore: offset + limitN < posts.length, counts });
   }));
   r.post('/channels/:id/posts', limit('newpost', 8, 60_000, (req) => req.user.id), h(async (req, res) => {
     const forum = getChannel(req, req.params.id); if (forum.type !== 'forum') throw bad('That is not a forum');
@@ -862,18 +875,51 @@ export function createApi() {
     automod(forum, req.user.id, `${b.title || ''}\n${b.content || ''}`, { host: req.get('host') });
     const content = guardText(forum, req.user.id, typeof b.content === 'string' ? b.content : '');
     if (content.length > 4000) throw bad('The post is too long (4000 characters max)');
+    if (forum.apply) {   // one application at a time; after a denial, again a day later; once accepted, done
+      const mine = Object.values(db.channels).filter((c) => c.type === 'post' && c.forumId === forum.id && c.ownerId === req.user.id);
+      if (mine.some((p) => p.status === 'accepted')) throw bad('You were already accepted here');
+      if (mine.some((p) => p.status === 'pending')) throw bad('You already have an application waiting for a decision here');
+      const denied = Math.max(0, ...mine.filter((p) => p.status === 'denied').map((p) => p.decidedAt || 0));
+      if (Date.now() - denied < APPLY_AGAIN) throw bad(`You can apply again ${formatDuration(denied + APPLY_AGAIN - Date.now())} from now`);
+    }
+    const theme = b.theme ? sanitizeSharedTheme(b.theme) : null;
     await Promise.all((Array.isArray(b.attachments) ? b.attachments.slice(0, 10) : []).map((a) => restoreUpload(path.basename(String(a?.url || '')))));
     let attachments = sanitizeAttachments(b.attachments, fs, path, UPLOAD_DIR);
     if (attachments.length && !canIn(req.user.id, forum, 'ATTACH_FILES')) attachments = [];
-    if (!content.trim() && !attachments.length) throw bad('Write something in your post');
+    if (!content.trim() && !attachments.length && !theme) throw bad('Write something in your post');
     const tagIds = (Array.isArray(b.tags) ? b.tags : []).map(String).filter((tid) => forum.tags?.some((t) => t.id === tid)).slice(0, 5);
     if (forum.requireTag && !tagIds.length) throw bad('Pick at least one tag for your post', 'tags');
     const id = newId(); const now = Date.now();
-    const post = db.channels[id] = { id, serverId: s.id, type: 'post', forumId: forum.id, name: title, ownerId: req.user.id, createdAt: now, lastActivity: now, tagIds, locked: false, pinned: false };
+    const post = db.channels[id] = { id, serverId: s.id, type: 'post', forumId: forum.id, name: title, ownerId: req.user.id, createdAt: now, lastActivity: now, tagIds, locked: false, pinned: false, ...(forum.apply ? { status: 'pending' } : {}) };
     db.messages[id] = []; save();
-    emitTo(audienceOf(forum), 'post_create', { post: postView(post), users: [publicUser(req.user)] });
-    const msg = postMessage(post, req.user.id, { content, attachments });
+    emitTo(audienceOf(post), 'post_create', { post: postView(post), users: [publicUser(req.user)] });   // a new application only reaches its author and the reviewers
+    const msg = postMessage(post, req.user.id, { content, attachments, theme });
     res.json({ post: channelView(post, req.user.id), message: messageView(msg) });
+  }));
+  const APPLY_AGAIN = 24 * 3600_000;
+  /** A reviewer (Access Applications) accepts or denies an application in an Application channel. Accepted ones show for everyone. */
+  r.post('/channels/:id/decision', h(async (req, res) => {
+    const post = getChannel(req, req.params.id); const forum = db.channels[post.forumId]; const s = db.servers[post.serverId];
+    if (post.type !== 'post' || !forum?.apply || !post.status) throw bad('That is not an application');
+    if (!canReview(s, req.user.id)) throw forbidden('You need Access Applications to decide on applications');
+    const decision = (req.body || {}).decision; if (decision !== 'accept' && decision !== 'deny') throw bad('Accept or deny it');
+    if (post.status !== 'pending') throw bad(`This application was already ${post.status}`);
+    const accept = decision === 'accept'; const reason = accept ? '' : String(req.body.reason || '').trim().slice(0, 300);
+    const before = audienceOf(post);
+    Object.assign(post, { status: accept ? 'accepted' : 'denied', decidedBy: req.user.id, decidedAt: Date.now() }); if (reason) post.reason = reason;
+    const role = accept && forum.apply.roleId ? giveRole(s, post.ownerId, forum.apply.roleId) : null;
+    audit(s, req.user.id, accept ? 'application_accept' : 'application_reject', { target: post.ownerId, reason, title: post.name, channel: forum.name });
+    save();
+    const view = postView(post);
+    emitTo(before, 'post_update', { post: view });
+    const fresh = audienceOf(post).filter((uid) => !before.includes(uid));
+    if (fresh.length) emitTo(fresh, 'post_create', { post: view, users: usersFor([post.ownerId]) });   // everyone else sees it for the first time
+    if (s.members[post.ownerId]) {
+      orbitTells(post.ownerId, accept
+        ? `✅ Your application **${post.name}** in **${s.name}** was accepted!${role ? ` You got the **${role.name}** role.` : ''}`
+        : `Your application **${post.name}** in **${s.name}** wasn’t accepted this time.${reason ? ` Reason: ${reason}` : ''} You can apply again in a day.`);
+    }
+    res.json(view);
   }));
 
   /* ---- DMs ---- */

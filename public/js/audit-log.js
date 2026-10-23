@@ -43,8 +43,8 @@ function said(e, who) {
     case 'invite_delete': return html`deleted the invite <b>${d.code}</b>`;
     case 'tag_update': return d.old ? html`changed the server tag from <b>${d.old}</b> to <b>${d.text}</b>` : html`set the server tag to <b>${d.text}</b>`;
     case 'join_mode': return d.mode === 'apply' ? html`made people apply to join the server` : html`let anyone with an invite join the server`;
-    case 'application_accept': return e.actorId ? html`accepted the application of ${T}` : html`let ${T} in (applying was switched off)`;
-    case 'application_reject': return html`rejected the application of ${T}`;
+    case 'application_accept': return !e.actorId ? html`let ${T} in (applying was switched off)` : d.title ? html`accepted <b>${d.title}</b> by ${T} in ${ch(d.channel)}` : html`accepted the application of ${T}`;
+    case 'application_reject': return d.title ? html`denied <b>${d.title}</b> by ${T} in ${ch(d.channel)}` : html`rejected the application of ${T}`;
     case 'discord_link': return html`linked ${ch(d.channel)} with <b>#${d.discordChannel}</b>${d.guild ? ` (${d.guild})` : ''} on Discord`;
     case 'discord_transfer': return html`moved ${[d.roles && `${d.roles} roles`, d.channels && `${d.channels} channels`, d.emojis && `${d.emojis} emoji`, d.identity && 'the name and icon'].filter(Boolean).join(', ') || 'nothing'} from the Discord server <b>${d.guild || '?'}</b>`;
     case 'discord_unlink': return html`unlinked ${ch(d.channel)} from Discord${d.why ? ` (${d.why})` : ''}`;

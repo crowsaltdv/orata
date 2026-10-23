@@ -11,7 +11,7 @@ import { checkLook, CARD_SECTIONS } from '/js/theme-data.js';
 
 
 /** What your look is made of: the same settings as Export theme, minus your saved wallpapers and your reduced-motion choice (those stay personal). */
-function currentLook() {
+export function currentLook() {
   const s = state.settings; const out = {};
   for (const k of CARD_SECTIONS) out[k] = structuredClone(s[k] || {});
   delete out.bg.library; delete out.motion.reduce;

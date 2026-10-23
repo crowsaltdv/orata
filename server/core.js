@@ -309,6 +309,7 @@ export function permsIn(server, userId, ch) {
     const mo = ows.find((o) => o.type === 'member' && o.id === userId); if (mo) apply(mo.allow, mo.deny);
   }
   if (ch.applications) { if (base.has('ACCESS_APPLICATIONS')) out.add('VIEW_CHANNEL'); else out.delete('VIEW_CHANNEL'); }   // the applications channel follows the permission, not overwrites
+  if (ch.type === 'post' && ch.status && ch.status !== 'accepted' && ch.ownerId !== userId && !base.has('ACCESS_APPLICATIONS')) out.delete('VIEW_CHANNEL');   // an application still waiting (or denied): only its author and the reviewers
   if (isTimedOut(server, userId)) return out.has('VIEW_CHANNEL') ? new Set(['VIEW_CHANNEL']) : new Set();   // overwrites cannot lift a timeout
   return out.has('VIEW_CHANNEL') ? out : new Set();   // a channel you cannot see grants nothing
 }
@@ -483,6 +484,7 @@ export function channelView(c, userId) {
   if (c.serverId) {
     const ows = overwritesOf(c);
     if (c.type === 'forum') { v.tags = c.tags || []; v.requireTag = !!c.requireTag; }
+    if (c.apply) v.apply = { roleId: c.apply.roleId || null };   // an Application channel (api.js)
     v.private = ows.some((o) => o.type === 'role' && o.id === c.serverId && o.deny.includes('VIEW_CHANNEL'));
     if (c.type !== 'category' && c.parentId) v.synced = isSynced(c);
     const server = db.servers[c.serverId];
@@ -527,6 +529,7 @@ export function postView(p) {
     id: p.id, serverId: p.serverId, type: 'post', forumId: p.forumId, name: p.name, ownerId: p.ownerId, createdAt: p.createdAt, lastActivity: p.lastActivity || p.createdAt,
     messageCount: Math.max(0, list.length - 1), tagIds: p.tagIds || [], locked: !!p.locked, pinned: !!p.pinned,
     preview: first ? String(first.content || '').slice(0, 300) : '', image: img?.url || null, lastMessageId: lastMessageId(p.id),
+    ...(p.status ? { status: p.status, decidedAt: p.decidedAt || null, reason: p.status === 'denied' ? p.reason || '' : undefined } : {}),   // an application (only its author and reviewers see one that isn't accepted)
   };
 }
 export function lastMessageId(channelId) { const a = db.messages[channelId]; return a?.length ? a[a.length - 1].id : null; }

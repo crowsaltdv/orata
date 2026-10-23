@@ -9,7 +9,7 @@ export const PERM_INFO = {
   MANAGE_EXPRESSIONS: ['Manage Expressions', 'Add, rename and delete the server’s custom emoji and stickers.'],
   MODERATE_MEMBERS: ['Timeout Members', 'Temporarily stop members from talking, reacting and joining voice.'],
   SEND_GIFS: ['Send GIFs & Stickers', 'Post GIFs and stickers (the GIF and sticker pickers).'],
-  ACCESS_APPLICATIONS: ['Access Applications', 'See the applications channel and accept or reject people who apply to join (Server Settings → Invites → Who can join).'],
+  ACCESS_APPLICATIONS: ['Access Applications', 'See the applications channel and accept or reject people who apply to join (Server Settings → Invites → Who can join), and see, accept and deny applications in Application channels.'],
 };
 export const PERM_ORDER = ['ADMINISTRATOR', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'VIEW_CHANNEL', 'MANAGE_MESSAGES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'MODERATE_MEMBERS', 'ACCESS_APPLICATIONS', 'MANAGE_EXPRESSIONS', 'MANAGE_NICKNAMES', 'CREATE_INVITE', 'SEND_MESSAGES', 'SEND_GIFS', 'ATTACH_FILES', 'ADD_REACTIONS', 'USE_REACTIONS', 'MENTION_EVERYONE', 'CONNECT', 'SPEAK', 'CHANGE_NICKNAME'];
 

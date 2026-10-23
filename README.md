@@ -21,7 +21,7 @@ Requires Node.js 20 or newer. Nothing else — there is no database to set up, d
 
 ```bash
 npm run dev                      # restart on file changes
-npm test                         # backend self-tests (486 checks: auth, servers, messages, DMs, uploads, GIFs, settings sync, permissions, bans, emoji, forums, polls, stage channels, email verification …)
+npm test                         # backend self-tests (486 checks: auth, servers, messages, DMs, uploads, GIFs, settings sync, permissions, bans, emoji, forums, application channels, polls, stage channels, email verification …)
 npm run reset-password <user>    # forgot a password? prints a new one
 ```
 
@@ -280,6 +280,8 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 **GIF icons & banners** — the server icon and the (now much bigger, 16:9) banner can be an uploaded GIF or one picked from KLIPY with *Choose a GIF*; animated pictures play everywhere.
 
 **Forum channels** — create a *Forum* channel: every topic is its own **post** with a title, tags and a first message, and replies happen inside the post like a normal channel. Posts can be sorted by recent activity or creation date, filtered by tag and searched; moderators can pin and lock posts (the post's author can lock their own and rename it), and a forum can *require a tag* and show guidelines above the new-post form. Posts follow the forum's permissions (private forums keep their posts private), and links to a post open it directly.
+
+**Application channels** — create an *Application* channel (a forum whose posts are applications): people press **Apply** and send a title, a message, pictures and, if they like, their current theme. A waiting application is seen only by its author and the people with **Access Applications** (plus admins and the owner), who get *Waiting / Accepted / Denied* tabs and **Accept** / **Deny** (with an optional reason) on each one; they can also chat with the applicant inside it first. Accepted applications are shown to everyone; denied ones stay hidden. Orbit DMs the applicant the decision, the channel settings can name a **role for accepted applicants**, and the *Instructions* show on the Apply form. One application at a time per person; after a denial they can apply again a day later. Decisions are in the Audit Log.
 
 **Polls** — the `+` button next to the message box → *Create Poll* (or `/poll`): a question with 2–10 answers, a duration from 1 hour to 2 weeks and an optional multiple-choice mode. Votes update live and results are shown as bars; **click the number of votes** to see who voted for which option. The author or a moderator can end a poll early.
 

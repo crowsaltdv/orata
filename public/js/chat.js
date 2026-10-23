@@ -1,7 +1,7 @@
 // Orata — chat view (channel / DM header + message list + composer) and right-panel routing.
 import { html, useEffect, useState, cx, copyText } from '/js/lib.js';
 import { state, set, useSel, getChannel, dmName, dmUserId, openModal, updateSettings, updateLocal, hasPerm, isMuted, toast, go, goChannel, openContext } from '/js/store.js';
-import { postMenu, TagChip } from '/js/forum.js';
+import { postMenu, TagChip, ApplicationBar } from '/js/forum.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, IconBtn, Modal, MODALS } from '/js/ui.js';
 import { MessageList } from '/js/messagelist.js';
@@ -81,6 +81,7 @@ export function ChatView() {
         <span class="name">${isDm ? dmName(ch, 5) : ch.name}</span>
         ${isPost && ch.locked ? html`<span class="post-lock" data-tip=${t('This post is locked')}><${Icon} name="lock" size=${15} /></span>` : null}
         ${postTags.length ? html`<span class="post-hdr-tags">${postTags.map((tg) => html`<${TagChip} key=${tg.id} tag=${tg} small=${true} />`)}</span>` : null}
+        ${isPost && ch.status === 'accepted' ? html`<span class="app-pill ok"><${Icon} name="check" size=${12} sw=${3} />${t('Accepted')}</span>` : null}
         ${isDm && !isGroup && other?.customStatus ? html`<span class="m-topic" style="border:0;padding:0">${other.customStatus.emoji} ${other.customStatus.text}</span>` : null}
       </div>
       ${!isDm && ch.topic ? html`<div class="m-topic" onClick=${() => openModal('topic', { channelId: ch.id })} title=${ch.topic}>${ch.topic}</div>` : null}
@@ -95,6 +96,7 @@ export function ChatView() {
         <label class="m-search"><${Icon} name="search" size=${15} /><input placeholder=${isDm ? `${t('Search')}` : `${t('Search')} ${state.servers[ch.serverId]?.name || ''}`} value=${query} onFocus=${() => set({ panel: 'search' })} onInput=${(e) => set({ searchQuery: e.target.value, panel: 'search' })} /></label>
       </div>
     </header>
+    ${isPost && ch.status ? html`<${ApplicationBar} post=${ch} />` : null}
     ${ghost ? html`<div class="ghost-banner"><${Icon} name="eye" size=${16} /><span>${t('Ghost mode: nobody here can see you, and you can only read.')}</span><button type="button" class="btn btn-sm" onClick=${() => import('/js/staff.js').then((m) => m.leaveGhost(ch.serverId))}>${t('Leave')}</button></div>` : null}
     ${showStage ? html`<${Stage} chId=${ch.id} />` : null}
     <div class="chat-col"><${MessageList} chId=${ch.id} key=${ch.id} />${ghost ? null : html`<${Composer} chId=${ch.id} />`}</div>

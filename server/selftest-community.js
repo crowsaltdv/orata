@@ -357,6 +357,48 @@ async function main() {
   r = await api('GET', `/channels/${post2.id}`, A.token); ok(r.status === 404, '… deletes its posts');
   void mm; wa.ws.close(); wt.ws.close();
 
+  /* ---------------------------------------------------------------- application channels */
+  console.log('\nApplication channels');
+  const wc = await connect(C.token); const wt2 = await connect(T.token);
+  r = await api('POST', `/servers/${S.id}/channels`, T.token, { name: 'Creator Program', type: 'application' }); ok(r.status === 403, 'only people who manage channels make an Application channel');
+  r = await api('POST', `/servers/${S.id}/channels`, A.token, { name: 'Creator Program', type: 'application' });
+  const appCh = r.body; ok(r.status === 200 && appCh.type === 'forum' && appCh.name === 'creator-program' && appCh.apply?.roleId === null, 'create an Application channel');
+  const creator = (await api('POST', `/servers/${S.id}/roles`, A.token, { name: 'Creator' })).body;
+  r = await api('PATCH', `/channels/${appCh.id}`, A.token, { applyRole: 'nope' }); ok(r.status === 400, 'the reward role has to exist');
+  r = await api('PATCH', `/channels/${appCh.id}`, A.token, { applyRole: creator.id, topic: 'Show at least 2 themes you made' });
+  ok(r.status === 200 && r.body.apply.roleId === creator.id && r.body.topic.startsWith('Show'), 'pick the role accepted people get, and the instructions');
+  const reviewer = (await api('POST', `/servers/${S.id}/roles`, A.token, { name: 'Reviewer', permissions: ['ACCESS_APPLICATIONS'] })).body;
+  await api('PUT', `/servers/${S.id}/members/${MOD.user.id}/roles/${reviewer.id}`, A.token);
+  const pic = await upload(T.token, PNG);
+  r = await api('POST', `/channels/${appCh.id}/posts`, T.token, { title: 'Tim’s themes', content: 'Here is my work', attachments: [pic], theme: { name: 'Night', data: { theme: { accent: '#ff0055' } } } });
+  const app1 = r.body.post; ok(r.status === 200 && app1.status === 'pending' && r.body.message.attachments.length === 1 && !!r.body.message.theme, 'apply with a title, a message, a picture and a theme');
+  r = await api('POST', `/channels/${appCh.id}/posts`, T.token, { title: 'Again', content: 'x' }); ok(r.status === 400, 'one waiting application at a time');
+  r = await api('GET', `/channels/${appCh.id}/posts`, C.token); ok(r.status === 200 && r.body.posts.length === 0 && !r.body.counts, 'other members don’t see a waiting application');
+  r = await api('GET', `/channels/${app1.id}/messages`, C.token); ok(r.status === 404, '… and can’t open it');
+  r = await api('GET', `/channels/${appCh.id}/posts`, T.token); ok(r.body.posts.length === 1 && r.body.posts[0].status === 'pending', 'the applicant sees their own');
+  r = await api('GET', `/channels/${appCh.id}/posts?status=pending`, MOD.token); ok(r.body.posts.length === 1 && r.body.counts?.pending === 1 && r.body.counts.accepted === 0, 'reviewers (Access Applications) see it, with counts');
+  r = await api('POST', `/channels/${app1.id}/messages`, MOD.token, { content: 'Can you show one more?' }); ok(r.status === 200, 'a reviewer can ask the applicant something in it');
+  await sleep(300);
+  ok(!wc.events.some((e) => (e.op === 'post_create' && e.d.post.id === app1.id) || (e.op === 'message_create' && e.d.message.channelId === app1.id)), 'nobody else hears about it live');
+  r = await api('POST', `/channels/${app1.id}/decision`, C.token, { decision: 'accept' }); ok(r.status === 404, 'a member without Access Applications can’t decide');
+  r = await api('POST', `/channels/${app1.id}/decision`, T.token, { decision: 'accept' }); ok(r.status === 403, '… nor can the applicant');
+  r = await api('POST', `/channels/${app1.id}/decision`, MOD.token, { decision: 'accept' }); ok(r.status === 200 && r.body.status === 'accepted', 'a reviewer accepts it');
+  ok(!!(await wc.wait('post_create', (d) => d.post.id === app1.id).catch(() => null)), 'everyone sees it now, live');
+  r = await api('GET', `/channels/${appCh.id}/posts`, C.token); ok(r.body.posts.length === 1 && r.body.posts[0].id === app1.id, '… and in the list');
+  ok(!!(await wt2.wait('message_create', (d) => /was accepted/.test(d.message.content) && /Creator/.test(d.message.content)).catch(() => null)), 'Orbit tells the applicant, who got the Creator role');
+  ok((await api('GET', '/ready', T.token)).body.servers.find((s) => s.id === S.id).members.find((m) => m.id === T.user.id).roles.includes(creator.id), '… really');
+  r = await api('POST', `/channels/${app1.id}/decision`, MOD.token, { decision: 'deny' }); ok(r.status === 400, 'a decision is final');
+  r = await api('POST', `/channels/${appCh.id}/posts`, T.token, { title: 'More', content: 'x' }); ok(r.status === 400, 'someone accepted doesn’t apply again');
+  r = await api('POST', `/channels/${appCh.id}/posts`, C.token, { title: 'Carlos applies', content: 'pls' }); const app2 = r.body.post;
+  r = await api('POST', `/channels/${app2.id}/decision`, A.token, { decision: 'deny', reason: 'Show your own themes' }); ok(r.status === 200 && r.body.status === 'denied' && r.body.reason === 'Show your own themes', 'deny with a reason');
+  ok(!!(await wc.wait('message_create', (d) => /wasn’t accepted/.test(d.message.content) && /Show your own themes/.test(d.message.content)).catch(() => null)), 'Orbit tells them why');
+  r = await api('GET', `/channels/${appCh.id}/posts`, T.token); ok(!r.body.posts.some((p) => p.id === app2.id), 'a denied application stays hidden from others');
+  r = await api('GET', `/channels/${appCh.id}/posts`, C.token); ok(r.body.posts.some((p) => p.id === app2.id && p.status === 'denied'), '… but its author still sees it');
+  r = await api('POST', `/channels/${appCh.id}/posts`, C.token, { title: 'Again', content: 'x' }); ok(r.status === 400 && /apply again/.test(r.body.error), 'after a denial, applying again waits a day');
+  r = await api('GET', `/servers/${S.id}/audit-log`, A.token); ok(['application_accept', 'application_reject'].every((a) => r.body.entries.some((e) => e.action === a && e.details?.title)), 'decisions go in the audit log');
+  r = await api('POST', `/channels/${appCh.id}/posts`, MOD.token, { title: 'Theme only', theme: { data: { theme: { accent: '#00ff00' } } } }); ok(r.status === 200, 'an application can be just a theme');
+  wc.ws.close(); wt2.ws.close();
+
   /* ---------------------------------------------------------------- polls */
   console.log('\nPolls');
   const wp = await connect(T.token);
