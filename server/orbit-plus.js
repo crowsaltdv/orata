@@ -115,7 +115,7 @@ hooks.onReact.push((ch, m, emoji, uid, add) => {
   if (stars < sb.stars || !board || (sb.posted ||= []).includes(m.id)) return;
   sb.posted.push(m.id); if (sb.posted.length > 500) sb.posted.splice(0, sb.posted.length - 500); save();
   const author = db.users[m.authorId];
-  postMessage(board, s.orbitId, { content: `⭐ **${stars}** in <#${ch.id}>`, forward: { messageId: m.id, channelId: ch.id, authorId: m.authorId, authorName: m.bridge?.name || s.members[m.authorId]?.nick || author?.displayName || 'Someone',
+  postMessage(board, s.orbitId, { content: `⭐ **${stars}** in <#${ch.id}>`, forward: { messageId: m.id, channelId: ch.id, serverId: s.id, authorId: m.authorId, authorName: m.bridge?.name || s.members[m.authorId]?.nick || author?.displayName || 'Someone',
     from: `#${ch.name} · ${s.name}`, content: m.content || '', attachments: (m.attachments || []).filter((a) => !a.voice), gif: m.gif || null, sticker: m.sticker || null, createdAt: m.createdAt } });
 });
 

@@ -3,7 +3,8 @@
 // Whoever holds the "dev" badge is a developer: they can give and take anyone's badges and create or delete custom ones — except the staff and
 // dev badges themselves, which only the two founders (oratedev and Orate_dev) can hand out or take away.
 import { db, save, newId, bad, forbidden, notFound, byUsername, emitTo, relatedUserIds, publicUser, ORATE_DEV_ID } from './core.js';
-import { isFounder } from './names.js';
+import { isFounder, isStaff } from './names.js';
+import { staffLog } from './staff.js';
 
 const BUILTIN = [
   { id: 'dev', name: 'Orata Developer', icon: 'code', color: '#5865f2' },
@@ -14,6 +15,7 @@ const BUILTIN = [
   { id: 'verified', name: 'Verified', icon: 'check-circle', color: '#3b82f6' },
   { id: 'artist', name: 'Artist', icon: 'palette', color: '#f97316' },
   { id: 'partner', name: 'Partner', icon: 'award', color: '#a78bfa' },
+  { id: 'creator', name: 'Creator', icon: 'paintbrush', color: '#ec4899' },   // may publish themes on Theme Discovery (themes.js); staff and developers give it
 ];
 const before = JSON.stringify(db.badges || null);
 db.badges ||= {};
@@ -49,6 +51,17 @@ export function mountBadges(r, { h }) {
     delete db.badges[badge.id];
     for (const u of Object.values(db.users)) if (u.badges?.includes(badge.id)) { u.badges = u.badges.filter((x) => x !== badge.id); tell(u); }
     save(); res.json({ ok: true });
+  }));
+  /** Orata staff (and developers) give or take the creator badge, the one that lets someone publish themes on Theme Discovery. Nothing else about the badges changes. */
+  r.put('/users/:id/creator', h(async (req, res) => {
+    if (!isStaff(req.user)) throw forbidden('Only Orata staff can do that');
+    const u = db.users[req.params.id]; if (!u || u.deleted || u.bot) throw notFound('Unknown user');
+    if (typeof req.body?.creator !== 'boolean') throw bad('Say whether they should have the Creator badge');
+    const has = !!u.badges?.includes('creator');
+    if (req.body.creator && !has) { (u.badges ||= []).push('creator'); staffLog(req.user.id, 'give_creator', u.id); }
+    else if (!req.body.creator && has) { u.badges = u.badges.filter((x) => x !== 'creator'); staffLog(req.user.id, 'take_creator', u.id); }
+    save(); tell(u, req.user.id);
+    res.json(publicUser(u));
   }));
   r.put('/users/:id/badges', h(async (req, res) => {
     dev(req); const u = db.users[req.params.id]; if (!u || u.deleted) throw notFound('Unknown user');

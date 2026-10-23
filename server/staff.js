@@ -60,6 +60,7 @@ function log(by, action, target, reason = '', details = {}) {
   (db.staffLog ||= []).push({ id: newId(), at: Date.now(), by, action, target, reason, ...details });
   if (db.staffLog.length > KEEP_LOG) db.staffLog.splice(0, db.staffLog.length - KEEP_LOG);
 }
+export { log as staffLog };   // for the other places staff act from (badges.js, themes.js)
 /** Adds a flag, unless the same one is already open from the last hour. */
 function flag(f) {
   const flags = (db.flags ||= []); const hour = Date.now() - 3600_000;

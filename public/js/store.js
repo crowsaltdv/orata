@@ -19,7 +19,7 @@ export const state = {
   local: deepMerge(DEFAULT_LOCAL, ls('local', {})),
   focused: document.hasFocus(), idle: false, width: window.innerWidth, mobileNav: false,
   music: { genres: null, category: 'top', charts: {}, chartLoading: false, chartError: null, recent: ls('musicRecentYT', []) || [], playlists: null, artists: [], query: '', results: null, searching: false, error: null, queue: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7 }, musicOk: null, postIndex: {}, postLists: {},
-  gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, replyTo: null, editing: null, searchQuery: '', speaking: {},
+  gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, themesRev: 0, replyTo: null, editing: null, searchQuery: '', speaking: {},
 };
 state.panel = state.local.panel;
 
@@ -181,6 +181,8 @@ export function parseRoute(path) {
   if ((m = p.match(/^\/music\/(artist|album|playlist)\/([\w-]+)$/))) return { view: 'music', serverId: '@me', channelId: null, musicView: m[1], musicId: m[2] };   // an artist's, an album's or one of your playlists' page
   if (p === '/music') return { view: 'music', serverId: '@me', channelId: null, musicView: null, musicId: null };
   if (p === '/staff') return { view: 'staff', serverId: '@me', channelId: null };   // Orata staff tools (staff.js)
+  if (p === '/themes' || p === '/themes/discover') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'discover' };   // Theme Discovery and your theme library (themes.js)
+  if (p === '/themes/library') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'library' };
   if (p === '/login' || p === '/register') return { view: p.slice(1), serverId: '@me', channelId: null };
   if (p === '/verify') return { view: 'verify', serverId: '@me', channelId: null };   // the link in the verification email (the token is read from the query string)
   return { view: 'friends', serverId: '@me', channelId: null };
@@ -191,6 +193,7 @@ export function routePath(r) {
     case 'friends': return '/channels/@me';
     case 'music': return r.musicView && r.musicId ? `/music/${r.musicView}/${r.musicId}` : '/music';
     case 'staff': return '/staff';
+    case 'themes': return r.themesView === 'library' ? '/themes/library' : '/themes';
     case 'channel': return r.channelId ? `/channels/${r.serverId}/${r.channelId}` : `/channels/${r.serverId}`;
     default: return '/channels/@me';
   }

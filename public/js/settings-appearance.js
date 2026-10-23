@@ -3,6 +3,7 @@ import { html, useState, useEffect, cx } from '/js/lib.js';
 import { state, set, useSel, setSetting, updateSettings, resetSettings, toast } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Btn, Slider, Toggle, Segmented, SettingRow, Section, ColorSwatch, TextInput, Dropdown, Avatar } from '/js/ui.js';
+import { ThemeLibraryBar } from '/js/themes.js';
 import { DEFAULT_SETTINGS, ACCENT_PRESETS, PANEL_PRESETS, MESH_WALLPAPERS, PHOTO_WALLPAPERS } from '/js/defaults.js';
 import { meshCss, proxied } from '/js/theme.js';
 import { RAIN_PRESETS } from '/js/rain.js';
@@ -43,6 +44,9 @@ export function ThemePage() {
   const gradient = th.accentType === 'gradient';
   return html`<div class="s-page">
     <${ThemePreview} />
+    <${Section} title=${t('Theme library')} desc=${t('Save your whole look — colors, wallpaper, fonts, glass and rain — to your library, or install themes other people made.')}>
+      <${ThemeLibraryBar} kind="site" />
+    <//>
     <${Section} title=${t('Theme')} desc=${t('Pick a base. Everything below fine-tunes it.')}>
       <div class="mode-grid">${MODES.map(([k, l, bg, fg]) => html`<button type="button" class=${cx('mode-card', th.mode === k && 'sel')} onClick=${() => setMode(k)}>
         <span class="mode-prev" style=${k === 'auto' ? { background: 'linear-gradient(105deg,#15121f 50%,#fff 50%)' } : { background: bg, color: fg }}><i></i><i></i></span><b>${t(l)}</b>${th.mode === k ? html`<span class="mode-check"><${Icon} name="check" size=${13} sw=${3.5} /></span>` : null}</button>`)}</div>

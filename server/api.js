@@ -27,6 +27,7 @@ import { createSession, findSession, touchSession, endSession, endUserSessions, 
 import { mountMusic, musicReady, musicProblem } from './music.js';
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 import { mountBadges } from './badges.js';
+import { mountThemes, dropUserThemes } from './themes.js';
 import { mountOrbit, addOrbit, reactionRole } from './orbit.js';
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -377,6 +378,7 @@ export function createApi() {
 
   mountMusic(r, { h, limit });
   mountBadges(r, { h });
+  mountThemes(r, { h, limit });
   mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdate, guardText, automod, kickMember, banMember, timeoutMember });
   startDiscord({ guardText });
 
@@ -478,7 +480,8 @@ export function createApi() {
     for (const id of Object.keys(u.rel || {})) { const o = db.users[id]; if (o?.rel) { delete o.rel[u.id]; emitTo([id], 'relationship_update', { id: u.id, type: null }); } }
     await endUserSessions(u.id);
     byUsername.delete(u.username); byEmail.delete(u.email);
-    Object.assign(u, { deleted: true, username: 'deleted_' + u.id.slice(-8), displayName: 'Deleted User', email: null, hash: null, salt: null, avatar: null, banner: null, bio: '', customStatus: null, rel: {}, settings: {} });
+    dropUserThemes(u.id);
+    Object.assign(u, { deleted: true, username: 'deleted_' + u.id.slice(-8), displayName: 'Deleted User', email: null, hash: null, salt: null, avatar: null, banner: null, bio: '', customStatus: null, rel: {}, settings: {}, themes: [] });
     emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) });
     for (const set of [...(conns.get(u.id) || [])]) set.ws.close(4001, 'deleted');
     save(); res.json({ ok: true });
@@ -1318,7 +1321,9 @@ export function createApi() {
     const m = (db.messages[src.id] || []).find((x) => x.id === String(f.messageId || '')); if (!m || (m.type && m.type !== 'default')) throw gone();
     const o = m.forward || m; const s = src.serverId && db.servers[src.serverId]; const author = db.users[o.authorId || m.authorId];
     const copy = {
-      messageId: m.id, channelId: src.id, authorId: o.authorId || m.authorId, authorName: o.authorName || (s ? s.members[m.authorId]?.nick : null) || author?.displayName || 'Someone',
+      // where the original is, so "Forwarded from …" can take you there (for a forward of a forward, the original's own place)
+      messageId: m.forward ? m.forward.messageId : m.id, channelId: m.forward ? m.forward.channelId : src.id, serverId: m.forward ? m.forward.serverId : src.serverId || null,
+      authorId: o.authorId || m.authorId, authorName: o.authorName || (s ? s.members[m.authorId]?.nick : null) || author?.displayName || 'Someone',
       from: m.forward ? m.forward.from : s ? `#${src.name} · ${s.name}` : src.type === 'group' ? (src.name || 'a group chat') : 'a direct message',
       content: guardText(target, req.user.id, String(o.content || '')), attachments: (o.attachments || []).filter((a) => !a.voice), gif: o.gif || null, sticker: o.sticker || null, createdAt: o.createdAt || m.createdAt,
     };

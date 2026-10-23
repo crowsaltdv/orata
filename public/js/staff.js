@@ -97,9 +97,12 @@ function Accounts() {
   const load = (query = q) => api.get(`/staff/users?q=${encodeURIComponent(query)}`).then(setList, () => setList([]));
   useEffect(() => { const id = setTimeout(() => load(q), 250); return () => clearTimeout(id); }, [q]);
   const run = async (u, what) => { const r = await moderate(u, what); if (r) { setList((l) => l.map((x) => (x.id === r.id ? r : x))); if (open?.id === r.id) setOpen({ ...open, ...r }); } };
+  // the Creator badge: lets someone publish themes on Theme Discovery
+  const creator = async (u) => { const has = u.badges?.some((b) => b.id === 'creator'); const r = await act(api.put(`/users/${u.id}/creator`, { creator: !has }), { success: has ? t('Creator badge taken away') : t('Creator badge given') }); if (r) setList((l) => l.map((x) => (x.id === r.id ? { ...x, badges: r.badges } : x))); };
   return html`<div class="staff-bar"><div class="input-wrap staff-search"><${Icon} name="search" size=${18} class="in-icon" /><input class="input" placeholder=${t('Search by username, name or ID…')} value=${q} onInput=${(e) => setQ(e.target.value)} /></div></div>
     ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : !list.length ? html`<${Empty} icon="users" title=${t('Nobody found')} />`
       : html`<div class="mem-table">${list.map((u) => html`<${UserRow} key=${u.id} u=${u} run=${run} sel=${open?.id === u.id}>
+          ${u.bot ? null : html`<${Btn} size="sm" variant="ghost" icon="paintbrush" onClick=${() => creator(u)}>${u.badges?.some((b) => b.id === 'creator') ? t('Take away Creator') : t('Give Creator')}<//>`}
           <${Btn} size="sm" variant="ghost" onClick=${() => (open?.id === u.id ? setOpen(null) : api.get(`/staff/users/${u.id}`).then(setOpen))}>${open?.id === u.id ? t('Close') : t('Details')}<//><//>
         ${open?.id === u.id ? html`<${AccountDetail} d=${open} />` : null}`)}</div>`}`;
 }
@@ -215,7 +218,7 @@ function Flags() {
       </div>`; })}</div>`}`;
 }
 
-const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into', view_dm: 'read a flagged DM of', unhide_flag: 'said a report wasn’t a joke, about' };
+const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into', view_dm: 'read a flagged DM of', unhide_flag: 'said a report wasn’t a joke, about', give_creator: 'gave the Creator badge to', take_creator: 'took the Creator badge from', unpublish_theme: 'unpublished a theme by' };
 function Log() {
   const [d, setD] = useState(null);
   useEffect(() => { api.get('/staff/log').then((r) => { addUsers(r.users); setD(r); }, () => setD({ log: [] })); }, []);

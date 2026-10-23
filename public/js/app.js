@@ -22,6 +22,7 @@ import { markAllRead, ackChannel } from '/js/actions.js';
 import { VerifyScreen, VerifyGate, VerifyBanner } from '/js/verify.js';
 import { MusicPage } from '/js/music.js';
 import { StaffPage } from '/js/staff.js';
+import { ThemesPage } from '/js/themes.js';
 import { ForumView } from '/js/forum.js';
 import '/js/polls.js';
 
@@ -34,6 +35,7 @@ function MainView() {
     case 'friends': return html`<${FriendsView} />`;
     case 'music': return html`<${MusicPage} />`;
     case 'staff': return html`<${StaffPage} />`;
+    case 'themes': return html`<${ThemesPage} />`;
     case 'dm': return html`<${ChatView} key=${chId} />`;
     case 'channel': return chId ? (isVoice ? html`<${VoiceChannelView} key=${chId} />` : chType === 'stage' ? html`<${StageChannelView} key=${chId} />` : chType === 'forum' ? html`<${ForumView} key=${chId} />` : html`<${ChatView} key=${chId} />`) : html`<main class="main panel"></main>`;
     default: return html`<${FriendsView} />`;
@@ -48,7 +50,7 @@ function Shell() {
     let n = 0; for (const id of Object.keys(s.reads)) n += s.reads[id].mentions || 0; return n;
   });
   const anyUnread = useSel((s) => Object.keys(s.lastMsg).some((id) => { const c = s.channelIndex[id]; return c && (c.type === 'text' || c.type === 'dm' || c.type === 'group') && unreadInfo(id).unread && !s.settings.mutedChannels[id] && !(s.settings.mutedServers[c.serverId]); }));
-  const chName = useSel((s) => { const c = getChannel(s.route.channelId); return c ? (c.serverId ? (c.type === 'post' ? c.name : `#${c.name}`) : dmName(c)) : view === 'friends' ? 'Friends' : view === 'music' ? 'Music' : ''; });
+  const chName = useSel((s) => { const c = getChannel(s.route.channelId); return c ? (c.serverId ? (c.type === 'post' ? c.name : `#${c.name}`) : dmName(c)) : view === 'friends' ? 'Friends' : view === 'music' ? 'Music' : view === 'themes' ? 'Themes' : ''; });
   useEffect(() => { document.title = `${totalUnread ? `(${totalUnread}) ` : anyUnread ? '• ' : ''}${chName ? chName + ' | ' : ''}Orata`; }, [totalUnread, anyUnread, chName]);
 
   // pending invite after login
@@ -79,7 +81,7 @@ function Shell() {
       <${UserBar} />
     </div>
     <${MainView} />
-    ${view === 'friends' ? html`<${ActiveNow} />` : view === 'music' || view === 'staff' ? null : html`<${RightPanel} />`}
+    ${view === 'friends' ? html`<${ActiveNow} />` : view === 'music' || view === 'staff' || view === 'themes' ? null : html`<${RightPanel} />`}
   </div>`;
 }
 function cycle(dir, unreadOnly) {

@@ -2,9 +2,9 @@
 import { html, useState, useEffect, useRef, useMemo, memo, cx, formatStamp, formatClock, formatFull, fileSize, copyText, isImageType, shallowEq } from '/js/lib.js';
 import { state, set, useSel, nameOf, roleColor, openContext, openPopover, openModal, toast, getChannel, hasPerm, hasChannelPerm, dmName, goChannel, goDm, go, emojiById } from '/js/store.js';
 import { Icon } from '/js/icons.js';
-import { Avatar, IconBtn, POPOVERS } from '/js/ui.js';
+import { Avatar, IconBtn, ServerIcon, POPOVERS } from '/js/ui.js';
 import { renderMarkdown, emojiOnlyCount, plainPreview, decodeMentions } from '/js/markdown.js';
-import { toggleReaction, deleteMessage, pinMessage, editMessage, jumpToMessage, retryMessage, discardMessage, mapMessage } from '/js/actions.js';
+import { toggleReaction, deleteMessage, pinMessage, editMessage, jumpToMessage, openMessage, retryMessage, discardMessage, mapMessage } from '/js/actions.js';
 import { openProfile } from '/js/sidebar.js';
 import { frequentEmoji } from '/js/emoji.js';
 import { api } from '/js/api.js';
@@ -124,7 +124,23 @@ function Forwarded({ f, onImage }) {
     ${f.gif ? html`<${GifMedia} g=${f.gif} onImage=${onImage} />` : null}
     ${f.sticker ? html`<${Sticker} s=${f.sticker} />` : null}
     ${f.attachments?.length ? html`<div class="attachments">${f.attachments.map((a) => html`<${Attachment} key=${a.id || a.url} a=${a} onImage=${onImage} />`)}</div>` : null}
-    <div class="fwd-foot">${f.authorName} · ${f.from} · ${formatStamp(f.createdAt, !state.settings.chat.hour24)}</div></div>`;
+    <${ForwardSource} f=${f} /></div>`;
+}
+/** The gray line under a forwarded message: who said it, where and when. When you can see the channel it came from, the line takes you to the original message
+ *  there, with that server's icon by the server's name. When you can't (a server you're not in, a channel you can't see) it is plain text, as it was written. */
+function ForwardSource({ f }) {
+  const ch = useSel((s) => s.channelIndex[f.channelId]);
+  const server = useSel((s) => { const id = f.serverId || s.channelIndex[f.channelId]?.serverId; return id ? s.servers[id] : null; });
+  const when = formatStamp(f.createdAt, !state.settings.chat.hour24);
+  if (!ch || !f.messageId) return html`<div class="fwd-foot">${f.authorName} · ${f.from} · ${when}</div>`;
+  const place = server ? html`#${ch.name} · <${ServerIcon} server=${server} size=${15} class="fwd-sicon" />${server.name}` : f.from;
+  const open = async () => {
+    const r = await openMessage(f.channelId, f.messageId);
+    if (r === 'gone') toast(t('The original message was deleted'), 'info', 3200);
+    else if (r === 'hidden') toast(t('You can’t see the channel it came from'), 'info', 3200);
+    else if (r === 'error') toast(t('Couldn’t open the original message. Try again.'), 'error', 3200);
+  };
+  return html`<button type="button" class="fwd-foot fwd-link" data-tip=${t('Go to the original message')} onClick=${open}>${f.authorName} · <span class="fwd-where">${place}</span> · ${when}</button>`;
 }
 
 /* ------------------------------------------------------------------ reactions */

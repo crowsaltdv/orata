@@ -1,0 +1,36 @@
+/* Orata — the Themes page: Theme Discovery and your theme library (themes.js). The header and tabs are the Staff page's (.m-header, .staff-tab). */
+.rail-btn.themes { color: var(--text); }
+.rail-item.active .rail-btn.themes { background: var(--accent-grad); color: var(--on-accent); }
+
+.themes-page { min-width: 0; display: flex; flex-direction: column; }
+.themes-bar .grow { flex: 1; }
+.themes-page .staff-tabs { flex: 0 1 auto; min-width: 0; }
+.th-undo { margin-left: auto; flex: none; }
+.themes-scroll { flex: 1; overflow-y: auto; padding: 20px 28px 48px; display: flex; flex-direction: column; gap: 22px; }
+.themes-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.themes-more { display: flex; justify-content: center; padding: 4px 0; }
+
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 26px 22px; align-items: start; }
+.tcard { position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tcard-prev { position: relative; aspect-ratio: 16 / 9; border-radius: var(--radius); overflow: hidden; background: rgb(var(--surface-rgb) / .08); box-shadow: 0 0 0 1px rgb(var(--surface-rgb) / .1), 0 10px 26px -14px rgb(0 0 0 / .6); transition: transform var(--t-med, .2s) var(--ease, ease), box-shadow var(--t-med, .2s); }
+.tcard:hover .tcard-prev { transform: translateY(-2px); box-shadow: 0 0 0 1px rgb(var(--surface-rgb) / .18), 0 16px 30px -14px rgb(0 0 0 / .7); }
+.tcard.worn .tcard-prev { box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / .9), 0 10px 26px -14px rgb(var(--accent-rgb) / .6); }
+.tcard-prev img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tcard-none { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
+.tcard-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 0 2px; }
+.tcard-name { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcard-by { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcard-btn { width: 100%; }
+.tcard-badge { position: absolute; left: 8px; top: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px 3px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: var(--accent-grad); color: var(--on-accent); box-shadow: 0 2px 8px rgb(0 0 0 / .35); }
+.tcard-more { position: absolute; right: 8px; top: 8px; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgb(0 0 0 / .55); color: #fff; backdrop-filter: blur(6px); opacity: 0; transition: opacity var(--t-fast, .12s), background var(--t-fast, .12s); }
+.tcard:hover .tcard-more, .tcard-more:focus-visible { opacity: 1; }
+.tcard-more:hover { background: rgb(0 0 0 / .8); }
+@media (hover: none) { .tcard-more { opacity: 1; } }
+
+.tlib-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.tlib-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .themes-page .m-title .name { display: none; }
+  .themes-scroll { padding: 14px 14px 40px; gap: 16px; }
+  .theme-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 18px 12px; }
+}

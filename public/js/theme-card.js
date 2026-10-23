@@ -7,60 +7,20 @@ import { Btn } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { act } from '/js/actions.js';
 import { t } from '/js/i18n.js';
+import { checkLook, CARD_SECTIONS } from '/js/theme-data.js';
 
-const SECTIONS = ['theme', 'bg', 'rain', 'glass', 'fonts', 'motion', 'chat'];
 
 /** What your look is made of: the same settings as Export theme, minus your saved wallpapers and your reduced-motion choice (those stay personal). */
 function currentLook() {
   const s = state.settings; const out = {};
-  for (const k of SECTIONS) out[k] = structuredClone(s[k] || {});
+  for (const k of CARD_SECTIONS) out[k] = structuredClone(s[k] || {});
   delete out.bg.library; delete out.motion.reduce;
   return out;
 }
 
 /* ------------------------------------------------------------------ checking a shared look
- * Whatever arrives in a message is untrusted: every setting must exist, have the right kind of value and sit inside what the settings sliders allow. */
-const RANGE = {
-  'theme.panelAngle': [0, 360], 'theme.panelOpacity': [0.05, 1], 'theme.panelBlur': [0, 60], 'theme.radius': [0, 36], 'theme.gap': [0, 24], 'theme.saturation': [0.5, 2.2],
-  'bg.blur': [0, 40], 'bg.dim': [0, 0.9], 'bg.brightness': [0.4, 1.6], 'bg.saturate': [0, 2.2], 'bg.posX': [0, 100], 'bg.posY': [0, 100], 'bg.zoom': [1, 2.5], 'bg.gradient.angle': [0, 360],
-  'rain.amount': [0, 0.7], 'rain.size': [0.5, 1.8], 'rain.speed': [0.3, 2.2], 'rain.refraction': [0.3, 1.8], 'rain.mist': [0, 40], 'rain.trails': [0, 5], 'rain.droplets': [0, 120], 'rain.lightning': [0, 0.25],
-  'glass.intensity': [0.1, 1], 'fonts.size': [12, 24], 'fonts.weight': [300, 600], 'fonts.lineHeight': [1.1, 2], 'fonts.letterSpacing': [-0.05, 0.2], 'motion.speed': [0.5, 2], 'chat.spacing': [0, 32],
-};
-const ENUM = {
-  'theme.mode': ['dark', 'light', 'midnight', 'auto'], 'theme.accentType': ['solid', 'gradient'], 'theme.panelType': ['solid', 'gradient'],
-  'bg.type': ['mesh', 'photo', 'image', 'gradient', 'solid'], 'bg.mesh': MESH_WALLPAPERS.map((m) => m.id), 'bg.photo': PHOTO_WALLPAPERS.map((p) => p.id),
-  'rain.preset': ['rain', 'drizzle', 'storm', 'fallout', 'custom'], 'rain.fps': [30, 60], 'glass.style': ['off', 'liquid'],
-};
-const COLORS = new Set(['theme.accent', 'theme.accent2', 'theme.panelColor', 'theme.panelColor2', 'theme.textColor', 'bg.color', 'bg.gradient.c1', 'bg.gradient.c2']);
-const HEX = /^#[0-9a-f]{6}$/i; const FONT = /^[\w .+-]{1,60}$/; const IMAGE = /^(\/uploads\/[\w.-]+|\/img\/[\w./-]+|https?:\/\/[^\s"'()\\]+)$/i;
-
-function checkValue(path, v, def) {
-  if (path in ENUM) return ENUM[path].includes(v) ? v : undefined;
-  if (COLORS.has(path)) return v === null ? (def === null ? null : undefined) : (typeof v === 'string' && HEX.test(v) ? v.toLowerCase() : undefined);
-  if (path === 'bg.image') return v === null || (typeof v === 'string' && IMAGE.test(v)) ? v : undefined;
-  if (/^fonts\.(ui|chat|code)$/.test(path)) return v === null || (typeof v === 'string' && FONT.test(v)) ? v : undefined;
-  if (typeof def === 'boolean') return typeof v === 'boolean' ? v : undefined;
-  if (typeof def === 'number') { const r = RANGE[path]; return r && typeof v === 'number' && Number.isFinite(v) ? Math.min(r[1], Math.max(r[0], v)) : undefined; }
-  return undefined;
-}
-export function checkedLook(data) {
-  const out = {};
-  for (const sec of SECTIONS) {
-    const src = data?.[sec]; const def = DEFAULT_SETTINGS[sec]; if (!src || typeof src !== 'object') continue;
-    const o = {};
-    for (const [k, v] of Object.entries(src)) {
-      if (!Object.hasOwn(def, k) || k === 'library' || (sec === 'motion' && k === 'reduce')) continue;
-      if (def[k] && typeof def[k] === 'object') {   // bg.gradient
-        const g = {};
-        for (const [gk, gv] of Object.entries(v && typeof v === 'object' ? v : {})) { if (!Object.hasOwn(def[k], gk)) continue; const c = checkValue(`${sec}.${k}.${gk}`, gv, def[k][gk]); if (c !== undefined) g[gk] = c; }
-        if (Object.keys(g).length) o[k] = g;
-      } else { const c = checkValue(`${sec}.${k}`, v, def[k]); if (c !== undefined) o[k] = c; }
-    }
-    if (sec === 'bg' && o.type === 'image' && !o.image) delete o.type;   // "my own wallpaper" without a usable picture would just blank yours
-    if (Object.keys(o).length) out[sec] = o;
-  }
-  return out;
-}
+ * Whatever arrives in a message is untrusted: every setting must exist, have the right kind of value and sit inside what the settings sliders allow (theme-data.js). */
+export const checkedLook = (data) => checkLook(data, { sections: CARD_SECTIONS });
 
 /* ------------------------------------------------------------------ apply / undo */
 const same = (a, b) => (typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-6 : JSON.stringify(a) === JSON.stringify(b));

@@ -523,8 +523,10 @@ async function main() {
   const src = (await api('POST', `/channels/${bgText.id}/messages`, PL.token, { content: 'look at this' })).body;
   r = await api('POST', `/channels/${ach.id}/messages`, A.token, { content: 'fyi', forward: { channelId: bgText.id, messageId: src.id } }); const FW = r.body;
   ok(r.status === 200 && FW.content === 'fyi' && FW.forward?.content === 'look at this' && FW.forward.from.includes('Bot Guild') && FW.forward.authorName === 'Plainy', 'a message can be forwarded to another channel, with a note');
+  ok(FW.forward.channelId === bgText.id && FW.forward.messageId === src.id && FW.forward.serverId === BG.id, 'a forward remembers where the original is (channel, message and server), so its footer can link there');
   r = await api('POST', `/channels/${bgText.id}/messages`, PL.token, { forward: { channelId: ach.id, messageId: FW.id } });
   ok(r.status === 200 && r.body.forward.content === 'look at this' && r.body.forward.from.includes('Bot Guild'), 'forwarding a forwarded message passes on the original');
+  ok(r.body.forward.channelId === bgText.id && r.body.forward.messageId === src.id && r.body.forward.serverId === BG.id, '… and its link still points at the original, not at the copy in between');
   r = await api('POST', `/channels/${ach.id}/messages`, CO.token, { forward: { channelId: bgText.id, messageId: src.id } }); ok(r.status === 404, 'a message from a channel you can’t see can’t be forwarded');
 
   /* ---------------------------------------------------------------- reaction roles */

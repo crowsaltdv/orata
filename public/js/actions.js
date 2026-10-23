@@ -1,5 +1,5 @@
 // Orata — user-facing actions (messages, read state, navigation helpers).
-import { state, set, getChannel, toast, updateSettings, goDm, addUsers, unreadInfo } from '/js/store.js';
+import { state, set, getChannel, toast, updateSettings, goDm, goChannel, addUsers, unreadInfo } from '/js/store.js';
 import { api } from '/js/api.js';
 import { cmpId, debounce, uid } from '/js/lib.js';
 import { playSound } from '/js/sound.js';
@@ -66,6 +66,19 @@ export async function jumpToMessage(chId, mid) {
   const e = getEntry(chId);
   if (!e.list.some((m) => m.id === mid)) await loadMessages(chId, { around: mid, force: true });
   set({ jump: { id: mid, ts: Date.now(), chId } });
+}
+/** Opens a message in its own channel (a forward's "from" line): loads the messages around it, goes there and scrolls to it.
+ *  Says why not when it can't: 'hidden' (you can't see that channel), 'gone' (the message was deleted) or 'error' (it couldn't be loaded). */
+export async function openMessage(chId, mid) {
+  const ch = getChannel(chId); if (!ch) return 'hidden';
+  const t0 = Date.now();
+  await loadMessages(chId, { around: mid, force: true });
+  const e = getEntry(chId);
+  if (!(e.fresh >= t0)) return 'error';   // (loadMessages stamps `fresh` only when it worked)
+  if (!e.list.some((m) => m.id === mid)) return 'gone';
+  if (ch.serverId) goChannel(ch.serverId, chId); else goDm(chId);
+  set({ jump: { id: mid, ts: Date.now(), chId } });
+  return 'ok';
 }
 
 /* ------------------------------------------------------------ sending */

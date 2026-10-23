@@ -11,6 +11,8 @@ import { chooseAndUploadImage, uploadGifFrom } from '/js/imageutil.js';
 import { openPicker } from '/js/pickers.js';
 import { ProfileCard, Banner } from '/js/profile.js';
 import { ProfileStyleEditor } from '/js/profile-style.js';
+import { sanitizeProfileStyle } from '/js/profile-data.js';
+import { saveCurrentLook, openThemes } from '/js/themes.js';
 import { ServerTag } from '/js/server-tag.js';
 import { CloakPage } from '/js/cloak.js';
 import { ThemePage, WallpaperPage, EffectsPage, FontsPage, ChatPage, SToggle, SSlider } from '/js/settings-appearance.js';
@@ -75,6 +77,7 @@ function ProfilePage() {
   const me = useSel((s) => s.me);
   const orig = { displayName: me.displayName, pronouns: me.pronouns || '', bio: me.bio || '', avatar: me.avatar, banner: me.banner, bannerColor: me.bannerColor || '#6d28d9', accentColor: me.accentColor || null, profile: me.profile || null, tagServer: me.tagServer || '' };
   const [d, setD] = useState(orig); const [busy, setBusy] = useState(false); const [up, setUp] = useState(null);
+  useEffect(() => { setD((p) => ({ ...p, profile: me.profile || null })); }, [JSON.stringify(me.profile || null)]);   // a profile theme applied from the library lands in the editor too
   const dirty = JSON.stringify(d) !== JSON.stringify(orig);
   const up1 = (k, v) => setD((p) => ({ ...p, [k]: v }));
   const img = async (key, opts) => { setUp(key); try { const u = await chooseAndUploadImage(opts); if (u) up1(key, u); } catch (e) { toast(errMsg(e), 'error'); } setUp(null); };
@@ -119,7 +122,7 @@ function ProfilePage() {
         <div class="pe-btns"><${Btn} variant="primary" loading=${up === 'banner'} icon="image" onClick=${() => img('banner', { aspect: 3, out: 960, title: 'Banner', allowGif: true })}>${t('Change Banner')}<//>${state.gifOk !== false ? html`<${Btn} icon="sticker" disabled=${up === 'banner'} onClick=${(e) => gifBanner(e.currentTarget)}>${t('Choose a GIF')}<//>` : null}${d.banner ? html`<${Btn} variant="ghost" onClick=${() => up1('banner', null)}>${t('Remove')}<//>` : null}<span class="pe-color"><${ColorSwatch} value=${d.bannerColor} onChange=${(c) => up1('bannerColor', c)} label=${t('First banner color')} size=${34} /><small>${t('First color')}</small></span><span class="pe-color"><${ColorSwatch} value=${d.accentColor || '#ec4899'} onChange=${(c) => up1('accentColor', c)} label=${t('Second banner color')} size=${34} /><small>${t('Second color')}</small>${d.accentColor ? html`<button type="button" class="link-btn" onClick=${() => up1('accentColor', null)}>${t('Reset')}</button>` : null}</span></div>
         <p class="text-muted" style="font-size:13px;margin:10px 0 0">${t('Upload a GIF or pick one from KLIPY — animated banners play everywhere.')}</p>
       <//>
-      <${Section} title=${t('Profile style')} desc=${t('Colors, outline, fonts, name style and effects for your profile. The preview updates as you go.')}>
+      <${Section} title=${t('Profile style')} desc=${t('Colors, outline, fonts, name style and effects for your profile. The preview updates as you go.')} action=${html`<span class="tlib-actions"><${Btn} size="sm" icon="plus" onClick=${() => saveCurrentLook('profile', sanitizeProfileStyle(d.profile))}>${t('Save to library')}<//><${Btn} size="sm" icon="folder" onClick=${() => openThemes('library', 'profile')}>${t('Library')}<//></span>`}>
         <${ProfileStyleEditor} value=${d.profile} change=${changeProfile} me=${me} />
       <//>
     </div>

@@ -217,6 +217,7 @@ gateway.on('presence_update', ({ userId, status, customStatus, listening }) => {
 });
 gateway.on('user_update', ({ user }) => addUsersNotify([user]));
 gateway.on('self_update', ({ user }) => { set({ me: { ...state.me, ...user } }); rememberAccount(state.me); addUsersNotify([user]); });
+gateway.on('themes_update', () => set({ themesRev: state.themesRev + 1 }));   // another device changed the theme library (themes.js reloads it when open)
 gateway.on('settings_update', ({ settings }) => { const next = deepMerge(DEFAULT_SETTINGS, migrateSettings(settings)); set({ settings: next }); ls('settings', null, next); });
 function addUsersNotify(list) { addUsers(list); notify(); }
 

@@ -1,4 +1,4 @@
-// Orata — server rail (left-most column): music, home, servers and server folders.
+// Orata — server rail (left-most column): Theme Discovery, music, home, servers and server folders.
 import { html, useState, useMemo, cx, memo } from '/js/lib.js';
 import { state, useSel, go, goChannel, openModal, closeModal, openContext, updateSettings, serverUnread, unreadInfo, hasPerm, toast, shallowArrEq } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
@@ -195,6 +195,7 @@ export function ServerRail() {
   const route = useSel((s) => s.route.serverId);
   const view = useSel((s) => s.route.view);
   const musicOpen = view === 'music'; const playing = useSel((s) => s.music.playing);
+  const themesOpen = view === 'themes';
   const staff = useSel((s) => !!s.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev'));   // the Staff page (staff.js) for Orata staff
   const layout = useMemo(() => railLayout(servers, order, folders), [servers, order, folders]);
   const badges = useSel((s) => Object.keys(s.servers).map((id) => { const u = serverUnread(id); return `${id}:${u.unread ? 1 : 0}:${u.mentions}`; }).join('|'));
@@ -227,6 +228,10 @@ export function ServerRail() {
     end() { setDrag(null); setOver(null); },
   };
   return html`<nav class="rail panel" aria-label="Servers">
+    <div class=${cx('rail-item', themesOpen && 'active')}>
+      <span class="rail-pill"></span>
+      <button type="button" class="rail-btn themes glass glass-rail" data-tip=${t('Theme Discovery')} data-tip-pos="right" aria-label=${t('Theme Discovery')} aria-pressed=${themesOpen} onClick=${() => go('/themes')}><${Icon} name="paintbrush" size=${24} /></button>
+    </div>
     <div class=${cx('rail-item', musicOpen && 'active')}>
       <span class="rail-pill"></span>
       <button type="button" class=${cx('rail-btn music glass glass-rail', playing && 'playing')} data-tip=${t('Music')} data-tip-pos="right" aria-label=${t('Music')} aria-pressed=${musicOpen} onClick=${openMusic}>
