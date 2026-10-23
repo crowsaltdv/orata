@@ -7,6 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
+import sharp from 'sharp';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-test-'));
@@ -144,6 +145,9 @@ async function main() {
   const small = await fetch(`${base}/thumbs/96/${r.body.url.slice('/uploads/'.length)}`);
   ok(small.status === 200 && small.headers.get('content-type') === 'image/webp', 'an uploaded picture has a small copy for Lite mode');
   ok((await fetch(`${base}/thumbs/97/${r.body.url.slice('/uploads/'.length)}`)).status === 404 && (await fetch(`${base}/thumbs/96/..%2Fdb.json`)).status === 404, '… only at the set sizes, and only for uploads');
+  r = await api('POST', '/upload', A, Buffer.from('R0lGODlhAQABAIAAAP8AAAAA/yH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAAQABAAACAkQBACH5BAAKAAAALAAAAAABAAEAAAICTAEAOw==', 'base64'), { 'x-filename': 'blink.gif', 'content-type': 'image/gif' });   // two frames, red then blue
+  const smallGif = Buffer.from(await (await fetch(`${base}/thumbs/96/${r.body.url.slice('/uploads/'.length)}`)).arrayBuffer());
+  ok((await sharp(smallGif, { animated: true }).metadata()).pages === 2, '… and an animated GIF (avatar, banner…) stays animated');
   ok((await (await fetch(base + '/channels/@me')).text()).includes('<link rel="modulepreload" href="/js/app.js"'), 'the page asks for every start-up module at once');
   r = await api('GET', '/gifs?mode=trending&per_page=4', A);
   ok(r.status === 200 && r.body.items?.length > 0, 'GIF trending via KLIPY', JSON.stringify(r.body).slice(0, 120));

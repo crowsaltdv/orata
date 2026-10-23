@@ -64,13 +64,14 @@ const THUMB_W = new Set([96, 256, 480]); const THUMBS = path.join(os.tmpdir(), '
 app.get('/thumbs/:w/:name', async (req, res) => {
   const w = Number(req.params.w); const name = String(req.params.name);
   if (!THUMB_W.has(w) || !/^[A-Za-z0-9_.-]{1,120}\.(png|jpe?g|gif|webp|avif)$/i.test(name)) return res.status(404).end();
-  const out = path.join(THUMBS, `${w}-${name}.webp`);
+  const out = path.join(THUMBS, `${w}-${name}.a.webp`);   // .a: animated GIFs keep their frames (older copies were stills)
   try {
     if (!fs.existsSync(out)) {
       if (pg) await restoreUpload(name);   // with Postgres the disk is only a cache
       const src = path.join(UPLOAD_DIR, name); if (!fs.existsSync(src)) return res.status(404).end();
       fs.mkdirSync(THUMBS, { recursive: true });
-      await sharp(src, { limitInputPixels: 50_000_000 }).rotate().resize({ width: w, withoutEnlargement: true }).webp({ quality: 55 }).toFile(out);
+      const make = (animated) => sharp(src, { animated, limitInputPixels: 50_000_000 }).rotate().resize({ width: w, withoutEnlargement: true }).webp({ quality: 55 }).toFile(out);
+      await make(true).catch(() => make(false));   // a GIF with too many frames to redo stays a still
     }
     res.set({ 'Cache-Control': 'public, max-age=2592000, immutable', 'Content-Security-Policy': "sandbox; default-src 'none'", 'Cross-Origin-Resource-Policy': 'cross-origin' }).type('image/webp').sendFile(out);
   } catch { res.status(404).end(); }

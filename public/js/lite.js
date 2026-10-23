@@ -17,5 +17,5 @@ export function setMode(mode, prefer = null) {
 }
 export const modeChosenThisVisit = () => { try { return !!sessionStorage.getItem('orate:modeChosen'); } catch { return true; } };
 
-/** In Lite mode an uploaded picture comes as a smaller, lighter copy (server/index.js /thumbs; an animated GIF becomes a still). */
+/** In Lite mode an uploaded picture comes as a smaller, lighter copy (server/index.js /thumbs; animated GIFs stay animated). */
 export const thumb = (url, w) => (LITE && /^\/uploads\/[A-Za-z0-9_.-]+\.(png|jpe?g|gif|webp|avif)$/i.test(url || '') ? `/thumbs/${w}/${url.slice(9)}` : url);

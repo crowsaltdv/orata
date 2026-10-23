@@ -54,7 +54,7 @@ export function StatusDot({ status = 'offline', size = 10, class: c, ring = true
 }
 export function Avatar({ user, userId, src, name, size = 40, status, class: c, onClick, onContextMenu, speaking, title, square, children }) {
   const u = user || (userId ? state.users[userId] : null);
-  const url = thumb(src !== undefined ? src : u?.avatar, size > 64 ? 256 : 96);   // Lite mode: a small still copy
+  const url = thumb(src !== undefined ? src : u?.avatar, size > 64 ? 256 : 96);   // Lite mode: a smaller copy
   const id = u?.id || name || '0';
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [url]);

@@ -5,7 +5,6 @@ import { useSel, toast } from '/js/store.js';
 import { chooseAndUploadImage } from '/js/imageutil.js';
 import { Btn, Segmented, Dropdown, Slider, Toggle, ColorSwatch } from '/js/ui.js';
 import { loadFont } from '/js/theme.js';
-import { LITE } from '/js/lite.js';
 import { t } from '/js/i18n.js';
 import { PROFILE_FONTS, EFFECTS, OUTLINE_STYLES, PROFILE_DEFAULTS, fontFamily, effectColors } from '/js/profile-data.js';
 
@@ -90,7 +89,7 @@ export function CardDecor({ profile: p }) {
 /** Loads the fonts a profile uses (once per page). */
 export function useProfileFonts(p) {
   const a = p?.fonts?.name; const b = p?.fonts?.text;
-  useEffect(() => { if (LITE) return; for (const id of [a, b]) { const f = fontFamily(id); if (f) loadFont(f); } }, [a, b]);   // Lite mode downloads no fonts
+  useEffect(() => { for (const id of [a, b]) { const f = fontFamily(id); if (f) loadFont(f); } }, [a, b]);
 }
 
 /* ------------------------------------------------------------------ editor */
