@@ -745,5 +745,12 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
   background: rgb(var(--panel-rgb)); box-shadow: 0 0 0 2px rgb(var(--panel-rgb)); color: var(--text-2); font-size: 11.5px; font-weight: 700; }
 .viewers-bar { position: absolute; bottom: 100%; left: 26px; z-index: 3; margin-bottom: 6px; padding: 3px 4px 3px 9px; display: flex; align-items: center; gap: 7px; border-radius: 999px;
   background: rgb(var(--panel-rgb) / .72); backdrop-filter: blur(10px); color: var(--text-3); animation: pop-in .2s ease; }   /* left: the last message's "seen" faces are on the right */
-.seen-row { justify-content: flex-end; padding: 1px 18px 4px; }
+.chat-col:has(.viewers-bar) .msg-end { height: 36px; }   /* room for it under the last message while anyone is looking (and none when nobody is) */
+/* the "seen" faces sit on the bottom-right corner of the message they belong to, taking no room of their own (a gap under it split a run of messages) */
+.seen-row { height: 0; padding: 0 16px; justify-content: flex-end; align-items: flex-end; position: relative; z-index: 2; transform: translateY(-4px); }
 .seen-row .face { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)); }
+/* Staff → Badges: give a badge to many people at once (staff.js) */
+.bulk-badges { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.bulk-row { display: flex; gap: 14px; flex-wrap: wrap; } .bulk-row > .field { flex: 1 1 220px; }
+.bulk-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--border); }
+.bulk-count { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 14px; }

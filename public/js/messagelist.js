@@ -133,7 +133,7 @@ export function MessageList({ chId }) {
       ${entry?.loading && list.length ? html`<div class="msg-loading-more"><${Spinner} size=${22} /></div>` : null}
       ${shown.map((r) => r.type === 'date' ? html`<div class="date-divider" key=${r.key}><span>${formatDay(r.ts)}</span></div>`
         : r.type === 'new' ? html`<div class="new-divider" key=${r.key}><span>${t('NEW')}</span></div>`
-        : r.type === 'seen' ? html`<${Faces} key=${r.key} ids=${r.ids} max=${8} size=${16} tip=${(n) => `${t('Seen by')} ${n}`} class="seen-row" />`
+        : r.type === 'seen' ? html`<${Faces} key=${r.key} ids=${r.ids} max=${8} size=${18} tip=${(n) => `${t('Seen by')} ${n}`} class="seen-row" />`
           : html`<${Message} key=${r.key} m=${r.m} head=${r.head} chId=${chId} editing=${editing === r.m.id} replyingTo=${replyTo === r.m.id} hour12=${hour12} showEmbeds=${embeds} compact=${compact} />`)}
       ${entry?.error ? html`<div class="msg-error"><${Icon} name="alert-circle" size=${18} /> ${entry.error} <button type="button" class="link-btn" onClick=${() => loadMessages(chId, { force: true })}>Retry</button></div>` : null}
       <div class="msg-end"></div>

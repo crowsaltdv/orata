@@ -196,7 +196,7 @@ export function ServerRail() {
   const view = useSel((s) => s.route.view);
   const musicOpen = view === 'music'; const playing = useSel((s) => s.music.playing);
   const themesOpen = view === 'themes';
-  const staff = useSel((s) => !!s.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev'));   // the Staff page (staff.js) for Orata staff
+  const staff = useSel((s) => !!s.me?.founder || !!s.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev'));   // the Staff page (staff.js) for Orata staff
   const layout = useMemo(() => railLayout(servers, order, folders), [servers, order, folders]);
   const badges = useSel((s) => Object.keys(s.servers).map((id) => { const u = serverUnread(id); return `${id}:${u.unread ? 1 : 0}:${u.mentions}`; }).join('|'));
   const dmBadge = useSel((s) => Object.values(s.dms).reduce((n, c) => { const u = unreadInfo(c.id); return n + (u.mentions || (u.unread && !s.settings.mutedChannels[c.id] ? 1 : 0)); }, 0));

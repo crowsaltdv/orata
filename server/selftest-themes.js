@@ -95,6 +95,7 @@ async function main() {
   j.users[A.user.id].username = 'oratedev'; j.users[A.user.id].badges = ['dev']; j.users[X.user.id].badges = ['dev']; j.users[S.user.id].badges = ['staff'];
   j.users[C.user.id].badges = ['creator', 'early'];   // the old Creator badge: taken off at start
   delete j.earlySeedV1;   // as if these accounts were here before the Early Supporter badge went out
+  j.users[D.user.id].createdAt = Date.parse('2025-01-15T12:00:00Z');   // dan joined long ago (badges by join date, below)
   fs.writeFileSync(path.join(data, 'db.json'), JSON.stringify(j)); startServer(); await ready();
 
   console.log('\nEarly Supporter for everyone');
@@ -103,6 +104,26 @@ async function main() {
   ok(((eb = await api('GET', `/users/${C.user.id}`, E.token)).body.user || eb.body).badges.filter((b) => b.id === 'early').length === 1, '… once (someone who had it already doesn’t get two)');
   const late = await register('latecomer'); eb = await api('GET', `/users/${late.user.id}`, E.token);
   ok(!((eb.body.user || eb.body).badges || []).some((b) => b.id === 'early'), '… and accounts made afterwards don’t get it by themselves');
+
+  console.log('\nBadges in bulk (Staff → Badges) and who opens the Staff page');
+  const badgesOf = async (u) => { const x = await api('GET', `/users/${u.user.id}`, E.token); return ((x.body.user || x.body).badges || []).map((b) => b.id); };
+  eb = await api('POST', '/badges/bulk', S.token, { badge: 'bug', who: {} }); ok(eb.status === 403, 'only developers give badges in bulk (as one at a time)');
+  eb = await api('POST', '/badges/bulk', X.token, { badge: 'bug', who: {}, dryRun: true });
+  ok(eb.status === 200 && eb.body.matched >= 8 && eb.body.changed === eb.body.matched && !(await badgesOf(N)).includes('bug'), 'a dry run counts everyone it would change, and changes nothing');
+  eb = await api('POST', '/badges/bulk', X.token, { badge: 'bug', who: { joinedBefore: '2025-06-01' } });
+  ok(eb.body.matched === 1 && eb.body.changed === 1 && (await badgesOf(D)).includes('bug') && !(await badgesOf(N)).includes('bug'), 'by join date: only who joined before it gets the badge');
+  eb = await api('POST', '/badges/bulk', X.token, { badge: 'bug', who: { joinedAfter: '2025-06-01' }, dryRun: true }); ok(eb.body.matched >= 7, '… and on or after it, everyone else');
+  eb = await api('POST', '/badges/bulk', X.token, { badge: 'bug', who: { joinedBefore: '2025-06-01' } }); ok(eb.body.changed === 0, 'giving it again changes no one');
+  const own = await api('POST', '/servers', C.token, { name: 'Cora’s place' });
+  eb = await api('POST', '/badges/bulk', X.token, { badge: 'artist', who: { serverId: own.body.id } }); ok(eb.body.matched === 1 && (await badgesOf(C)).includes('artist'), 'by server: its members get it');
+  eb = await api('POST', '/badges/bulk', X.token, { badge: 'bug', take: true, who: { hasBadge: 'bug' } }); ok(eb.body.changed === 1 && !(await badgesOf(D)).includes('bug'), 'take it away from whoever has a badge');
+  eb = await api('POST', '/badges/bulk', X.token, { badge: 'staff', who: {}, dryRun: true }); ok(eb.status === 403, 'the Staff badge stays the founders’ to give');
+  eb = await api('POST', '/badges/bulk', A.token, { badge: 'dev', take: true, who: {}, dryRun: true }); ok(eb.status === 200 && eb.body.changed === 1, '… and a founder taking the Dev badge from everyone would keep their own');
+  eb = await api('POST', '/badges/bulk', X.token, { badge: 'bug', who: { joinedBefore: 'not a date' } }); ok(eb.status === 400, 'a bad date is refused');
+  eb = await api('GET', '/staff/log', S.token); ok(eb.body.log.some((x) => x.action === 'bulk_badge_give' && x.badge === 'Bug Hunter' && x.count === 1) && eb.body.log.some((x) => x.action === 'bulk_badge_take'), 'it goes in the staff log');
+  eb = await api('GET', '/ready', A.token); const xr = await api('GET', '/ready', X.token);
+  ok(eb.body.user.founder === true && xr.body.user.founder === false, 'the page is told who the founders are (staff even without the badge)');
+  ok((await api('GET', '/staff/overview', S.token)).status === 200 && (await api('GET', '/staff/overview', X.token)).status === 200 && (await api('GET', '/staff/overview', N.token)).status === 403, 'the Staff badge and the Dev badge both open the Staff page; others can’t');
 
   /* ---------------------------------------------------------------- the Creator badge is gone */
   console.log('\nNo more Creator badge');

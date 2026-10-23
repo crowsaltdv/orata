@@ -231,7 +231,7 @@ gateway.on('presence_update', ({ userId, status, customStatus, listening }) => {
   const u = state.users[userId]; if (!u) return;
   set({ users: { ...state.users, [userId]: { ...u, status, customStatus, ...(listening !== undefined ? { listening } : null) } } });
 });
-gateway.on('user_update', ({ user }) => addUsersNotify([user]));
+gateway.on('user_update', ({ user }) => { if (user.id === state.me?.id && user.badges) set({ me: { ...state.me, badges: user.badges } }); addUsersNotify([user]); });   // your badges changed (the Staff page follows them)
 gateway.on('self_update', ({ user }) => { set({ me: { ...state.me, ...user } }); rememberAccount(state.me); addUsersNotify([user]); });
 gateway.on('themes_update', () => set({ themesRev: state.themesRev + 1 }));   // another device changed the theme library (themes.js reloads it when open)
 gateway.on('settings_update', ({ settings }) => { const next = deepMerge(DEFAULT_SETTINGS, migrateSettings(settings)); set({ settings: next }); ls('settings', null, next); });

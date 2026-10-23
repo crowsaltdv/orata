@@ -12,7 +12,7 @@ import {
   ensureBot, createServer, addMember, PERMS, DEFAULT_PERMS, effectiveStatus, voice, lastMessageId, memberView, noteDevice, deviceHashesOf, requestHashes, randomAvatarBg, CUSTOM_EMOJI, findEmoji, customEmojisIn, postView, isOwner, audit,
 } from './core.js';
 import { automodRule } from './automod.js';
-import { nameProblem } from './names.js';
+import { nameProblem, isFounder } from './names.js';
 import { mountApplications, publicServerInfo, canReview, orbitTells } from './applications.js';
 import { giveRole } from './orbit-plus.js';
 import { mountStaff, accountBlock, noteNewAccount } from './staff.js';
@@ -165,7 +165,7 @@ export function buildReady(user) {
   const voiceStates = [];
   for (const [channelId, room] of voice) { const ch = db.channels[channelId]; if (ch && canView(user.id, ch)) for (const st of room.values()) voiceStates.push(st); }
   return {
-    user: selfUser(user),
+    user: { ...selfUser(user), founder: isFounder(user) },   // founders are staff even without the badge (names.js isStaff)
     servers: servers.map((s) => serverView(s, user.id)),
     dms: dms.map((c) => channelView(c)),
     users: usersFor([...userIds]),

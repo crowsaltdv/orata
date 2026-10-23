@@ -135,6 +135,7 @@ async function anotherInstance() {
 async function reload() {
   const st = await pg.loadState().catch(() => null); if (!st) return false;
   adopt(st.json); pgVersion = st.version; dirty = false; clearTimeout(timer); timer = null;
+  for (const fn of onLoad) fn();   // the start-up fixes again, on the newer data (they save if they changed anything)
   for (const uid of [...conns.keys(), ...gatedConns.keys()]) closeConns(uid, 4000, 'reloaded');   // their apps reconnect and load the newer data
   return true;
 }
@@ -148,6 +149,11 @@ function adopt(json) {
   }
   indexUsers();
 }
+/** Start-up fixes of the data (migrateDb, badges.js): run now, and again whenever newer data from another instance is loaded (a deploy's old
+ *  version still saving), which drops this process's unsaved changes — those fixes included, so the Early Supporter badge never went out.
+ *  Each must do nothing the second time. */
+const onLoad = [];
+export function afterLoad(fn) { onLoad.push(fn); fn(); }
 if (pg) {
   // A new deploy's first minutes: while this process has nothing unsaved, pick up the old version's saves at once, so its own changes
   // land on current data instead of conflicting (and being dropped) later
@@ -168,7 +174,7 @@ if (pg) {
   }, 30_000).unref();
 }
 process.on('exit', () => { if (!pg) flush(); });
-migrateDb();
+afterLoad(migrateDb);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {   // flush, then leave (at most ~8 s for a slow database)
   const bye = setTimeout(() => process.exit(0), 8000); bye.unref();
   Promise.resolve(flush()).catch(() => {}).finally(() => process.exit(0));

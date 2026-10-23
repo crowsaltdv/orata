@@ -2,8 +2,9 @@
 // The catalog lives in db.badges: the built-in ones below (rewritten on every start, so they follow this file) and custom ones the developers make.
 // Whoever holds the "dev" badge is a developer: they can give and take anyone's badges and create or delete custom ones — except the staff and
 // dev badges themselves, which only the two founders (oratedev and Orate_dev) can hand out or take away.
-import { db, save, newId, bad, forbidden, notFound, byUsername, emitTo, relatedUserIds, publicUser, ORATE_DEV_ID } from './core.js';
+import { db, save, newId, bad, forbidden, notFound, byUsername, emitTo, relatedUserIds, publicUser, ORATE_DEV_ID, afterLoad } from './core.js';
 import { isFounder } from './names.js';
+import { staffLog } from './staff.js';
 
 const BUILTIN = [
   { id: 'dev', name: 'Orata Developer', icon: 'code', color: '#5865f2' },
@@ -15,22 +16,26 @@ const BUILTIN = [
   { id: 'artist', name: 'Artist', icon: 'palette', color: '#f97316' },
   { id: 'partner', name: 'Partner', icon: 'award', color: '#a78bfa' },
 ];
-const before = JSON.stringify(db.badges || null);
-db.badges ||= {};
-for (const b of BUILTIN) db.badges[b.id] = { ...b, builtin: true };
-let seeded = false;
-// The Creator badge is gone (anyone can send a theme to Discovery now, and Orata staff approve each one): off the catalog and off everyone who had it
-if (db.badges.creator?.builtin) delete db.badges.creator;
-for (const u of Object.values(db.users)) if (u.badges?.includes('creator') && !db.badges.creator) { u.badges = u.badges.filter((b) => b !== 'creator'); seeded = true; }
-if (!db.badgeSeedV1) {   // once: the first two developers
-  for (const id of [byUsername.get('oratedev'), ORATE_DEV_ID]) { const u = db.users[id]; if (u && !u.badges?.includes('dev')) (u.badges ||= []).push('dev'); }
-  db.badgeSeedV1 = true; seeded = true;
+/** The catalog and the one-time hand-outs. Runs at start and again whenever newer data is loaded from another instance (afterLoad in core.js). */
+function seed() {
+  const before = JSON.stringify(db.badges || null);
+  db.badges ||= {};
+  for (const b of BUILTIN) db.badges[b.id] = { ...b, builtin: true };
+  let seeded = false;
+  // The Creator badge is gone (anyone can send a theme to Discovery now, and Orata staff approve each one): off the catalog and off everyone who had it
+  if (db.badges.creator?.builtin) delete db.badges.creator;
+  for (const u of Object.values(db.users)) if (u.badges?.includes('creator') && !db.badges.creator) { u.badges = u.badges.filter((b) => b !== 'creator'); seeded = true; }
+  if (!db.badgeSeedV1) {   // once: the first two developers
+    for (const id of [byUsername.get('oratedev'), ORATE_DEV_ID]) { const u = db.users[id]; if (u && !u.badges?.includes('dev')) (u.badges ||= []).push('dev'); }
+    db.badgeSeedV1 = true; seeded = true;
+  }
+  if (!db.earlySeedV1) {   // once: everyone with an account now is an Early Supporter (accounts made later don't get it by themselves)
+    for (const u of Object.values(db.users)) if (!u.bot && !u.deleted && !u.badges?.includes('early')) (u.badges ||= []).push('early');
+    db.earlySeedV1 = true; seeded = true;
+  }
+  if (seeded || JSON.stringify(db.badges) !== before) save();
 }
-if (!db.earlySeedV1) {   // once: everyone with an account now is an Early Supporter (accounts made later don't get it by themselves)
-  for (const u of Object.values(db.users)) if (!u.bot && !u.deleted && !u.badges?.includes('early')) (u.badges ||= []).push('early');
-  db.earlySeedV1 = true; seeded = true;
-}
-if (seeded || JSON.stringify(db.badges) !== before) save();
+afterLoad(seed);
 
 export const isDev = (u) => !!u?.badges?.includes('dev');
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -65,5 +70,26 @@ export function mountBadges(r, { h }) {
     for (const id of ['staff', 'dev']) if (want.includes(id) !== !!u.badges?.includes(id) && !isFounder(req.user)) throw forbidden(`Only oratedev and Orate_dev can give or take the ${db.badges[id].name} badge`);
     u.badges = want; save(); tell(u, req.user.id);
     res.json(publicUser(u));
+  }));
+  /** Many people at once (Staff → Badges): everyone, or by join date (on or after / before, yyyy-mm-dd UTC), the members of a server, or
+   *  whoever has another badge. `take` takes it away instead. `dryRun` only counts. */
+  r.post('/badges/bulk', h(async (req, res) => {
+    dev(req); const b = req.body || {}; const w = b.who || {}; const take = !!b.take;
+    const badge = db.badges[String(b.badge || '')]; if (!badge) throw bad('Pick a badge');
+    if (['staff', 'dev'].includes(badge.id) && !isFounder(req.user)) throw forbidden(`Only oratedev and Orate_dev can give or take the ${badge.name} badge`);
+    const date = (v) => (v ? Date.parse(String(v)) : null); const after = date(w.joinedAfter); const before = date(w.joinedBefore);
+    if (Number.isNaN(after) || Number.isNaN(before)) throw bad('Pick a valid date');
+    const server = w.serverId ? db.servers[String(w.serverId)] : null; if (w.serverId && !server) throw notFound('Unknown server');
+    const has = w.hasBadge ? String(w.hasBadge) : null; if (has && !db.badges[has]) throw bad('Unknown badge');
+    const people = Object.values(db.users).filter((u) => !u.bot && !u.deleted && (after === null || (u.createdAt || 0) >= after) && (before === null || (u.createdAt || 0) < before)
+      && (!server || server.members[u.id]) && (!has || u.badges?.includes(has)));
+    const change = people.filter((u) => !!u.badges?.includes(badge.id) === take && !(take && badge.id === 'dev' && u.id === req.user.id));   // (never your own dev badge)
+    if (!b.dryRun && change.length) {
+      // ponytail: tells only each person's own sessions; everyone else sees the badge the next time they load the profile
+      for (const u of change) { u.badges = take ? u.badges.filter((x) => x !== badge.id) : [...(u.badges || []), badge.id]; emitTo([u.id], 'user_update', { user: publicUser(u) }); }
+      staffLog(req.user.id, take ? 'bulk_badge_take' : 'bulk_badge_give', null, '', { badge: badge.name, count: change.length });
+      save();
+    }
+    res.json({ matched: people.length, changed: change.length });
   }));
 }

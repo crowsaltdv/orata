@@ -165,6 +165,11 @@ async function main() {
     ok(!!await until(() => hasUser('frank')) && await hasUser('erin') && fresh.exited === null && /keeping up with its data/.test(fresh.out),
       'a just-started instance (a new deploy) keeps up with the old one’s saves instead of quitting, and its own changes stick', fresh.out.slice(-300));
     r = await fresh.api('POST', '/auth/check', null, { username: 'erin' }); ok(r.body?.username === false, '… so it knows what the old one saved');
+    // the old version saves data without a start-up fix the new one made (how the Early Supporter badge got lost): the new one makes it again
+    { const st = await readState(); delete st.db.earlySeedV1; for (const u of Object.values(st.db.users)) u.badges = (u.badges || []).filter((b) => b !== 'early');
+      await sql('UPDATE orate_state SET data = $1, version = version + 1 WHERE id = 1', [zlib.gzipSync(JSON.stringify(st.db))]); }
+    ok(!!await until(async () => { const s = await readState(); return s?.db.earlySeedV1 && Object.values(s.db.users).filter((u) => !u.bot && !u.deleted).every((u) => u.badges?.includes('early')); }),
+      '… and its start-up fixes (like the Early Supporter badge) are made again on the data it loads, instead of being lost with it');
     old.stop(); await until(() => old.exited !== null);
     await reg(fresh, 'gina');
     ok(!!await until(() => hasUser('gina')) && await hasUser('erin') && await hasUser('frank') && fresh.exited === null, '… and once the old one is gone, it saves as normal');

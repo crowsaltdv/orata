@@ -1,9 +1,9 @@
 // Orata — the Staff page (/staff, the shield under the + in the server rail) for holders of the staff or dev badge, and the "Report to Orata
 // staff" window everyone has. The server (server/staff.js) decides who may do what; this only shows it.
 import { html, useState, useEffect, relTime, formatFull, cx } from '/js/lib.js';
-import { state, set, useSel, openModal, closeModal, addUsers, rebuildIndex, go, goChannel } from '/js/store.js';
+import { state, set, useSel, openModal, closeModal, addUsers, rebuildIndex, go, goChannel, toast } from '/js/store.js';
 import { Icon } from '/js/icons.js';
-import { Modal, Btn, Spinner, Avatar, Empty, Dropdown, Field, ServerIcon, MODALS } from '/js/ui.js';
+import { Modal, Btn, Spinner, Avatar, Empty, Dropdown, Field, ServerIcon, MODALS, Segmented, confirmDialog } from '/js/ui.js';
 import { renderMarkdown } from '/js/markdown.js';
 import { ServerTag } from '/js/server-tag.js';
 import { api } from '/js/api.js';
@@ -11,8 +11,8 @@ import { act, errMsg } from '/js/actions.js';
 import { openProfile } from '/js/sidebar.js';
 import { t } from '/js/i18n.js';
 
-/** Does the signed-in person have the staff or dev badge? (The server checks again.) */
-export const isStaffMe = () => !!state.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev');
+/** Is the signed-in person Orata staff: the staff or dev badge, or one of the two founders? (The server checks again: names.js isStaff.) */
+export const isStaffMe = () => !!state.me?.founder || !!state.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev');
 
 // what can be reported: what the Community Guidelines (/guidelines) forbid (server/staff.js has the same list)
 const REASONS = [['hate', 'Hate speech'], ['threats', 'Threats or violent extremism'], ['self-harm', 'Self-harm or suicide'], ['child-safety', 'Sexualizing minors'], ['nonconsensual', 'Intimate images shared without consent'],
@@ -30,7 +30,9 @@ MODALS.report = function Report({ id, messageId, channelId, userId, serverId }) 
   <//>`;
 };
 
-const TABS = [['overview', 'bar-chart', 'Overview'], ['accounts', 'users', 'Accounts'], ['servers', 'server', 'Servers'], ['dms', 'message', 'DMs'], ['flags', 'flag', 'Flags & reports'], ['log', 'list', 'Staff log']];
+const TABS = [['overview', 'bar-chart', 'Overview'], ['accounts', 'users', 'Accounts'], ['servers', 'server', 'Servers'], ['dms', 'message', 'DMs'], ['flags', 'flag', 'Flags & reports'], ['badges', 'award', 'Badges'], ['log', 'list', 'Staff log']];
+/** Developers (the dev badge) and the founders give badges — one person at a time from their profile, many at once on the Badges tab. */
+const isDevMe = () => !!state.me?.founder || !!state.me?.badges?.some((b) => b.id === 'dev');
 export function StaffPage() {
   const [tab, setTab] = useState('overview');
   if (!isStaffMe()) return html`<main class="main panel staff-page"><${Empty} icon="shield" title=${t('Staff only')}>${t('This page is for Orata staff.')}<//></main>`;
@@ -38,9 +40,9 @@ export function StaffPage() {
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
       <div class="m-title"><${Icon} name="shield" size=${23} /><span class="name">${t('Staff')}</span></div>
-      <div class="staff-tabs">${TABS.map(([k, ic, label]) => html`<button type="button" key=${k} class=${cx('staff-tab', tab === k && 'on')} onClick=${() => setTab(k)}><${Icon} name=${ic} size=${16} />${t(label)}</button>`)}</div>
+      <div class="staff-tabs">${TABS.filter(([k]) => k !== 'badges' || isDevMe()).map(([k, ic, label]) => html`<button type="button" key=${k} class=${cx('staff-tab', tab === k && 'on')} onClick=${() => setTab(k)}><${Icon} name=${ic} size=${16} />${t(label)}</button>`)}</div>
     </header>
-    <div class="staff-scroll">${tab === 'overview' ? html`<${Overview} go=${setTab} />` : tab === 'accounts' ? html`<${Accounts} />` : tab === 'servers' ? html`<${Servers} />` : tab === 'dms' ? html`<${Dms} />` : tab === 'flags' ? html`<${Flags} />` : html`<${Log} />`}</div>
+    <div class="staff-scroll">${tab === 'overview' ? html`<${Overview} go=${setTab} />` : tab === 'accounts' ? html`<${Accounts} />` : tab === 'servers' ? html`<${Servers} />` : tab === 'dms' ? html`<${Dms} />` : tab === 'flags' ? html`<${Flags} />` : tab === 'badges' ? html`<${BulkBadges} />` : html`<${Log} />`}</div>
   </main>`;
 }
 
@@ -215,14 +217,60 @@ function Flags() {
       </div>`; })}</div>`}`;
 }
 
-const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into', view_dm: 'read a flagged DM of', unhide_flag: 'said a report wasn’t a joke, about', unpublish_theme: 'removed a theme from Discovery by' };
+/* ---------------------------------------------------------------- Badges: give one to many people at once (or take it away) */
+const WHO = [['all', 'Everyone'], ['after', 'Joined on or after a date'], ['before', 'Joined before a date'], ['between', 'Joined between two dates'], ['server', 'Members of a server'], ['badge', 'People who have another badge']];
+function BulkBadges() {
+  const [cat, setCat] = useState(null); const [servers, setServers] = useState([]); const [busy, setBusy] = useState(false); const [count, setCount] = useState(null);
+  const [f, setF] = useState({ badge: 'early', take: false, who: 'all', after: '', before: '', serverId: '', hasBadge: '' });
+  const put = (k) => (v) => setF((cur) => ({ ...cur, [k]: v?.target ? v.target.value : v }));
+  useEffect(() => { api.get('/badges').then(setCat, () => setCat([])); api.get('/staff/servers').then(setServers, () => {}); }, []);
+  const ready = f.badge && (f.who === 'all' || (f.who === 'after' && f.after) || (f.who === 'before' && f.before) || (f.who === 'between' && f.after && f.before) || (f.who === 'server' && f.serverId) || (f.who === 'badge' && f.hasBadge));
+  const body = (dryRun) => ({ badge: f.badge, take: f.take, dryRun, who: {
+    ...(['after', 'between'].includes(f.who) ? { joinedAfter: f.after } : {}), ...(['before', 'between'].includes(f.who) ? { joinedBefore: f.before } : {}),
+    ...(f.who === 'server' ? { serverId: f.serverId } : {}), ...(f.who === 'badge' ? { hasBadge: f.hasBadge } : {}) } });
+  useEffect(() => {   // how many it would change, as you pick
+    setCount(null); if (!ready) return undefined;
+    const id = setTimeout(() => api.post('/badges/bulk', body(true)).then(setCount, (e) => setCount({ error: errMsg(e) })), 250);
+    return () => clearTimeout(id);
+  }, [JSON.stringify(f), ready]);
+  if (!cat) return html`<div class="pk-center"><${Spinner} /></div>`;
+  const badges = cat.filter((b) => state.me.founder || !['staff', 'dev'].includes(b.id)).map((b) => ({ value: b.id, label: b.name }));
+  const name = cat.find((b) => b.id === f.badge)?.name || '';
+  const run = async () => {
+    const n = count.changed;
+    if (!await confirmDialog({ title: f.take ? t('Take the badge away?') : t('Give the badge?'), body: `${f.take ? t('Take') : t('Give')} ${name} ${f.take ? t('from') : t('to')} ${n} ${n === 1 ? t('person') : t('people')}.`, confirmLabel: f.take ? t('Take it away') : t('Give it'), danger: f.take })) return;
+    setBusy(true); const r = await act(api.post('/badges/bulk', body(false))); setBusy(false);
+    if (r) { toast(`${f.take ? t('Took') : t('Gave')} ${name} ${f.take ? t('from') : t('to')} ${r.changed} ${r.changed === 1 ? t('person') : t('people')}`, 'success'); setCount({ matched: r.matched, changed: 0 }); }
+  };
+  return html`<div class="bulk-badges">
+    <p class="text-muted">${t('Give a badge to many people at once, or take it away. Bots and deleted accounts are left out. It goes in the staff log.')}</p>
+    <div class="bulk-row">
+      <${Field} label=${t('Badge')}><${Dropdown} value=${f.badge} options=${badges} onChange=${put('badge')} /><//>
+      <${Field} label=${t('Do')}><${Segmented} value=${f.take ? 'take' : 'give'} options=${[{ value: 'give', label: t('Give') }, { value: 'take', label: t('Take away') }]} onChange=${(v) => setF((cur) => ({ ...cur, take: v === 'take' }))} /><//>
+    </div>
+    <${Field} label=${t('Who')}><${Dropdown} value=${f.who} options=${WHO.map(([value, label]) => ({ value, label: t(label) }))} onChange=${put('who')} /><//>
+    ${['after', 'between'].includes(f.who) || ['before', 'between'].includes(f.who) ? html`<div class="bulk-row">
+      ${['after', 'between'].includes(f.who) ? html`<${Field} label=${t('Joined on or after')}><input class="input" type="date" value=${f.after} onInput=${put('after')} /><//>` : null}
+      ${['before', 'between'].includes(f.who) ? html`<${Field} label=${t('Joined before')}><input class="input" type="date" value=${f.before} onInput=${put('before')} /><//>` : null}
+    </div>` : null}
+    ${f.who === 'server' ? html`<${Field} label=${t('Server')}><${Dropdown} value=${f.serverId} placeholder=${t('Pick a server')} options=${servers.map((s) => ({ value: s.id, label: `${s.name} · ${s.members} ${t('members')}` }))} onChange=${put('serverId')} /><//>` : null}
+    ${f.who === 'badge' ? html`<${Field} label=${t('Who have')}><${Dropdown} value=${f.hasBadge} placeholder=${t('Pick a badge')} options=${cat.map((b) => ({ value: b.id, label: b.name }))} onChange=${put('hasBadge')} /><//>` : null}
+    <div class="bulk-foot">
+      <span class="bulk-count">${!ready ? t('Pick who first.') : !count ? html`<${Spinner} size=${14} />` : count.error ? html`<span class="text-danger">${count.error}</span>`
+        : html`<b>${count.matched}</b> ${count.matched === 1 ? t('person matches') : t('people match')} · <b>${count.changed}</b> ${f.take ? t('have it now') : t('don’t have it yet')}`}</span>
+      <${Btn} variant=${f.take ? 'danger' : 'primary'} icon="award" loading=${busy} disabled=${!count || count.error || !count.changed} onClick=${run}>${f.take ? t('Take away') : t('Give')}${count?.changed ? ` (${count.changed})` : ''}<//>
+    </div>
+  </div>`;
+}
+
+const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into', view_dm: 'read a flagged DM of', unhide_flag: 'said a report wasn’t a joke, about', unpublish_theme: 'removed a theme from Discovery by', approve_theme: 'put a theme on Discovery by', reject_theme: 'turned away a theme by', bulk_badge_give: 'gave a badge in bulk:', bulk_badge_take: 'took a badge away in bulk:' };
 function Log() {
   const [d, setD] = useState(null);
   useEffect(() => { api.get('/staff/log').then((r) => { addUsers(r.users); setD(r); }, () => setD({ log: [] })); }, []);
   const users = useSel((s) => s.users);
   if (!d) return html`<div class="pk-center"><${Spinner} /></div>`;
   if (!d.log.length) return html`<${Empty} icon="list" title=${t('No staff actions yet')} />`;
-  return html`<div class="al-list">${d.log.map((e) => html`<div class="al-row" key=${e.id}><span class=${cx('al-ic', ['terminate', 'lock', 'delete_message'].includes(e.action) && 'bad')}><${Icon} name=${e.action.includes('lock') ? 'lock' : e.action.includes('terminate') ? 'ban' : e.action === 'ghost' ? 'eye' : e.action === 'view_dm' ? 'message' : 'flag'} size=${16} /></span>
-    <div class="al-text"><div><b>${users[e.by]?.displayName || '?'}</b> ${t(ACTION[e.action] || e.action)} <b>${e.action === 'ghost' ? e.serverName : users[e.target]?.displayName || '?'}</b>${e.hours ? ` ${t('for')} ${HOURS.find(([h]) => h === e.hours)?.[1] || `${e.hours}h`}` : ''}</div>${e.reason ? html`<small>${t('Reason')}: ${e.reason}</small>` : null}</div>
+  return html`<div class="al-list">${d.log.map((e) => html`<div class="al-row" key=${e.id}><span class=${cx('al-ic', ['terminate', 'lock', 'delete_message'].includes(e.action) && 'bad')}><${Icon} name=${e.action.includes('lock') ? 'lock' : e.action.includes('terminate') ? 'ban' : e.action === 'ghost' ? 'eye' : e.action === 'view_dm' ? 'message' : e.action.startsWith('bulk_badge') ? 'award' : 'flag'} size=${16} /></span>
+    <div class="al-text"><div><b>${users[e.by]?.displayName || '?'}</b> ${t(ACTION[e.action] || e.action)} <b>${e.action === 'ghost' ? e.serverName : e.action.startsWith('bulk_badge') ? `${e.badge} · ${e.count} ${t('people')}` : users[e.target]?.displayName || '?'}</b>${e.hours ? ` ${t('for')} ${HOURS.find(([h]) => h === e.hours)?.[1] || `${e.hours}h`}` : ''}</div>${e.reason ? html`<small>${t('Reason')}: ${e.reason}</small>` : null}</div>
     <time title=${formatFull(e.at)}>${relTime(e.at)}</time></div>`)}</div>`;
 }
