@@ -367,6 +367,9 @@ async function main() {
   r = await api('PATCH', `/channels/${appCh.id}`, A.token, { applyRole: 'nope' }); ok(r.status === 400, 'the reward role has to exist');
   r = await api('PATCH', `/channels/${appCh.id}`, A.token, { applyRole: creator.id, topic: 'Show at least 2 themes you made' });
   ok(r.status === 200 && r.body.apply.roleId === creator.id && r.body.topic.startsWith('Show'), 'pick the role accepted people get, and the instructions');
+  r = await api('PATCH', `/channels/${appCh.id}`, A.token, { applyDescription: '  The creator program: get the Creator badge and your themes on Discovery.  ' });
+  ok(r.status === 200 && r.body.apply.description === 'The creator program: get the Creator badge and your themes on Discovery.' && r.body.apply.roleId === creator.id, 'a description says what people are applying for');
+  r = await api('PATCH', `/channels/${appCh.id}`, T.token, { applyDescription: 'hacked' }); ok(r.status === 403, '… only people who manage the channel change it');
   const reviewer = (await api('POST', `/servers/${S.id}/roles`, A.token, { name: 'Reviewer', permissions: ['ACCESS_APPLICATIONS'] })).body;
   await api('PUT', `/servers/${S.id}/members/${MOD.user.id}/roles/${reviewer.id}`, A.token);
   const pic = await upload(T.token, PNG);

@@ -484,7 +484,7 @@ export function channelView(c, userId) {
   if (c.serverId) {
     const ows = overwritesOf(c);
     if (c.type === 'forum') { v.tags = c.tags || []; v.requireTag = !!c.requireTag; }
-    if (c.apply) v.apply = { roleId: c.apply.roleId || null };   // an Application channel (api.js)
+    if (c.apply) v.apply = { roleId: c.apply.roleId || null, description: c.apply.description || '' };   // an Application channel (api.js)
     v.private = ows.some((o) => o.type === 'role' && o.id === c.serverId && o.deny.includes('VIEW_CHANNEL'));
     if (c.type !== 'category' && c.parentId) v.synced = isSynced(c);
     const server = db.servers[c.serverId];

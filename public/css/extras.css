@@ -626,3 +626,7 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 .app-bar.no { background: rgb(255 107 129 / .08); border: 1px solid rgb(255 107 129 / .3); } .app-bar.no > .icon { color: #ff6b81; }
 .app-acts { display: flex; gap: 8px; }
 .np-theme { margin-top: 12px; }
+.app-intro { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 16px; background: rgb(var(--accent-rgb) / .08); border: 1px solid rgb(var(--accent-rgb) / .25); }
+.app-intro > .icon { color: rgb(var(--accent-rgb)); flex: none; margin-top: 2px; } .app-intro b { font-size: 15px; color: var(--text); }
+.app-intro p { margin: 4px 0 0; color: var(--text-2); font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+.app-intro.sm { display: block; margin-bottom: 12px; padding: 10px 12px; border-radius: 12px; } .app-intro.sm b { font-size: 13.5px; } .app-intro.sm p { font-size: 13.5px; }

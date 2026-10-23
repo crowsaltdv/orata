@@ -787,7 +787,7 @@ export function createApi() {
     if (ch.serverId) {
       const s = db.servers[ch.serverId]; const mine = permsIn(s, req.user.id, ch);
       const touchesPerms = b.overwrites !== undefined || b.synced !== undefined;
-      const touchesProps = ['name', 'topic', 'nsfw', 'slowmode', 'parentId', 'tags', 'requireTag', 'emoji', 'applyRole'].some((k) => b[k] !== undefined);
+      const touchesProps = ['name', 'topic', 'nsfw', 'slowmode', 'parentId', 'tags', 'requireTag', 'emoji', 'applyRole', 'applyDescription'].some((k) => b[k] !== undefined);
       if ((touchesProps || !touchesPerms) && !mine.has('MANAGE_CHANNELS')) throw forbidden();
       if (touchesPerms && !mine.has('MANAGE_ROLES')) throw forbidden();
       if (b.name !== undefined && s.joinMode === 'apply' && s.applicationsChannelId === ch.id && channelName(str(b.name, 1, 100, 'Channel name'), ch.type, ch.name) !== ch.name) throw forbidden('The applications channel can’t be renamed while “Apply to join” is on.');
@@ -796,6 +796,7 @@ export function createApi() {
       if (b.topic !== undefined) ch.topic = String(b.topic).slice(0, 1024);
       if (b.nsfw !== undefined) ch.nsfw = !!b.nsfw;
       if (ch.type === 'forum') { if (b.tags !== undefined) ch.tags = sanitizeTags(b.tags); if (b.requireTag !== undefined) ch.requireTag = !!b.requireTag; }
+      if (ch.apply && b.applyDescription !== undefined) ch.apply.description = String(b.applyDescription).trim().slice(0, 1000);   // what people are applying for (top of the channel, and the Apply form)
       if (ch.apply && b.applyRole !== undefined) {   // the role people get when their application is accepted: handing it out takes the right to give it yourself
         const role = b.applyRole ? s.roles.find((x) => x.id === String(b.applyRole) && x.id !== s.id) : null;
         if (b.applyRole && !role) throw bad('That role doesn’t exist');

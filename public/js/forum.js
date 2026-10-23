@@ -96,6 +96,7 @@ MODALS['new-post'] = function NewPost({ id, forumId }) {
     } catch (e) { setErr(errMsg(e)); setBusy(false); }
   };
   return html`<${Modal} title=${app ? t('Apply') : t('New Post')} subtitle=${`#${forum.name}`} width=${560} onClose=${() => closeModal(id)} footer=${html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Cancel')}<//><${Btn} variant="primary" loading=${busy} disabled=${files.some((f) => f.status === 'uploading')} onClick=${create}>${app ? t('Send Application') : t('Post')}<//>`}>
+    ${app && forum.apply.description ? html`<div class="app-intro sm"><b>${t('What you’re applying for')}</b><p>${forum.apply.description}</p></div>` : null}
     ${forum.topic ? html`<div class="forum-guide"><${Icon} name="info" size=${16} /><span>${forum.topic}</span></div>` : null}
     <${Field} label=${t('Title')} error=${err}><${TextInput} value=${title} onInput=${(v) => { setTitle(v); setErr(null); }} maxlength="100" autofocus placeholder=${app ? t('Give your application a title') : t('What is this post about?')} /><//>
     ${forum.tags?.length ? html`<${Field} label=${forum.requireTag ? `${t('Tags')} (${t('pick at least one')})` : `${t('Tags')} (${t('up to 5')})`}><${TagPicker} forum=${forum} value=${tags} onChange=${setTags} /><//>` : null}
@@ -189,6 +190,7 @@ export function ForumView() {
       <div class="m-actions"><label class="m-search"><${Icon} name="search" size=${15} /><input placeholder=${app ? t('Search applications') : t('Search posts')} value=${q} onInput=${(e) => setQ(e.target.value)} /></label></div>
     </header>
     <div class="forum-body">
+      ${app && forum.apply.description ? html`<div class="app-intro"><${Icon} name="file-text" size=${22} /><div><b>${t('What you’re applying for')}</b><p>${forum.apply.description}</p></div></div>` : null}
       <div class="forum-bar">
         ${mine ? html`<${Btn} icon="file-text" onClick=${() => goChannel(forum.serverId, mine.id)}>${t('Your application')}<//>`
           : canPost ? html`<${Btn} variant="primary" icon=${app ? 'file-text' : 'plus'} onClick=${() => openModal('new-post', { forumId: forum.id })}>${app ? t('Apply') : t('New Post')}<//>` : null}
