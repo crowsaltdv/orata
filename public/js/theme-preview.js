@@ -5,8 +5,8 @@
 import { loadFont, drawMesh } from '/js/theme.js';
 import { MESH_WALLPAPERS, PHOTO_WALLPAPERS } from '/js/defaults.js';
 import { hexToRgb, luminance } from '/js/lib.js';
-import { fontFamily, sanitizeProfileStyle } from '/js/profile-data.js';
-import { sanitizeSiteLook } from '/js/theme-data.js';
+import { fontFamily } from '/js/profile-data.js';
+import { sanitizeSiteLook, sanitizeProfileTheme } from '/js/theme-data.js';
 
 export const PREVIEW_W = 960; export const PREVIEW_H = 540;
 const TAU = Math.PI * 2;
@@ -223,6 +223,7 @@ async function drawProfile(c, style, images) {
   await Promise.all([ensureFont(nameFam, [400]), ensureFont(textFam, [400, 600, 800]), ensureFont('Montserrat', [500, 700, 800])]);
   const UI = stack('Montserrat'); const TEXT = textFam ? stack(textFam) : UI;
   let pic = null; if (images && p.colors?.mode === 'image' && p.colors.image) pic = await loadImage(p.colors.image);
+  let ban = null; if (images && p.banner?.image) ban = await loadImage(p.banner.image);   // (a GIF shows its first frame)
   let fx = null;
   if (p.effect) {
     try {
@@ -252,8 +253,10 @@ async function drawProfile(c, style, images) {
       c.fillRect(0, 0, CARD_W, CARD_H); c.globalAlpha = 1;
     }
   }
-  // banner: gray, like the avatar
-  c.fillStyle = linear(c, 0, 0, CARD_W, 98, 120, ['#5a5e69', '#7a7e89']); c.fillRect(0, 0, CARD_W, 98);
+  // the banner: the theme's picture (or GIF's first frame), else its colours, else gray like the avatar
+  if (ban) { const kk = Math.max(CARD_W / ban.width, 98 / ban.height); const w = ban.width * kk; const h = ban.height * kk; c.drawImage(ban, (CARD_W - w) / 2, (98 - h) / 2, w, h); }
+  else if (p.banner && (p.banner.color || p.banner.color2)) { c.fillStyle = linear(c, 0, 0, CARD_W, 98, 135, [p.banner.color || '#6d28d9', p.banner.color2 || '#ec4899']); c.fillRect(0, 0, CARD_W, 98); }
+  else { c.fillStyle = linear(c, 0, 0, CARD_W, 98, 120, ['#5a5e69', '#7a7e89']); c.fillRect(0, 0, CARD_W, 98); }
   // the body
   const body = (weight, size, fam = TEXT) => { c.font = `${weight} ${size}px ${fam}`; };
   const wrapText = (str, max) => { const out = []; let line = ''; for (const w of str.split(' ')) { const next = line ? `${line} ${w}` : w; if (c.measureText(next).width > max && line) { out.push(line); line = w; } else line = next; } if (line) out.push(line); return out; };
@@ -307,7 +310,7 @@ async function drawProfile(c, style, images) {
 /** Draws the preview picture of a theme and resolves it as an image Blob (WebP, or PNG where that isn't supported). Never throws for a theme that can be saved:
  *  if a picture of the theme can't be read into the canvas (a wallpaper that blocks it), the preview is drawn without that picture. */
 export async function renderThemePreview(kind, data) {
-  const look = kind === 'site' ? sanitizeSiteLook(data) : sanitizeProfileStyle(data);
+  const look = kind === 'site' ? sanitizeSiteLook(data) : sanitizeProfileTheme(data);
   if (!look) throw new Error('There is nothing to draw');
   for (const images of [true, false]) {
     const cv = document.createElement('canvas'); cv.width = PREVIEW_W; cv.height = PREVIEW_H; const c = cv.getContext('2d');

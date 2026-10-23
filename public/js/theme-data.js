@@ -88,17 +88,37 @@ export function siteLookOf(settings) {
   return out;
 }
 
+/* ------------------------------------------------------------------ profile themes */
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const UPLOAD = /^\/uploads\/([A-Za-z0-9_][A-Za-z0-9_.-]{0,119})$/;
+/** A profile theme is your profile style (`sanitizeProfileStyle`: it holds the card's picture or GIF) plus, when it has one, your banner: { image (a picture or GIF of this server's), color, color2 }. */
+function sanitizeBanner(b) {
+  if (!isObj(b)) return null;
+  const hex = (v) => (typeof v === 'string' && HEX.test(v) ? v.toLowerCase() : null);
+  const out = { image: typeof b.image === 'string' && UPLOAD.test(b.image) ? b.image : null, color: hex(b.color), color2: hex(b.color2) };
+  return out.image || out.color || out.color2 ? out : null;
+}
+/** A clean profile theme from anything: the profile style, and the banner if it has one. Null when nothing usable is in it. */
+export function sanitizeProfileTheme(data) {
+  const style = sanitizeProfileStyle(data); const banner = sanitizeBanner(data?.banner);
+  return style || banner ? { ...(style || {}), ...(banner ? { banner } : {}) } : null;
+}
+/** The profile theme a profile makes: its style, its banner picture (or GIF) and the banner's colours (the account's `profile`, `banner`, `bannerColor` and `accentColor`). */
+export const profileLookOf = ({ profile, banner, bannerColor, accentColor } = {}) => sanitizeProfileTheme({ ...(profile || {}), banner: { image: banner || null, color: bannerColor || null, color2: accentColor || null } });
+
 /* ------------------------------------------------------------------ any theme */
 /** A clean theme of `kind` ('site' or 'profile'), or null when nothing usable is in it. */
-export const sanitizeTheme = (kind, data) => (kind === 'site' ? sanitizeSiteLook(data) : kind === 'profile' ? sanitizeProfileStyle(data) : null);
+export const sanitizeTheme = (kind, data) => (kind === 'site' ? sanitizeSiteLook(data) : kind === 'profile' ? sanitizeProfileTheme(data) : null);
 /** A theme's name: one line, at most THEME_NAME_MAX characters ('' when there is none). */
 export const cleanThemeName = (name) => String(name ?? '').replace(/[\u0000-\u001f\u007f<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, THEME_NAME_MAX);
 
-const UPLOAD = /^\/uploads\/([A-Za-z0-9_][A-Za-z0-9_.-]{0,119})$/;
-/** Where a theme keeps pictures of this server's: a site theme's wallpaper, a profile theme's card picture. [{ get, set }] on the (cloned) data. */
+/** Where a theme keeps pictures of this server's: a site theme's wallpaper; a profile theme's card picture and banner. [{ get, set }] on the (cloned) data. */
 function pictureSlots(kind, data) {
-  if (kind === 'site') return data?.bg && typeof data.bg === 'object' ? [{ get: () => data.bg.image, set: (v) => { data.bg.image = v; } }] : [];
-  return data?.colors && typeof data.colors === 'object' ? [{ get: () => data.colors.image, set: (v) => { data.colors.image = v; } }] : [];
+  if (kind === 'site') return isObj(data?.bg) ? [{ get: () => data.bg.image, set: (v) => { data.bg.image = v; } }] : [];
+  const slots = [];
+  if (isObj(data?.colors)) slots.push({ get: () => data.colors.image, set: (v) => { data.colors.image = v; } });
+  if (isObj(data?.banner)) slots.push({ get: () => data.banner.image, set: (v) => { data.banner.image = v; } });
+  return slots;
 }
 /** The file names (in /uploads) a theme's pictures are. */
 export const themeFiles = (kind, data) => pictureSlots(kind, data).map((s) => UPLOAD.exec(String(s.get() ?? ''))?.[1]).filter(Boolean);

@@ -2,6 +2,7 @@
 // The library (25 profile + 25 site themes per account, enforced here), everything a site / profile theme keeps, pictures that keep working, the
 // preview pictures, who may post (the creator badge, and staff and developers) and remove, installing from Discovery, upvotes and Featured sorting, and the sweep of theme files nobody uses.
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +22,7 @@ const rot13 = (s) => s.replace(/[a-z]/g, (c) => String.fromCharCode(((c.charCode
 let child = null;
 function startServer(extra = {}) {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
-    env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '', MUSIC: '', ACCOUNTS_PER_BROWSER: '1000', ACCOUNTS_PER_HOUR: '1000', TRUST_PROXY: '1', THEME_SWEEP_FIRST_MS: '3600000', ...extra },
+    env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '', MUSIC: '', ACCOUNTS_PER_BROWSER: '1000', ACCOUNTS_PER_HOUR: '1000', TRUST_PROXY: '1', THEME_SWEEP_FIRST_MS: '3600000', THEME_TEST_FETCH_ANY: '1', ...extra },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
 }
@@ -42,6 +43,11 @@ let ip = 10;   // each sign-up from its own address: sign-ups are limited per ad
 const register = async (username) => {
   const r = await api('POST', '/auth/register', null, { agree: true, username, displayName: username[0].toUpperCase() + username.slice(1), password: 'password123', dob: { year: 1995, month: 1, day: 1 } }, { 'x-forwarded-for': `198.51.100.${ip++}` });
   return { token: r.body?.token, user: r.body?.user };
+};
+/** A two-frame GIF (it moves), as bytes: 1 × 1 pixel, black then white. */
+const animatedGif = () => {
+  const frame = (px) => Buffer.from([0x21, 0xF9, 0x04, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x2C, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0x02, 0x02, px === 0 ? 0x44 : 0x4C, 0x01, 0x00]);
+  return Buffer.concat([Buffer.from('GIF89a'), Buffer.from([1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255]), Buffer.from([0x21, 0xFF, 0x0B]), Buffer.from('NETSCAPE2.0'), Buffer.from([3, 1, 0, 0, 0]), frame(0), frame(1), Buffer.from([0x3B])]);
 };
 const png = (w, h, color) => sharp({ create: { width: w, height: h, channels: 3, background: color } }).png().toBuffer();
 const upload = async (tok, bytes, type = 'image/png', name = 'pic.png') => (await sendBytes('POST', '/upload', tok, bytes, type, name)).body?.url;
@@ -176,6 +182,42 @@ async function main() {
   r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Sneaky', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: '/uploads/../../etc/passwd' } }) }); ok(r.status === 200 && r.body.data.bg.image !== '/uploads/../../etc/passwd', 'a path that tries to leave the uploads folder never gets through');
 
   /* ---------------------------------------------------------------- previews */
+  /* banners, GIFs and web-link wallpapers */
+  console.log('\nBanners, GIFs and wallpapers from a link');
+  const gifBytes = animatedGif(); const pagesOf = async (url) => (await sharp(Buffer.from(await (await fetch(base + url)).arrayBuffer()), { animated: true }).metadata()).pages;
+  const bannerUp = await upload(N.token, await png(90, 30, '#3366aa'));
+  r = await api('POST', '/themes/library', N.token, { kind: 'profile', name: 'With banner', data: profileLook({ banner: { image: bannerUp, color: '#112233', color2: '#445566' } }) }); const BT = r.body;
+  ok(r.status === 200 && /^\/uploads\/th_\d+\.png$/.test(BT.data.banner?.image) && BT.data.banner.image !== bannerUp && BT.data.banner.color === '#112233' && BT.data.banner.color2 === '#445566' && await fetchOk(BT.data.banner.image), 'a profile theme keeps the banner picture (as a file of its own) and the banner colours');
+  ok(BT.data.colors.mode === 'gradient' && BT.data.effect.id === 'aurora', '… along with the rest of the profile style');
+  const gifUp = await upload(N.token, gifBytes, 'image/gif', 'moving.gif');
+  r = await api('POST', '/themes/library', N.token, { kind: 'profile', name: 'GIF banner and card', data: profileLook({ colors: { mode: 'image', a: '#8b5cf6', b: '#ec4899', angle: 150, tint: 0.4, image: gifUp, imageOpacity: 0.7 }, banner: { image: gifUp } }) }); const GT = r.body;
+  ok(r.status === 200 && /^\/uploads\/th_\d+\.gif$/.test(GT.data.banner.image) && /^\/uploads\/th_\d+\.gif$/.test(GT.data.colors.image) && GT.data.banner.image === GT.data.colors.image, 'a GIF banner and a GIF card picture are kept as GIFs (one copy for the same GIF)');
+  ok(await pagesOf(GT.data.banner.image) === 2, '… and they still move (the copy has both frames)');
+  r = await api('POST', '/themes/library', N.token, { kind: 'profile', name: 'Banner only', data: { banner: { image: bannerUp } } }); ok(r.status === 200 && r.body.data.banner.image && !r.body.data.colors, 'a theme can be just a banner');
+  r = await api('POST', '/themes/library', N.token, { kind: 'profile', name: 'Nothing', data: { banner: { image: null, color: null, color2: null } } }); ok(r.status === 400, 'an empty banner is nothing to save');
+  r = await api('POST', '/themes/library', N.token, { kind: 'profile', name: 'Bad banner path', data: profileLook({ banner: { image: '/uploads/../../etc/passwd', color: '#112233' } }) }); ok(r.status === 200 && r.body.data.banner.image === null && r.body.data.banner.color === '#112233', 'a banner picture from anywhere but the uploads is dropped, its colours stay');
+  r = await api('POST', '/themes/library', N.token, { kind: 'profile', name: 'No banner', data: profileLook() }); ok(r.status === 200 && !('banner' in r.body.data), 'a theme saved without a banner has none (applying it leaves yours alone)');
+  r = await api('POST', '/themes/library', N.token, { kind: 'profile', name: 'Fake banner', data: profileLook({ banner: { image: fake } }) }); ok(r.status === 400 && r.body.code === 'picture_bad', 'a banner that isn’t a picture is refused');
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'GIF wallpaper', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: gifUp } }) });
+  ok(r.status === 200 && /^\/uploads\/th_\d+\.gif$/.test(r.body.data.bg.image) && await pagesOf(r.body.data.bg.image) === 2, 'a GIF wallpaper is kept as a GIF that moves');
+  const biggish = await upload(N.token, Buffer.concat([gifBytes, Buffer.alloc(16 * 1024 * 1024)]), 'image/gif', 'huge.gif');
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Too big GIF', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: biggish } }) }); ok(r.status === 400 && r.body.code === 'picture_big' && /15 MB/.test(r.body.error), 'a GIF over 15 MB is refused, and the message says the limit');
+  // a wallpaper that is a web link is fetched and kept (this test's own little picture server stands in for the web)
+  const web = http.createServer(async (rq, rs) => {
+    if (rq.url === '/a.png') { rs.writeHead(200, { 'content-type': 'image/png' }); rs.end(await png(70, 40, '#aa5500')); }
+    else if (rq.url === '/m.gif') { rs.writeHead(200, { 'content-type': 'image/gif' }); rs.end(gifBytes); }
+    else if (rq.url === '/page') { rs.writeHead(200, { 'content-type': 'text/html' }); rs.end('<p>not a picture</p>'); }
+    else { rs.writeHead(404); rs.end(); }
+  });
+  await new Promise((res) => web.listen(0, '127.0.0.1', res)); const site = (path2) => `http://127.0.0.1:${web.address().port}${path2}`;
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Linked photo', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: site('/a.png') } }) }); const LT = r.body;
+  ok(r.status === 200 && /^\/uploads\/th_\d+\.png$/.test(LT.data.bg.image) && await fetchOk(LT.data.bg.image), 'a wallpaper from a web link is fetched and kept as a file of the theme’s own');
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Linked photo again', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: site('/a.png') } }) }); ok(r.body.data.bg.image === LT.data.bg.image, '… once, however many themes use the link');
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Linked GIF', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: site('/m.gif') } }) }); ok(/\.gif$/.test(r.body.data.bg.image) && await pagesOf(r.body.data.bg.image) === 2, 'a GIF from a web link keeps moving');
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Dead link', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: site('/gone.png') } }) }); ok(r.status === 200 && r.body.data.bg.image === site('/gone.png'), 'a link that can’t be fetched stays a link (the theme still saves)');
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Page link', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: site('/page') } }) }); ok(r.status === 200 && r.body.data.bg.image === site('/page'), '… and so does one that isn’t a picture');
+  web.close();
+
   console.log('\nPreview pictures');
   const prev = await png(640, 360, '#223344');
   r = await sendBytes('PUT', `/themes/library/${T2.id}/preview`, N.token, prev); const pv = r.body?.preview;
@@ -321,7 +363,7 @@ async function main() {
   const t2Preview = (await api('GET', '/themes/library', N.token)).body.themes.find((t) => t.id === T2.id).preview;
   await stopServer(); startServer({ THEME_FILE_GRACE_MS: '0', THEME_SWEEP_FIRST_MS: '400' }); await ready(); await sleep(1500);
   ok(!(await fetchOk(lonely.data.bg.image)) && !(await fetchOk(lonelyPreview)), 'the sweep removes the picture and preview nothing uses any more');
-  ok(await fetchOk(kept.data.bg.image) && await fetchOk(worn.data.bg.image) && await fetchOk(T2.data.bg.image) && await fetchOk(PUB1.preview) && await fetchOk(t2Preview), '… and keeps every one that a theme, a published theme or your current wallpaper still uses');
+  ok(await fetchOk(kept.data.bg.image) && await fetchOk(worn.data.bg.image) && await fetchOk(T2.data.bg.image) && await fetchOk(PUB1.preview) && await fetchOk(t2Preview) && await fetchOk(BT.data.banner.image) && await fetchOk(GT.data.banner.image), '… and keeps every one that a theme (a banner or card picture too), a posted theme or your current wallpaper still uses');
   r = await api('GET', '/themes/library', N.token); ok(r.body.themes.some((t) => t.id === IN1.id), 'everything is still there after a restart');
   r = await api('POST', '/themes/library', E.token, { kind: 'site', name: 'Again', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: kept.data.bg.image } }) }); ok(r.status === 200, 'saving after a sweep works');
 

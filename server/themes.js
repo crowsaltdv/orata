@@ -2,8 +2,9 @@
 // Library: every account keeps its own themes on the server (so they follow you to other devices): up to 25 profile themes and 25 site themes.
 // Discovery: people with the "creator" badge (and Orata staff and developers) post a theme of their own there; anyone installs one, which copies it into their library,
 // and anyone can upvote one (the most upvoted are shown first, "Featured").
-// Pictures: a theme's wallpaper / card picture is copied into files the theme owns (th_<id>.<ext> in the uploads, checked to be a real picture), so it keeps
-// working after the original upload is replaced; a sweep removes theme files nothing uses any more. Every theme also has a preview picture the browser draws
+// Pictures (and GIFs): a theme's wallpaper, card picture and banner are copied into files the theme owns (th_<id>.<ext> in the uploads, checked to be a real
+// picture), so they keep working after the original upload is replaced; a wallpaper that is a web link is fetched and kept too (when the link can't be fetched
+// the theme keeps the link). A sweep removes theme files nothing uses any more. Every theme also has a preview picture the browser draws
 // from the theme itself (public/js/theme-preview.js) and uploads here.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,31 +22,53 @@ db.themeCopies ||= {};   // an upload's name -> the theme file that is its copy 
 
 const FILE = /^th_(\d+)\.[a-z0-9]+$/;
 const FORMATS = { png: 'png', jpeg: 'jpg', webp: 'webp', gif: 'gif', heif: 'avif' };
-const BIG_BYTES = 3 * 1024 * 1024; const BIG_PIXELS = 2600; const MAX_ANIMATED = 8 * 1024 * 1024; const MAX_DATA = 12_000;
+const BIG_BYTES = 3 * 1024 * 1024; const BIG_PIXELS = 2600; const MAX_ANIMATED = 15 * 1024 * 1024; const MAX_REMOTE = 25 * 1024 * 1024; const MAX_DATA = 12_000;
 const kindName = (k) => (k === 'site' ? 'site' : 'profile');
 export const hasCreator = (u) => !!u?.badges?.includes('creator');
 /** Who may post a theme on Discovery: people with the creator badge, and Orata staff and developers. */
 export const canPost = (u) => hasCreator(u) || isStaff(u);
 const votesOf = (t) => (Array.isArray(t.votes) ? t.votes.length : 0);
 
-/** A theme's picture, copied into a file of its own. Resolves the new file name. */
-async function ownCopy(name) {
-  if (FILE.test(name)) return name;   // already a theme's
-  const known = db.themeCopies[name];
-  if (known && await restoreUpload(known)) return known;
-  if (!isSafeFileName(name) || !await restoreUpload(name)) throw bad('A picture in this theme can’t be found any more. Pick it again and save once more.', 'picture_missing');
-  let buf = fs.readFileSync(path.join(UPLOAD_DIR, name)); let meta;
+/** Checks a picture (a real PNG, JPEG, WebP, GIF or AVIF; a GIF may move) and keeps it as a file the theme owns. Resolves the new file name. */
+async function keepPicture(buf) {
+  let meta;
   try { meta = await sharp(buf, { limitInputPixels: 80_000_000, animated: true }).metadata(); } catch { throw bad('A picture in this theme isn’t a picture Orata can use.', 'picture_bad'); }
   let ext = FORMATS[meta.format]; if (!ext) throw bad('A picture in this theme is in a format Orata can’t use (PNG, JPEG, WebP, GIF and AVIF work).', 'picture_bad');
   const animated = (meta.pages || 1) > 1;
-  if (animated && buf.length > MAX_ANIMATED) throw bad('An animated picture in a theme can be 8 MB at most.', 'picture_big');
+  if (animated && buf.length > MAX_ANIMATED) throw bad(`An animated picture (GIF) in a theme can be ${MAX_ANIMATED / 1048576} MB at most.`, 'picture_big');
   if (!animated && (buf.length > BIG_BYTES || (meta.width || 0) > BIG_PIXELS)) {   // wallpapers are shown at screen size: no need to keep a 20 MB original
     buf = await sharp(buf, { limitInputPixels: 80_000_000 }).rotate().resize({ width: 2560, withoutEnlargement: true }).webp({ quality: 88 }).toBuffer(); ext = 'webp';
   }
   const file = `th_${newId()}.${ext}`;
   try { await storeUpload(file, `image/${ext === 'jpg' ? 'jpeg' : ext}`, buf); } catch (e) { throw e.code === 'QUOTA' ? new ApiError(507, e.message, 'storage_full') : new ApiError(503, 'Could not save the picture right now. Try again in a moment.', 'storage_error'); }
+  return file;
+}
+/** An upload of this server (a wallpaper, card picture or banner), copied into a file of its own. Resolves the new file name. */
+async function ownCopy(name) {
+  if (FILE.test(name)) return name;   // already a theme's
+  const known = db.themeCopies[name];
+  if (known && await restoreUpload(known)) return known;
+  if (!isSafeFileName(name) || !await restoreUpload(name)) throw bad('A picture in this theme can’t be found any more. Pick it again and save once more.', 'picture_missing');
+  const file = await keepPicture(fs.readFileSync(path.join(UPLOAD_DIR, name)));
   db.themeCopies[name] = file;
   return file;
+}
+let fetchImage = null;   // the server's address-checked fetch (api.js), which never reaches into the server's own network
+/** A wallpaper that is a web link, fetched and kept like an upload. Resolves its new /uploads address, or null when it can't be fetched or isn't a picture (the theme then keeps the link). */
+async function copyRemote(url) {
+  if (!fetchImage) return null;
+  const known = db.themeCopies[url];
+  if (known && await restoreUpload(known)) return `/uploads/${known}`;
+  try {
+    const { resp } = await fetchImage(url, { image: true });
+    const type = (resp.headers.get('content-type') || '').split(';')[0].toLowerCase();
+    if (!resp.ok || !/^image\/(png|jpe?g|webp|gif|avif)$/.test(type) || Number(resp.headers.get('content-length') || 0) > MAX_REMOTE) { resp.body?.cancel().catch(() => {}); return null; }
+    const chunks = []; let total = 0;
+    for await (const c of resp.body) { total += c.length; if (total > MAX_REMOTE) return null; chunks.push(c); }
+    const file = await keepPicture(Buffer.concat(chunks));
+    db.themeCopies[url] = file;
+    return `/uploads/${file}`;
+  } catch (e) { if (e instanceof ApiError && e.status >= 500) throw e; return null; }
 }
 
 /** Checks `data` for a theme of `kind` and gives the theme its own copies of its pictures. */
@@ -53,6 +76,7 @@ async function readyTheme(kind, data) {
   const clean = sanitizeTheme(kind, data);
   if (!clean) throw bad('There is nothing in that theme to save.', 'empty_theme');
   const own = await mapThemeFiles(kind, clean, ownCopy);
+  if (kind === 'site' && /^https?:\/\//i.test(own.bg?.image || '')) own.bg.image = await copyRemote(own.bg.image) || own.bg.image;
   if (JSON.stringify(own).length > MAX_DATA) throw bad('That theme is too large.', 'theme_big');
   return own;
 }
@@ -104,7 +128,8 @@ function shuffled(list, seed) {
   return a;
 }
 
-export function mountThemes(r, { h, limit }) {
+export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
+  fetchImage = ENV.THEME_TEST_FETCH_ANY === '1' ? async (u) => ({ resp: await fetch(u) }) : fetcher;   // (THEME_TEST_FETCH_ANY is for the self-test only: its picture server is on this computer)
   const mine = (req) => (req.user.themes ||= []);
   const find = (req) => { const t = mine(req).find((x) => x.id === req.params.id); if (!t) throw notFound('Unknown theme'); return t; };
   const full = (kind) => bad(`Your ${kindName(kind)} theme library is full (${LIBRARY_LIMIT} of ${LIBRARY_LIMIT}). Delete one from your library to make room.`, 'library_full');

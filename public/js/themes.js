@@ -10,8 +10,7 @@ import { Modal, Btn, IconBtn, Avatar, Segmented, Dropdown, Spinner, Empty, Field
 import { api } from '/js/api.js';
 import { act, errMsg, closeSettings } from '/js/actions.js';
 import { t } from '/js/i18n.js';
-import { sanitizeProfileStyle } from '/js/profile-data.js';
-import { LIBRARY_LIMIT, sanitizeSiteLook, siteLookOf } from '/js/theme-data.js';
+import { LIBRARY_LIMIT, sanitizeSiteLook, siteLookOf, sanitizeProfileTheme, profileLookOf } from '/js/theme-data.js';
 import { isStaffMe } from '/js/staff.js';
 
 const KINDS = [{ value: 'profile', label: 'Profile themes' }, { value: 'site', label: 'Site themes' }];
@@ -20,33 +19,41 @@ const NOUN = { profile: 'profile theme', site: 'site theme' };
 export const canPost = (u) => !!u?.badges?.some((b) => b.id === 'creator' || b.id === 'staff' || b.id === 'dev');
 
 /* ------------------------------------------------------------------ the look you have now, and wearing a theme */
-/** The theme your look is right now: your whole site look, or your saved profile style (null when you haven't styled your profile). */
-export const currentLook = (kind) => (kind === 'site' ? sanitizeSiteLook(siteLookOf(state.settings)) : sanitizeProfileStyle(state.me?.profile));
+/** The theme your look is right now: your whole site look (wallpaper picture or GIF included), or your saved profile style with your card picture and your banner picture or GIF (null when you haven't styled your profile). */
+export const currentLook = (kind) => (kind === 'site' ? sanitizeSiteLook(siteLookOf(state.settings)) : profileLookOf(state.me));
 const sameLook = (a, b) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
-export const isWorn = (th) => sameLook(th.kind === 'site' ? sanitizeSiteLook(th.data) : sanitizeProfileStyle(th.data), currentLook(th.kind));
+export const isWorn = (th) => {
+  if (th.kind === 'site') return sameLook(sanitizeSiteLook(th.data), currentLook('site'));
+  const mine = sanitizeProfileTheme(th.data); const now = currentLook('profile');
+  if (mine && now && !mine.banner) delete now.banner;   // (a theme without a banner doesn't ask about yours)
+  return sameLook(mine, now);
+};
 
 let undo = null;   // the look before the last theme was applied, for the Undo button
 let kindNow = ls('themesKind', 'site');   // the tab you were on
 const subs = new Set(); const changed = () => subs.forEach((f) => f());
 const setUndo = (v) => { undo = v; changed(); };
 const setKindNow = (k) => { kindNow = k; ls('themesKind', null, k); changed(); };
-/** Puts a theme on: a site theme becomes your whole site look (your wallpapers, Reduce motion and accessibility switches stay yours), a profile theme your profile style. */
+/** Puts a theme on: a site theme becomes your whole site look (your wallpapers, Reduce motion and accessibility switches stay yours), a profile theme your profile style, card picture and banner. */
 export async function applyTheme(th) {
-  const before = { kind: th.kind, data: currentLook(th.kind) };
+  const m = state.me;
+  const before = th.kind === 'profile' ? { kind: 'profile', me: { profile: m.profile || null, banner: m.banner || null, bannerColor: m.bannerColor || null, accentColor: m.accentColor || null } } : { kind: 'site', data: currentLook('site') };
   if (th.kind === 'site') {
     const look = sanitizeSiteLook(th.data); if (!look) { toast(t('That theme can’t be applied'), 'error'); return false; }
     const img = look.bg.image && !/^https?:/i.test(look.bg.image) ? look.bg.image : null;
     updateSettings({ ...look, bg: { ...look.bg, ...(img ? { library: [img, ...state.settings.bg.library.filter((x) => x !== img)].slice(0, 8) } : {}) } });   // (a wallpaper of its own also joins your Wallpaper page)
     toast(t('Theme applied'), 'success', 2200);
   } else {
-    const style = sanitizeProfileStyle(th.data); if (!style) { toast(t('That theme can’t be applied'), 'error'); return false; }
-    if (!await act(api.patch('/me', { profile: style }), { success: t('Profile theme applied') })) return false;
+    const look = sanitizeProfileTheme(th.data); if (!look) { toast(t('That theme can’t be applied'), 'error'); return false; }
+    const { banner, ...style } = look;   // (the banner is kept apart from the style: a theme with no banner leaves yours alone, one with a banner sets its picture or GIF and colours)
+    const body = { ...(Object.keys(style).length ? { profile: style } : {}), ...(banner ? { banner: banner.image, bannerColor: banner.color, accentColor: banner.color2 } : {}) };
+    if (!await act(api.patch('/me', body), { success: t('Profile theme applied') })) return false;
   }
   setUndo(before); return true;
 }
 async function undoApply() {
   const u = undo; if (!u) return;
-  if (u.kind === 'site') updateSettings(u.data || {}); else if (!await act(api.patch('/me', { profile: u.data }))) return;
+  if (u.kind === 'site') updateSettings(u.data || {}); else if (!await act(api.patch('/me', u.me))) return;
   setUndo(null); toast(t('Your previous look is back'), 'success', 2200);
 }
 

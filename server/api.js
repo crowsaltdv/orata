@@ -378,7 +378,7 @@ export function createApi() {
 
   mountMusic(r, { h, limit });
   mountBadges(r, { h });
-  mountThemes(r, { h, limit });
+  mountThemes(r, { h, limit, fetchImage: safeFetch });
   mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdate, guardText, automod, kickMember, banMember, timeoutMember });
   startDiscord({ guardText });
 
