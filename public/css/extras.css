@@ -634,12 +634,12 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 /* ------------------------------------------------ music library: Grid (three columns of song cards) / List (covers), loading as you scroll (music.js) */
 .mpg-scroll { container-type: inline-size; }
 .mpg-top { display: flex; align-items: center; gap: 12px; } .mpg-top .mpg-search { flex: 1; min-width: 0; }
-.seg-switch { --seg-w: 84px; position: relative; flex: none; display: inline-flex; padding: 3px; border-radius: 99px; background: rgb(var(--surface-rgb) / .08); border: 1px solid var(--border); }
-.seg-switch button { position: relative; z-index: 1; width: var(--seg-w); display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 0; border-radius: 99px; font-size: 13px; font-weight: 600; color: var(--text-3); transition: color 200ms; }
-.seg-switch button.on { color: var(--text); } .seg-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.seg-thumb { position: absolute; top: 3px; bottom: 3px; left: 3px; width: var(--seg-w); border-radius: 99px; background: rgb(var(--surface-rgb) / .16); box-shadow: 0 1px 3px rgb(0 0 0 / .18); transition: transform 220ms cubic-bezier(.2, .8, .2, 1); }
-.seg-switch.second .seg-thumb { transform: translateX(var(--seg-w)); }
-@container (max-width: 560px) { .seg-switch { --seg-w: 40px; } .seg-switch button span { display: none; } }
+.lay-switch { --lay-w: 84px; position: relative; flex: none; display: inline-flex; padding: 3px; border-radius: 99px; background: rgb(var(--surface-rgb) / .08); border: 1px solid var(--border); }
+.lay-switch button { position: relative; z-index: 1; width: var(--lay-w); display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 0; border-radius: 99px; font-size: 13px; font-weight: 600; color: var(--text-3); transition: color 200ms; }
+.lay-switch button.on { color: var(--text); } .lay-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lay-thumb { position: absolute; top: 3px; bottom: 3px; left: 3px; width: var(--lay-w); border-radius: 99px; background: rgb(var(--surface-rgb) / .16); box-shadow: 0 1px 3px rgb(0 0 0 / .18); transition: transform 220ms cubic-bezier(.2, .8, .2, 1); }
+.lay-switch.second .lay-thumb { transform: translateX(var(--lay-w)); }
+@container (max-width: 560px) { .lay-switch { --lay-w: 40px; } .lay-switch button span { display: none; } }
 .mpg-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 @container (max-width: 820px) { .mpg-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container (max-width: 540px) { .mpg-cards { grid-template-columns: minmax(0, 1fr); } }

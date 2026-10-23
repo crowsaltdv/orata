@@ -288,7 +288,7 @@ const useLayout = () => useSel((s) => (s.settings.music?.layout === 'list' ? 'li
 function LayoutSwitch() {
   const layout = useLayout();
   const opt = (v, icon, label) => html`<button type="button" role="radio" aria-checked=${layout === v} class=${cx(layout === v && 'on')} onClick=${() => updateSettings({ music: { layout: v } })} data-tip=${label} aria-label=${label}><${Icon} name=${icon} size=${16} /><span>${label}</span></button>`;
-  return html`<div class=${cx('seg-switch', layout === 'list' && 'second')} role="radiogroup" aria-label=${t('Layout')}><span class="seg-thumb" aria-hidden="true"></span>${opt('grid', 'grid', t('Grid'))}${opt('list', 'list', t('List'))}</div>`;
+  return html`<div class=${cx('lay-switch', layout === 'list' && 'second')} role="radiogroup" aria-label=${t('Layout')}><span class="lay-thumb" aria-hidden="true"></span>${opt('grid', 'grid', t('Grid'))}${opt('list', 'list', t('List'))}</div>`;
 }
 /** Grid: a card per song, cover on the left, title and artist, length on the right. */
 function TrackCard({ tr, list, cur, playing }) {

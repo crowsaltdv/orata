@@ -270,9 +270,28 @@ def songs_shelf(raw):
     return []
 
 
+def playlist_ids(node, found=None):
+    # every playlist a YouTube Music page links to, in page order: its cards (musicTwoRowItemRenderer) open "VL" + the playlist id.
+    # Read from the page itself: ytmusicapi's get_mood_playlists fails on genre pages, whose song rows it can't parse.
+    found = [] if found is None else found
+    if isinstance(node, dict):
+        card = node.get("musicTwoRowItemRenderer")
+        if isinstance(card, dict):
+            bid = str(((card.get("navigationEndpoint") or {}).get("browseEndpoint") or {}).get("browseId") or "")
+            if bid.startswith("VL") and len(bid) > 4 and bid[2:] not in found:
+                found.append(bid[2:])
+        for v in node.values():
+            playlist_ids(v, found)
+    elif isinstance(node, list):
+        for v in node:
+            playlist_ids(v, found)
+    return found
+
+
 def category_tracks(entry):
     # ytmusicapi's get_mood_playlists only reads playlists, but a genre page lists songs directly, so read the page and use its song parser
     raw = yt._send_request("browse", {"browseId": "FEmusic_moods_and_genres_category", "params": entry["params"]})
+    _mood_lists[entry["params"]] = playlist_ids(raw)[:40]   # the page's playlists: the genre's next pages
     found = tracks_of(songs_shelf(raw), 40)
     if len(found) < 5:  # the page changed shape: a plain search for the category still gives something to play
         found = tracks_of(yt.search(f"{entry['name']} songs", filter="songs", limit=40), 40)
@@ -283,21 +302,21 @@ _mood_lists = {}  # a genre's params -> the ids of its playlists
 
 
 def mood_playlists(entry):
+    # the genre page's playlists (category_tracks reads them while it loads the page; a later page that finds none yet reads the page once)
     if entry["params"] not in _mood_lists:
-        ids = []
         try:
-            ids = [pl["playlistId"] for pl in yt.get_mood_playlists(entry["params"]) or [] if pl.get("playlistId")]
+            _mood_lists[entry["params"]] = playlist_ids(yt._send_request("browse", {"browseId": "FEmusic_moods_and_genres_category", "params": entry["params"]}))[:40]
         except Exception:  # noqa: BLE001 - then the genre is just its own page
-            pass
-        _mood_lists[entry["params"]] = ids[:40]
+            _mood_lists[entry["params"]] = []
     return _mood_lists[entry["params"]]
 
 
 def category_page(entry, page):
     # page 0: the songs on the genre's own page; then one of its playlists per page (a genre has 10 to 40), so a genre runs to hundreds of songs
-    lists = mood_playlists(entry)
     if page == 0:
-        return {"tracks": category_tracks(entry), "more": bool(lists)}
+        tracks = category_tracks(entry)
+        return {"tracks": tracks, "more": bool(mood_playlists(entry))}
+    lists = mood_playlists(entry)
     if page > len(lists):
         return {"tracks": [], "more": False}
     try:
