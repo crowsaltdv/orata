@@ -713,3 +713,11 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 .ac-cover.mosaic img { width: 100%; height: 100%; object-fit: cover; }
 .ac-empty { padding: 10px 12px; font-size: 13.5px; color: var(--text-3); }
 .cmd-ac .ac-head b { color: var(--text); }
+/* a song shared in a chat (playlist-card.js SongCard) */
+.song-card { display: flex; gap: 14px; align-items: center; max-width: 520px; margin-top: 6px; padding: 12px; border-radius: 16px; background: rgb(var(--surface-rgb) / .07); border: 1px solid var(--border); }
+.song-card.cur { border-color: rgb(var(--accent-rgb) / .45); }
+.sc-art { position: relative; flex: none; width: 84px; height: 84px; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: rgb(var(--surface-rgb) / .12); color: var(--text-3); }
+.sc-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sc-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / .4); color: #fff; opacity: 0; transition: opacity 160ms; }
+.sc-art:hover .sc-play, .sc-art:focus-visible .sc-play, .song-card.cur .sc-play { opacity: 1; }
+.sc-title { font-size: 16px; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

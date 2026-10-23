@@ -13,7 +13,7 @@ import { UserName } from '/js/profile-style.js';
 import { InviteCard, inviteCodeOf } from '/js/invite-card.js';
 import { PollView } from '/js/polls.js';
 import { ThemeCard } from '/js/theme-card.js';
-import { PlaylistCard } from '/js/playlist-card.js';
+import { PlaylistCard, SongCard } from '/js/playlist-card.js';
 import { useFavGifs, toggleFavGif, gifFromMessage } from '/js/gif-favs.js';
 import { dismissEphemeral } from '/js/orbit.js';
 import '/js/forward.js';   // the Forward dialog
@@ -297,6 +297,7 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
         ${m.poll ? html`<${PollView} m=${m} ch=${ch} />` : null}
         ${m.theme ? html`<${ThemeCard} m=${m} />` : null}
         ${m.playlist ? html`<${PlaylistCard} m=${m} />` : null}
+        ${m.song ? html`<${SongCard} m=${m} />` : null}
         ${m.attachments?.length ? html`<div class="attachments">${m.attachments.map((a) => (a.voice ? html`<${VoiceMessage} key=${a.id || a.url} a=${a} expiresAt=${m.expiresAt} />` : html`<${Attachment} key=${a.id || a.url} a=${a} onImage=${onImage} />`))}</div>` : null}
         ${invites.map((c) => html`<${InviteCard} key=${c} code=${c} mine=${m.authorId === me} />`)}
         ${urls.map((u) => html`<${LinkEmbed} key=${u} url=${u} onImage=${(a) => set({ lightbox: { items: [a], index: 0 } })} />`)}

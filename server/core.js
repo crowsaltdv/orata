@@ -550,7 +550,7 @@ export function messageView(m) {
     id: m.id, channelId: m.channelId, authorId: m.authorId, content: m.content, createdAt: m.createdAt, editedAt: m.editedAt || null,
     attachments: m.attachments || [], gif: m.gif || null, sticker: m.sticker || null, reactions: m.reactions || {},
     replyTo: m.replyTo || null, reply, mentions: m.mentions || [], mentionRoles: m.mentionRoles || [],
-    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, forward: m.forward || undefined, bridge: m.bridge || undefined, application: m.application ? applicationView(m) : undefined, command: m.command ? { name: m.command.name } : undefined /* who used it: only server admins and staff may ask (orbit.js) */, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined, playlist: m.playlist || undefined,
+    mentionEveryone: !!m.mentionEveryone, pinned: !!m.pinned, type: m.type || 'default', nonce: undefined, expiresAt: m.expiresAt || undefined, forward: m.forward || undefined, bridge: m.bridge || undefined, application: m.application ? applicationView(m) : undefined, command: m.command ? { name: m.command.name } : undefined /* who used it: only server admins and staff may ask (orbit.js) */, emojis: m.emojis, poll: m.poll ? pollView(m.poll) : undefined, theme: m.theme || undefined, playlist: m.playlist || undefined, song: m.song || undefined,
   };
 }
 

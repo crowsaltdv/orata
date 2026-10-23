@@ -220,6 +220,13 @@ const playlistsOf = (u) => (u.playlists ||= []);
 const playlistName = (v) => { const n = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 60); if (!n) throw bad('Give the playlist a name'); return n; };
 const findPlaylist = (u, id) => { const p = playlistsOf(u).find((x) => x.id === String(id)); if (!p) throw notFound('That playlist doesn’t exist'); return p; };
 const playlistSummary = (p) => ({ id: p.id, name: p.name, count: p.tracks.length, duration: p.tracks.reduce((n, t) => n + (t.duration || 0), 0), covers: p.tracks.map((t) => t.artwork).filter(Boolean).slice(0, 4), updatedAt: p.updatedAt });
+/** What a song shared in a chat shows (/song): the server's own details of it (from YouTube Music), never what the client says. */
+export async function songCard(id) {
+  const tid = String(id ?? ''); if (!TRACK_ID.test(tid)) throw bad('Unknown track');
+  needEnabled();
+  const { title, artist, artists, album, albumId, artwork, duration, url } = await trackInfo(tid);
+  return { id: tid, title, artist, artists, album, albumId, artwork, duration, url };
+}
 /** What a playlist shared in a chat shows (a snapshot; opening it loads the playlist as it is now, through the message). */
 export function playlistCard(u, id) {
   const p = playlistsOf(u).find((x) => x.id === String(id ?? '')); if (!p) throw notFound('That playlist doesn’t exist');

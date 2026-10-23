@@ -311,6 +311,12 @@ async function main() {
   await api('DELETE', `/me/playlists/${copy.id}/tracks/${order[0]}`, D.token);
   r = await api('GET', `/me/playlists/${pl.id}`, A3); ok(r.body.playlist.tracks.length === order.length, '… changing the copy never touches the original');
   await api('DELETE', `/me/playlists/${empty.id}`, A3);
+  r = await api('POST', `/channels/${textCh.id}/messages`, D.token, { song: { id: 'nightdrive1', title: 'Fake title', artwork: 'https://evil.example/x.png' } });
+  ok(r.status === 200 && r.body.song?.title === 'Night Drive' && r.body.song.artist === 'Test Artist' && r.body.song.url === 'https://music.youtube.com/watch?v=nightdrive1' && !JSON.stringify(r.body.song).includes('evil'), '/song shares a song card, with YouTube Music’s own details');
+  const songMsg = r.body.id;
+  r = await api('GET', `/channels/${textCh.id}/messages?limit=5`, A3); ok(r.body.messages.some((m) => m.id === songMsg && m.song?.id === 'nightdrive1'), '… and it stays in the channel');
+  r = await api('POST', `/channels/${textCh.id}/messages`, D.token, { song: { id: 'nosuchtrack' } }); ok(r.status === 404, 'a song YouTube Music doesn’t have is refused');
+  r = await api('POST', `/channels/${textCh.id}/messages`, D.token, { song: { id: '<script>' } }); ok(r.status === 400, '… and so is a made-up id');
 
   console.log('\nListening status');
   const w1 = await connect(A3); const w2 = await connect(D.token);

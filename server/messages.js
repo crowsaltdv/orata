@@ -46,7 +46,7 @@ export function sanitizeAttachments(list, fs, path, uploadDir) {
   return out;
 }
 
-export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce, poll = null, theme = null, forward = null, bridge = null, application = null, command = null, playlist = null } = {}) {
+export function postMessage(ch, authorId, { content = '', attachments = [], gif = null, sticker = null, replyTo = null, replyPing = true, type = 'default', nonce, poll = null, theme = null, forward = null, bridge = null, application = null, command = null, playlist = null, song = null } = {}) {
   content = String(content).replace(/\r\n/g, '\n').slice(0, 4000);
   const server = ch.serverId ? db.servers[ch.serverId] : null;
   const author = db.users[authorId];
@@ -78,6 +78,7 @@ export function postMessage(ch, authorId, { content = '', attachments = [], gif 
   if (poll) msg.poll = poll;
   if (theme) msg.theme = theme;
   if (playlist) msg.playlist = playlist;   // a playlist shared with /playlist (server/music.js playlistCard)
+  if (song) msg.song = song;   // a song shared with /song (server/music.js songCard)
   if (forward) msg.forward = forward;   // a copy of a message forwarded from elsewhere
   if (bridge) msg.bridge = bridge;
   if (command) msg.command = command;   // Orbit's answer to a command: { name, by } (by: who used it)
@@ -115,7 +116,7 @@ function sweepExpired() {
     if (!m || !ch) continue;
     for (const a of (m.attachments || []).filter((y) => y.voice)) removeUpload(a.url.split('/').pop());
     m.attachments = (m.attachments || []).filter((y) => !y.voice); delete m.expiresAt;
-    if (!m.content?.trim() && !m.attachments.length && !m.gif && !m.sticker && !m.poll && !m.theme && !m.playlist) {
+    if (!m.content?.trim() && !m.attachments.length && !m.gif && !m.sticker && !m.poll && !m.theme && !m.playlist && !m.song) {
       list.splice(list.indexOf(m), 1);
       emitTo(audienceOf(ch), 'message_delete', { channelId: ch.id, messageId: id }); messagesDeleted(ch, [id]);
     } else emitTo(audienceOf(ch), 'message_update', { message: messageView(m) });

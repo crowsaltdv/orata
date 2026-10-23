@@ -25,7 +25,7 @@ import { verificationMode, isGated, issueVerification, consumeVerification, rese
 import { beginSignup, confirmSignup, resendSignup } from './signup.js';
 import { closeConns, storeUpload, restoreUpload } from './core.js';
 import { createSession, findSession, touchSession, endSession, endUserSessions, listSessions } from './sessions.js';
-import { mountMusic, musicReady, musicProblem, playlistCard } from './music.js';
+import { mountMusic, musicReady, musicProblem, playlistCard, songCard } from './music.js';
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 import { mountBadges } from './badges.js';
 import { mountThemes, dropUserThemes } from './themes.js';
@@ -1356,10 +1356,11 @@ export function createApi() {
     if (poll) { poll.question = guardText(ch, req.user.id, poll.question); for (const a of poll.answers) a.text = guardText(ch, req.user.id, a.text); }
     const theme = b.theme ? sanitizeSharedTheme(b.theme) : null;
     const playlist = b.playlist ? playlistCard(req.user, b.playlist.id) : null;   // only your own playlists can be shared
-    if (!content.trim() && !attachments.length && !gif && !sticker && !poll && !theme && !forward && !playlist) throw bad('Cannot send an empty message');
+    const song = b.song ? await songCard(b.song.id) : null;   // /song
+    if (!content.trim() && !attachments.length && !gif && !sticker && !poll && !theme && !forward && !playlist && !song) throw bad('Cannot send an empty message');
     if ((gif || sticker) && server && !canIn(req.user.id, ch, 'SEND_GIFS')) throw new ApiError(403, 'You don’t have permission to send GIFs or stickers here', 'no_gifs');
     if (content.length > 4000) throw bad('Message is too long (4000 characters max)');
-    const msg = postMessage(ch, req.user.id, { content, attachments, gif, sticker, replyTo: b.replyTo, replyPing: b.replyPing !== false, nonce: b.nonce, poll, theme, forward, playlist });
+    const msg = postMessage(ch, req.user.id, { content, attachments, gif, sticker, replyTo: b.replyTo, replyPing: b.replyPing !== false, nonce: b.nonce, poll, theme, forward, playlist, song });
     res.json(messageView(msg));
   }));
   /** A copy of a message from a channel you can see, to send on elsewhere ("Forwarded"). Audio messages aren't forwarded (they expire), polls and themes neither. */
