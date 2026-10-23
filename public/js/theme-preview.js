@@ -1,7 +1,7 @@
 // Orata — the preview picture of a theme, drawn right here in the browser from the theme itself (no screenshot service, nothing fetched from anywhere else).
 // A site theme is a picture of Orata with the theme on: the wallpaper (blur, dim, rain), frosted / glass panels, the rail, channel list, a few messages and the
 // message box, in the theme's colors and fonts. A profile theme is a profile card for a grayed-out "User", styled with the theme. The picture is uploaded when a
-// theme is saved (themes.js) and is what Theme Discovery shows above the name.
+// theme is saved (themes.js) and is what Discovery shows above the name.
 import { loadFont, drawMesh } from '/js/theme.js';
 import { MESH_WALLPAPERS, PHOTO_WALLPAPERS } from '/js/defaults.js';
 import { hexToRgb, luminance } from '/js/lib.js';

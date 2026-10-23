@@ -1,4 +1,4 @@
-// Orata self-test for the theme library and Theme Discovery:  npm test
+// Orata self-test for the theme library and Discovery:  npm test
 // The library (25 profile + 25 site themes per account, enforced here), everything a site / profile theme keeps, pictures that keep working, the
 // preview pictures, who may publish (the creator badge) and unpublish, installing from Discovery, sorting, and the sweep of theme files nobody uses.
 import { spawn } from 'node:child_process';
@@ -190,7 +190,7 @@ async function main() {
   r = await api('GET', '/themes/library', N.token); ok(r.body.themes.find((t) => t.id === T2.id).preview.endsWith('.webp'), 'the library hands it out with the theme');
 
   /* ---------------------------------------------------------------- publishing */
-  console.log('\nPublishing on Theme Discovery');
+  console.log('\nPublishing on Discovery');
   r = await api('POST', '/themes/discover', N.token, { id: T2.id }); ok(r.status === 403, 'without the Creator badge nobody can publish');
   r = await api('POST', '/themes/library', C.token, { kind: 'site', name: 'Sunset Glass', data: siteLook() }); const CT1 = r.body;
   r = await api('POST', '/themes/discover', C.token, { id: CT1.id }); ok(r.status === 400 && r.body.code === 'no_preview', 'a creator’s theme needs its preview first');
@@ -209,7 +209,7 @@ async function main() {
   }
 
   /* ---------------------------------------------------------------- Discovery */
-  console.log('\nBrowsing Theme Discovery');
+  console.log('\nBrowsing Discovery');
   r = await api('GET', '/themes/discover?kind=site&sort=alpha', N.token);
   ok(r.status === 200 && r.body.total === 5 && r.body.themes.map((t) => t.name).join() === 'Apple,Banana,cherry,mango,Sunset Glass', 'the site themes sort alphabetically, whatever the capital letters');
   r = await api('GET', '/themes/discover?kind=profile&sort=alpha', N.token); ok(r.body.total === 1 && r.body.themes[0].name === 'Zebra', 'profile themes are a tab of their own');

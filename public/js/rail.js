@@ -1,4 +1,4 @@
-// Orata — server rail (left-most column): Theme Discovery, music, home, servers and server folders.
+// Orata — server rail (left-most column): Discovery, music, home, servers and server folders.
 import { html, useState, useMemo, cx, memo } from '/js/lib.js';
 import { state, useSel, go, goChannel, openModal, closeModal, openContext, updateSettings, serverUnread, unreadInfo, hasPerm, toast, shallowArrEq } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
@@ -230,7 +230,7 @@ export function ServerRail() {
   return html`<nav class="rail panel" aria-label="Servers">
     <div class=${cx('rail-item', themesOpen && 'active')}>
       <span class="rail-pill"></span>
-      <button type="button" class="rail-btn themes glass glass-rail" data-tip=${t('Theme Discovery')} data-tip-pos="right" aria-label=${t('Theme Discovery')} aria-pressed=${themesOpen} onClick=${() => go('/themes')}><${Icon} name="paintbrush" size=${24} /></button>
+      <button type="button" class="rail-btn themes glass glass-rail" data-tip=${t('Discovery')} data-tip-pos="right" aria-label=${t('Discovery')} aria-pressed=${themesOpen} onClick=${() => go('/themes')}><${Icon} name="globe-grid" size=${24} /></button>
     </div>
     <div class=${cx('rail-item', musicOpen && 'active')}>
       <span class="rail-pill"></span>

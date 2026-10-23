@@ -181,7 +181,7 @@ export function parseRoute(path) {
   if ((m = p.match(/^\/music\/(artist|album|playlist)\/([\w-]+)$/))) return { view: 'music', serverId: '@me', channelId: null, musicView: m[1], musicId: m[2] };   // an artist's, an album's or one of your playlists' page
   if (p === '/music') return { view: 'music', serverId: '@me', channelId: null, musicView: null, musicId: null };
   if (p === '/staff') return { view: 'staff', serverId: '@me', channelId: null };   // Orata staff tools (staff.js)
-  if (p === '/themes' || p === '/themes/discover') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'discover' };   // Theme Discovery and your theme library (themes.js)
+  if (p === '/themes' || p === '/themes/discover') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'discover' };   // Discovery and your theme library (themes.js)
   if (p === '/themes/library') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'library' };
   if (p === '/login' || p === '/register') return { view: p.slice(1), serverId: '@me', channelId: null };
   if (p === '/verify') return { view: 'verify', serverId: '@me', channelId: null };   // the link in the verification email (the token is read from the query string)

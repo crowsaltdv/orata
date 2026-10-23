@@ -97,7 +97,7 @@ function Accounts() {
   const load = (query = q) => api.get(`/staff/users?q=${encodeURIComponent(query)}`).then(setList, () => setList([]));
   useEffect(() => { const id = setTimeout(() => load(q), 250); return () => clearTimeout(id); }, [q]);
   const run = async (u, what) => { const r = await moderate(u, what); if (r) { setList((l) => l.map((x) => (x.id === r.id ? r : x))); if (open?.id === r.id) setOpen({ ...open, ...r }); } };
-  // the Creator badge: lets someone publish themes on Theme Discovery
+  // the Creator badge: lets someone publish themes on Discovery
   const creator = async (u) => { const has = u.badges?.some((b) => b.id === 'creator'); const r = await act(api.put(`/users/${u.id}/creator`, { creator: !has }), { success: has ? t('Creator badge taken away') : t('Creator badge given') }); if (r) setList((l) => l.map((x) => (x.id === r.id ? { ...x, badges: r.badges } : x))); };
   return html`<div class="staff-bar"><div class="input-wrap staff-search"><${Icon} name="search" size=${18} class="in-icon" /><input class="input" placeholder=${t('Search by username, name or ID…')} value=${q} onInput=${(e) => setQ(e.target.value)} /></div></div>
     ${!list ? html`<div class="pk-center"><${Spinner} /></div>` : !list.length ? html`<${Empty} icon="users" title=${t('Nobody found')} />`

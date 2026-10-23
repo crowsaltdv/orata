@@ -15,7 +15,7 @@ const BUILTIN = [
   { id: 'verified', name: 'Verified', icon: 'check-circle', color: '#3b82f6' },
   { id: 'artist', name: 'Artist', icon: 'palette', color: '#f97316' },
   { id: 'partner', name: 'Partner', icon: 'award', color: '#a78bfa' },
-  { id: 'creator', name: 'Creator', icon: 'paintbrush', color: '#ec4899' },   // may publish themes on Theme Discovery (themes.js); staff and developers give it
+  { id: 'creator', name: 'Creator', icon: 'paintbrush', color: '#ec4899' },   // may publish themes on Discovery (themes.js); staff and developers give it
 ];
 const before = JSON.stringify(db.badges || null);
 db.badges ||= {};
@@ -52,7 +52,7 @@ export function mountBadges(r, { h }) {
     for (const u of Object.values(db.users)) if (u.badges?.includes(badge.id)) { u.badges = u.badges.filter((x) => x !== badge.id); tell(u); }
     save(); res.json({ ok: true });
   }));
-  /** Orata staff (and developers) give or take the creator badge, the one that lets someone publish themes on Theme Discovery. Nothing else about the badges changes. */
+  /** Orata staff (and developers) give or take the creator badge, the one that lets someone publish themes on Discovery. Nothing else about the badges changes. */
   r.put('/users/:id/creator', h(async (req, res) => {
     if (!isStaff(req.user)) throw forbidden('Only Orata staff can do that');
     const u = db.users[req.params.id]; if (!u || u.deleted || u.bot) throw notFound('Unknown user');

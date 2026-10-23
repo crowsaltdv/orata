@@ -1,4 +1,4 @@
-// Orata — themes: the Themes page (the paintbrush in the server rail, like Music): Theme Discovery (themes other people made) and your theme library
+// Orata — themes: the Discovery page (the globe in the server rail, like Music): Discovery (themes other people made) and your theme library
 // (up to 25 profile + 25 site themes, kept on your account). Each has a Profile themes and a Site themes tab and a Random / Alphabetical sort. Saving the look
 // you have now, applying a saved theme, renaming, deleting; people with the Creator badge publish a theme of their own; everyone installs from Discovery into
 // their library. What a theme holds is public/js/theme-data.js; the picture each one shows is drawn by theme-preview.js; the server side is server/themes.js.
@@ -113,13 +113,13 @@ function DiscoverCard({ th, onInstall, onUnpublish }) {
 function LibraryCard({ th, creator, worn, working, onApply, onRename, onDelete, onPublish, onUnpublish }) {
   const menu = [
     { label: t('Rename'), icon: 'edit', onClick: () => onRename(th) },
-    creator && !th.from && (th.published ? { label: t('Unpublish from Discovery'), icon: 'paintbrush', onClick: () => onUnpublish(th) } : { label: t('Publish on Discovery'), icon: 'paintbrush', onClick: () => onPublish(th) }),
+    creator && !th.from && (th.published ? { label: t('Unpublish from Discovery'), icon: 'globe-grid', onClick: () => onUnpublish(th) } : { label: t('Publish on Discovery'), icon: 'globe-grid', onClick: () => onPublish(th) }),
     { type: 'sep' },
     { label: t('Delete'), icon: 'trash', danger: true, onClick: () => onDelete(th) },
   ];
   return html`<article class=${cx('tcard', worn && 'worn')}>
     <${Picture} src=${th.preview} busy=${working}>${worn ? html`<span class="tcard-badge"><${Icon} name="check" size=${12} sw=${3} />${t('In use')}</span>` : null}<${More} items=${menu} /><//>
-    <div class="tcard-meta"><b class="tcard-name" title=${th.name}>${th.name}</b>${th.published ? html`<span class="tcard-by"><${Icon} name="globe" size=${12} sw=${2.2} />${t('Published')}</span>` : th.from ? html`<span class="tcard-by">${t('From Discovery')}</span>` : null}</div>
+    <div class="tcard-meta"><b class="tcard-name" title=${th.name}>${th.name}</b>${th.published ? html`<span class="tcard-by"><${Icon} name="globe-grid" size=${12} sw=${2.2} />${t('Published')}</span>` : th.from ? html`<span class="tcard-by">${t('From Discovery')}</span>` : null}</div>
     ${worn ? html`<${Btn} class="tcard-btn" disabled=${true}>${t('In use')}<//>` : html`<${Btn} class="tcard-btn" variant="primary" onClick=${() => onApply(th)}>${t('Apply')}<//>`}
   </article>`;
 }
@@ -139,7 +139,7 @@ export function ThemesPage() {
   const kind = kindNow; const sort = sorts[view]; const creator = isCreator(me); const closed = useRef(false); const asked = useRef(0); const tried = useRef(new Set()); const scroller = useRef(null);
   useEffect(() => { const f = () => bump((n) => n + 1); subs.add(f); return () => { subs.delete(f); closed.current = true; }; }, []);
 
-  // Theme Discovery: one page of the kind and sort chosen, more on request
+  // Discovery: one page of the kind and sort chosen, more on request
   const loadPub = async (more) => {
     const mine = ++asked.current;   // (an answer that comes after you picked another tab or sort is dropped)
     try {
@@ -175,22 +175,22 @@ export function ThemesPage() {
   };
   const unpublish = async (th) => {
     const theirs = th.mine === false;   // (a staff member taking someone else's theme down)
-    if (!await confirmDialog({ title: `${theirs ? t('Take down') : t('Unpublish')} “${th.name}”?`, body: theirs ? t('It leaves Theme Discovery for everyone. People who already installed it keep their copy.') : t('It leaves Theme Discovery for everyone. People who already installed it keep their copy, and it stays in your library.'), confirmLabel: theirs ? t('Take down') : t('Unpublish'), danger: true })) return;
+    if (!await confirmDialog({ title: `${theirs ? t('Take down') : t('Unpublish')} “${th.name}”?`, body: theirs ? t('It leaves Discovery for everyone. People who already installed it keep their copy.') : t('It leaves Discovery for everyone. People who already installed it keep their copy, and it stays in your library.'), confirmLabel: theirs ? t('Take down') : t('Unpublish'), danger: true })) return;
     if (await act(api.del(`/themes/discover/${th.published || th.id}`), { success: t('Unpublished') })) reload();
   };
   const publish = async (th) => {
     let cur = th;
-    const name = await askName({ title: t('Publish on Theme Discovery'), label: t('Name everyone will see'), value: th.name, confirm: t('Publish'), note: t('Everyone can install it. People see the preview picture, its name and your display name.') });
+    const name = await askName({ title: t('Publish on Discovery'), label: t('Name everyone will see'), value: th.name, confirm: t('Publish'), note: t('Everyone can install it. People see the preview picture, its name and your display name.') });
     if (!name) return;
     if (!cur.preview) { setMaking((m) => ({ ...m, [th.id]: true })); cur = await ensurePreview(th); setMaking((m) => { const n = { ...m }; delete n[th.id]; return n; }); }
-    if (await act(api.post('/themes/discover', { id: cur.id, name }), { success: t('Published on Theme Discovery') })) loadLib();
+    if (await act(api.post('/themes/discover', { id: cur.id, name }), { success: t('Published on Discovery') })) loadLib();
   };
   const rename = async (th) => {
     const name = await askName({ title: t('Rename theme'), label: t('Theme name'), value: th.name, confirm: t('Rename') });
     if (name && await act(api.patch(`/themes/library/${th.id}`, { name }))) setLib((l) => l.map((x) => (x.id === th.id ? { ...x, name } : x)));
   };
   const remove = async (th) => {
-    if (!await confirmDialog({ title: `${t('Delete')} “${th.name}”?`, body: th.published ? t('It is removed from your library. It stays on Theme Discovery until you unpublish it.') : t('It is removed from your library.'), confirmLabel: t('Delete'), danger: true })) return;
+    if (!await confirmDialog({ title: `${t('Delete')} “${th.name}”?`, body: th.published ? t('It is removed from your library. It stays on Discovery until you unpublish it.') : t('It is removed from your library.'), confirmLabel: t('Delete'), danger: true })) return;
     if (await act(api.del(`/themes/library/${th.id}`))) setLib((l) => l.filter((x) => x.id !== th.id));
   };
   const saveNow = async () => { if (await saveCurrentLook(kind)) loadLib(); };
@@ -203,8 +203,8 @@ export function ThemesPage() {
   return html`<main class="main panel themes-page view-anim">
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
-      <div class="m-title"><${Icon} name="paintbrush" size=${23} /><span class="name">${t('Themes')}</span></div>
-      <div class="staff-tabs">${tab('discover', 'compass', 'Discovery')}${tab('library', 'folder', 'My library')}</div>
+      <div class="m-title"><${Icon} name="globe-grid" size=${23} /><span class="name">${t('Discovery')}</span></div>
+      <div class="staff-tabs">${tab('discover', 'compass', 'Browse')}${tab('library', 'folder', 'My library')}</div>
       ${view === 'library' && undo ? html`<${Btn} class="th-undo" size="sm" variant="ghost" icon="refresh" onClick=${undoApply}>${t('Undo last theme')}<//>` : null}
     </header>
     <div class="themes-scroll" ref=${scroller}>
@@ -217,11 +217,11 @@ export function ThemesPage() {
       </div>
       ${error ? html`<${Empty} icon="alert-circle" title=${t('Couldn’t load themes')}>${error} <button type="button" class="link-btn" onClick=${reload}>${t('Try again')}</button><//>`
         : view === 'discover' ? (!pub ? html`<div class="pk-center"><${Spinner} /></div>` : !pub.themes.length
-          ? html`<${Empty} icon="paintbrush" title=${t(`No ${NOUN[kind]}s here yet`)}>${creator ? t('Publish one of yours from My library.') : t('People with the Creator badge can publish their themes here.')}<//>`
+          ? html`<${Empty} icon="globe-grid" title=${t(`No ${NOUN[kind]}s here yet`)}>${creator ? t('Publish one of yours from My library.') : t('People with the Creator badge can publish their themes here.')}<//>`
           : html`<div class="theme-grid">${pub.themes.map((th) => html`<${DiscoverCard} key=${th.id} th=${th} onInstall=${install} onUnpublish=${unpublish} />`)}</div>
             ${pub.themes.length < pub.total ? html`<div class="themes-more"><${Btn} onClick=${async () => { setPubMore(true); await loadPub(true); setPubMore(false); }} loading=${pubMore}>${t('Show more')}<//></div>` : null}`)
           : !lib ? html`<div class="pk-center"><${Spinner} /></div>` : !shownLib.length
-            ? html`<${Empty} icon="folder" title=${t(`No ${NOUN[kind]}s saved yet`)}>${t('Save the look you have now, or install one from Theme Discovery.')}<//>`
+            ? html`<${Empty} icon="folder" title=${t(`No ${NOUN[kind]}s saved yet`)}>${t('Save the look you have now, or install one from Discovery.')}<//>`
             : html`<div class="theme-grid">${shownLib.map((th) => html`<${LibraryCard} key=${th.id} th=${th} creator=${creator} worn=${isWorn(th)} working=${!!making[th.id] && !th.preview} onApply=${applyTheme} onRename=${rename} onDelete=${remove} onPublish=${publish} onUnpublish=${unpublish} />`)}</div>`}
     </div>
   </main>`;

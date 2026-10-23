@@ -1,4 +1,4 @@
-// Orata — the theme library and Theme Discovery. The screens are public/js/themes.js; what a theme is (and how it is checked) is public/js/theme-data.js.
+// Orata — the theme library and Discovery. The screens are public/js/themes.js; what a theme is (and how it is checked) is public/js/theme-data.js.
 // Library: every account keeps its own themes on the server (so they follow you to other devices): up to 25 profile themes and 25 site themes.
 // Discovery: people with the "creator" badge publish a theme of their own there; anyone installs one, which copies it into their library.
 // Pictures: a theme's wallpaper / card picture is copied into files the theme owns (th_<id>.<ext> in the uploads, checked to be a real picture), so it keeps
@@ -140,7 +140,7 @@ export function mountThemes(r, { h, limit }) {
     res.json(libView(t));
   }));
 
-  /* ---- Theme Discovery ---- */
+  /* ---- Discovery ---- */
   r.get('/themes/discover', h(async (req, res) => {
     const kind = THEME_KINDS.includes(req.query.kind) ? req.query.kind : 'site';
     let list = Object.values(db.themes).filter((t) => t.kind === kind && alive(t));
@@ -163,7 +163,7 @@ export function mountThemes(r, { h, limit }) {
   }));
   /** Unpublish: its author can; so can Orata staff (a theme that breaks the Community Guidelines). People who installed it keep their copy. */
   r.delete('/themes/discover/:id', h(async (req, res) => {
-    const t = db.themes[req.params.id]; if (!t) throw notFound('That theme isn’t on Theme Discovery');
+    const t = db.themes[req.params.id]; if (!t) throw notFound('That theme isn’t on Discovery');
     if (t.authorId !== req.user.id && !isStaff(req.user)) throw forbidden('Only the theme’s author can unpublish it.');
     delete db.themes[t.id];
     for (const x of db.users[t.authorId]?.themes || []) if (x.published === t.id) x.published = null;
@@ -173,7 +173,7 @@ export function mountThemes(r, { h, limit }) {
   }));
   /** Copies a published theme into your library, if there is room for it. */
   r.post('/themes/discover/:id/install', pace, h(async (req, res) => {
-    const pub = db.themes[req.params.id]; if (!pub || !alive(pub)) throw notFound('That theme isn’t on Theme Discovery any more');
+    const pub = db.themes[req.params.id]; if (!pub || !alive(pub)) throw notFound('That theme isn’t on Discovery any more');
     const have = mine(req).find((x) => x.from === pub.id);
     if (have) return res.json({ already: true, theme: libView(have) });
     if (mine(req).filter((x) => x.kind === pub.kind).length >= LIBRARY_LIMIT) throw full(pub.kind);
