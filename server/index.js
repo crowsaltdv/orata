@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import sharp from 'sharp';
-import { ROOT, UPLOAD_DIR, ENV, ensureBot, db, pg, restoreUpload, storageSummary } from './core.js';
+import { ROOT, UPLOAD_DIR, ENV, ensureBot, db, pg, restoreUpload, storageSummary, BUILD } from './core.js';
 import { discordOn } from './discord.js';
 import { createApi, turnConfigured } from './api.js';
 import { attachGateway } from './gateway.js';
@@ -94,7 +94,7 @@ const INDEX_HTML = (() => {
     for (const m of src.matchAll(/^\s*import\s+(?:[^'"]*?from\s+)?['"](\/(?:js|vendor)\/[^'"]+)['"]/gm)) walk(m[1]);
   };
   walk('/js/boot.js');
-  return fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8').replace('</head>', `${[...seen].map((f) => `  <link rel="modulepreload" href="${f}" />`).join('\n')}\n</head>`);
+  return fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8').replace('</head>', `  <meta name="orata-build" content="${BUILD}" />\n${[...seen].map((f) => `  <link rel="modulepreload" href="${f}" />`).join('\n')}\n</head>`);
 })();
 // SPA fallback (client-side routes: /channels/…, /invite/…, /login …)
 app.get('*', (req, res, next) => {

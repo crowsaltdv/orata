@@ -9,6 +9,13 @@ import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 export { ROOT, ENV, loadEnv };
 export const DATA_DIR = process.env.ORATE_DATA || path.join(ROOT, 'data');
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+/** This version of the browser app, a hash of its files. The page carries it (index.js) and "ready" says the server's (api.js): a tab left open
+ *  across a deploy sees they differ and loads the new version (events.js), so nobody stays on old code. */
+export const BUILD = (() => {
+  const h = crypto.createHash('sha1'); const pub = path.join(ROOT, 'public');
+  for (const d of ['js', 'css']) for (const f of fs.readdirSync(path.join(pub, d), { withFileTypes: true }).filter((x) => x.isFile()).map((x) => x.name).sort()) h.update(f).update(fs.readFileSync(path.join(pub, d, f)));
+  return h.update(fs.readFileSync(path.join(pub, 'index.html'))).digest('hex').slice(0, 12);
+})();
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 

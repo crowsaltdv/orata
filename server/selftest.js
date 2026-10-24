@@ -149,6 +149,8 @@ async function main() {
   const smallGif = Buffer.from(await (await fetch(`${base}/thumbs/96/${r.body.url.slice('/uploads/'.length)}`)).arrayBuffer());
   ok((await sharp(smallGif, { animated: true }).metadata()).pages === 2, '… and an animated GIF (avatar, banner…) stays animated');
   ok((await (await fetch(base + '/channels/@me')).text()).includes('<link rel="modulepreload" href="/js/app.js"'), 'the page asks for every start-up module at once');
+  { const pb = /name="orata-build" content="(\w+)"/.exec(await (await fetch(base + '/channels/@me')).text())?.[1]; const rr = await api('GET', '/ready', A);
+    ok(!!pb && rr.body.build === pb, 'the page and "ready" carry the same app version (a tab left open across a deploy sees they differ and reloads)'); }
   r = await api('GET', '/gifs?mode=trending&per_page=4', A);
   ok(r.status === 200 && r.body.items?.length > 0, 'GIF trending via KLIPY', JSON.stringify(r.body).slice(0, 120));
   if (r.body.items?.[0]) {

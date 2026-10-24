@@ -219,6 +219,15 @@ function sendView() {
 subscribe(sendView);
 gateway.on('ready', () => { viewSent = undefined; sendView(); });
 // only the list for the channel this tab shows now: one still on its way for a channel just left would stay up forever
+/* a new version of Orata went out while this tab was open (the page's version isn't the server's): load it, once you're not in a call, playing music or
+   halfway through a message. At most once a minute, in case two versions answer for a moment during a deploy. */
+const PAGE_BUILD = document.querySelector('meta[name="orata-build"]')?.content || null;
+function reloadWhenFree() {
+  if (state.voice.conn || state.music.playing || document.querySelector('.composer-input')?.value.trim()) { setTimeout(reloadWhenFree, 15_000); return; }
+  try { if (Date.now() - Number(sessionStorage.getItem('orate:updated') || 0) < 60_000) return; sessionStorage.setItem('orate:updated', String(Date.now())); } catch { /* private mode */ }
+  location.reload();
+}
+gateway.on('ready', (d) => { if (PAGE_BUILD && d.build && d.build !== PAGE_BUILD) reloadWhenFree(); });
 gateway.on('viewers', ({ channelId, users }) => { if (channelId !== viewSent) return; addUsers(users); set({ viewers: { [channelId]: users.map((u) => u.id) } }); });
 setInterval(() => {
   const now = Date.now(); let changed = false; const next = {};

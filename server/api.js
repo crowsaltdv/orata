@@ -23,7 +23,7 @@ import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 import { hasProfanity, censor, cleanBlockedWords } from './profanity.js';   // the same checker the browser uses
 import { verificationMode, isGated, issueVerification, consumeVerification, resendWait, maskEmail, baseUrl } from './verify.js';
 import { beginSignup, confirmSignup, resendSignup } from './signup.js';
-import { closeConns, storeUpload, restoreUpload } from './core.js';
+import { closeConns, storeUpload, restoreUpload, BUILD } from './core.js';
 import { createSession, findSession, touchSession, endSession, endUserSessions, listSessions } from './sessions.js';
 import { mountMusic, musicReady, musicProblem, playlistCard, songCard } from './music.js';
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
@@ -153,7 +153,7 @@ export async function buildIceConfig(userId) {
 
 /* ------------------------------------------------------------ ready */
 export function buildReady(user) {
-  if (isGated(user)) return { user: selfUser(user), servers: [], dms: [], users: [], relationships: [], readStates: {}, voiceStates: [], botId: db.botId, gated: true };   // must verify their email first
+  if (isGated(user)) return { user: selfUser(user), servers: [], dms: [], users: [], relationships: [], readStates: {}, voiceStates: [], botId: db.botId, gated: true, build: BUILD };   // must verify their email first
   const servers = Object.values(db.servers).filter((s) => s.members[user.id]);
   const dms = Object.values(db.channels).filter((c) => !c.serverId && c.recipients?.includes(user.id) && !user.closedDms?.[c.id]);
   const userIds = new Set([user.id, ...relatedUserIds(user.id)]);
@@ -170,7 +170,7 @@ export function buildReady(user) {
     dms: dms.map((c) => channelView(c)),
     users: usersFor([...userIds]),
     relationships: Object.entries(user.rel || {}).map(([id, type]) => ({ id, type })),
-    readStates, voiceStates, botId: db.botId,
+    readStates, voiceStates, botId: db.botId, build: BUILD,
   };
 }
 
