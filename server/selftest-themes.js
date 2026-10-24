@@ -282,6 +282,8 @@ async function main() {
   r = await api('GET', '/themes/discover?status=pending', N.token); ok(r.status === 403, 'only Orata staff see what is waiting');
   r = await api('GET', '/themes/discover?status=pending', S.token); ok(r.status === 200 && r.body.themes.some((t) => t.id === PUB1.id && t.status === 'pending'), 'Orata staff do');
   r = await api('POST', `/themes/discover/${PUB1.id}/review`, C.token, { approve: true }); ok(r.status === 403, 'its author can’t approve it');
+  r = await api('GET', `/themes/discover/${PUB1.id}/data`, S.token); ok(r.status === 200 && r.body.kind === 'site' && !!r.body.data?.theme, 'Orata staff can fetch a waiting theme’s whole look to preview it');
+  r = await api('GET', `/themes/discover/${PUB1.id}/data`, N.token); ok(r.status === 403, '… nobody else can');
   const wc = await connect(C.token);
   r = await approve(PUB1.id); ok(r.status === 200 && r.body.status === 'approved', 'a staff member approves it');
   ok(/is on Discovery now/.test((await wc.wait('message_create').catch(() => null))?.message?.content || ''), '… and Orbit tells its author'); wc.ws.close();

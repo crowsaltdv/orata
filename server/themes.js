@@ -223,6 +223,12 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
     res.json({ ok: true });
   }));
   /** Orata staff decide on a theme waiting for Discovery: { approve: true } puts it up; { approve: false, reason } turns it away (it stays in its author's library). */
+  /** Orata staff try a theme on before deciding (or any time): its whole look, not just the picture everyone sees. */
+  r.get('/themes/discover/:id/data', h(async (req, res) => {
+    if (!isStaff(req.user)) throw forbidden('Only Orata staff preview themes');
+    const pub = db.themes[req.params.id]; if (!pub || !alive(pub)) throw notFound('That theme isn’t on Discovery any more');
+    res.json({ id: pub.id, kind: pub.kind, name: pub.name, data: pub.data });
+  }));
   r.post('/themes/discover/:id/review', h(async (req, res) => {
     if (!isStaff(req.user)) throw forbidden('Only Orata staff review themes');
     const t = db.themes[req.params.id]; if (!t) throw notFound('That theme isn’t waiting any more');

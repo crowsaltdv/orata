@@ -22,7 +22,7 @@ import { markAllRead, ackChannel } from '/js/actions.js';
 import { VerifyScreen, VerifyGate, VerifyBanner } from '/js/verify.js';
 import { MusicPage } from '/js/music.js';
 import { StaffPage } from '/js/staff.js';
-import { ThemesPage } from '/js/themes.js';
+import { ThemesPage, ThemePreviewBar } from '/js/themes.js';
 import { ForumView } from '/js/forum.js';
 import '/js/polls.js';
 
@@ -141,7 +141,7 @@ export function App() {
   useEffect(() => { if (phase !== 'ready') document.title = 'Orata'; }, [phase]);
   return html`<div class="app-root" key=${`${lang}:${i18nVer}`}>
     ${verifying ? html`<${VerifyScreen} />` : phase === 'auth' ? html`<${AuthScreen} />` : phase === 'ready' ? (gated ? html`<${VerifyGate} />` : html`<${Shell} />`) : html`<${Splash} />`}
-    ${phase === 'ready' && !gated && !verifying ? html`<${CallOverlay} /><${QuickSwitcher} /><${SettingsHost} /><${ServerSettingsHost} /><${SaveBarHost} /><${VerifyBanner} />` : null}
+    ${phase === 'ready' && !gated && !verifying ? html`<${CallOverlay} /><${QuickSwitcher} /><${SettingsHost} /><${ServerSettingsHost} /><${SaveBarHost} /><${ThemePreviewBar} /><${VerifyBanner} />` : null}
     ${phase === 'ready' && !gated && !verifying ? html`<${ModeChooser} />` : null}
     <${Lightbox} /><${ModalHost} /><${ContextMenu} /><${PopoverHost} /><${ToastHost} />
   </div>`;

@@ -56,3 +56,11 @@
   .themes-scroll { padding: 14px 14px 40px; gap: 16px; }
   .theme-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 18px 12px; }
 }
+/* staff: try a theme on (themes.js previewTheme) */
+.tcard-peek { position: absolute; left: 8px; bottom: 8px; z-index: 2; display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px 5px 9px; border-radius: 999px;
+  background: rgb(0 0 0 / .62); color: #fff; font-size: 12.5px; font-weight: 700; backdrop-filter: blur(8px); opacity: .92; transition: opacity var(--t-fast), transform var(--t-fast); }
+.tcard-peek:hover { opacity: 1; transform: translateY(-1px); }
+.theme-preview-bar { animation: save-in .3s var(--ease-out, ease); }
+.theme-preview-bar .tpb-text { display: flex; align-items: center; gap: 10px; min-width: 0; } .theme-preview-bar .tpb-text > .icon { color: rgb(var(--accent-rgb)); flex: none; }
+.theme-preview-bar small { display: block; color: var(--text-3); font-size: 12px; }
+.theme-preview-card { width: 100%; max-width: 360px; margin: 0 auto; pointer-events: none; }

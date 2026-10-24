@@ -13,6 +13,7 @@ import { act, errMsg, closeSettings } from '/js/actions.js';
 import { t } from '/js/i18n.js';
 import { LIBRARY_LIMIT, sanitizeSiteLook, siteLookOf, sanitizeProfileTheme, profileLookOf } from '/js/theme-data.js';
 import { isStaffMe } from '/js/staff.js';
+import { ProfileCard } from '/js/profile.js';
 
 const KINDS = [{ value: 'profile', label: 'Profile themes' }, { value: 'site', label: 'Site themes' }];
 const NOUN = { profile: 'profile theme', site: 'site theme' };
@@ -55,6 +56,48 @@ async function undoApply() {
   if (u.kind === 'site') updateSettings(u.data || {}); else if (!await act(api.patch('/me', u.me))) return;
   setUndo(null); toast(t('Your previous look is back'), 'success', 2200);
 }
+
+/* ------------------------------------------------------------------ staff: try a theme on before deciding */
+let previewing = null;   // { before, th, onReview } while a site theme is on for a look
+/** Orata staff try a theme from Discovery on without keeping it. A site theme becomes the look of the app on this device only (nothing is saved to the
+ *  account) until the bar at the bottom ends it, so you can look around in it; a profile theme shows on your own profile card. `onReview(th, yes)`
+ *  lets either approve it or turn it away. */
+async function previewTheme(th, onReview) {
+  const full = await act(api.get(`/themes/discover/${th.id}/data`)); if (!full) return;
+  const look = th.kind === 'site' ? sanitizeSiteLook(full.data) : sanitizeProfileTheme(full.data);
+  if (!look) { toast(t('That theme can’t be shown'), 'error'); return; }
+  if (th.kind === 'profile') { openModal('theme-preview', { th, look, onReview }); return; }
+  if (!previewing) previewing = { before: structuredClone(state.settings) };
+  Object.assign(previewing, { th, onReview }); updateSettings(look, { sync: false }); changed();
+}
+function endPreview() {
+  if (!previewing) return;
+  const { before } = previewing; previewing = null; updateSettings(before); changed();   // (synced: whatever happens meanwhile, the account keeps its own look)
+}
+/** While a site theme is previewed: the bar at the bottom of every screen (app.js), with Approve / Turn away for a theme that's waiting. */
+export function ThemePreviewBar() {
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); subs.add(f); return () => subs.delete(f); }, []);
+  if (!previewing) return null;
+  const { th, onReview } = previewing;
+  const decide = async (yes) => { if (await onReview?.(th, yes)) endPreview(); };
+  return html`<div class="save-bar theme-preview-bar" role="status">
+    <span class="tpb-text"><${Icon} name="eye" size=${18} /><span>${t('Previewing')} <b>${th.name}</b> ${t('by')} ${th.author?.displayName || '?'}<small>${t('Only you see it, and nothing is saved.')}</small></span></span>
+    ${th.status === 'pending' && onReview ? html`<${Btn} size="sm" variant="primary" icon="check" onClick=${() => decide(true)}>${t('Approve')}<//><${Btn} size="sm" variant="danger" icon="x" onClick=${() => decide(false)}>${t('Turn away')}<//>` : null}
+    <${Btn} size="sm" onClick=${endPreview}>${t('End preview')}<//>
+  </div>`;
+}
+MODALS['theme-preview'] = function ThemePreview({ id, th, look, onReview }) {
+  const me = useSel((s) => s.me);
+  const { banner, ...style } = look;
+  const user = { ...me, profile: Object.keys(style).length ? style : me.profile, ...(banner ? { banner: banner.image, bannerColor: banner.color, accentColor: banner.color2 } : {}) };
+  const decide = async (yes) => { if (await onReview?.(th, yes)) closeModal(id); };
+  return html`<${Modal} title=${`${t('Preview')}: ${th.name}`} subtitle=${`${t('By')} ${th.author?.displayName || '?'} · ${t('your own profile card wearing it (nothing is saved)')}`} width=${420} onClose=${() => closeModal(id)}
+    footer=${html`${th.status === 'pending' && onReview ? html`<${Btn} variant="danger" icon="x" onClick=${() => decide(false)}>${t('Turn away')}<//><${Btn} variant="primary" icon="check" onClick=${() => decide(true)}>${t('Approve')}<//>` : null}<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Close')}<//>`}>
+    <div class="theme-preview-card pop-card"><${ProfileCard} userId=${me.id} mode="popout" userOverride=${user} /></div>
+  <//>`;
+};
+const Peek = ({ th, onReview }) => html`<button type="button" class="tcard-peek" onClick=${() => previewTheme(th, onReview)}><${Icon} name="eye" size=${14} />${t('Preview')}</button>`;
 
 /* ------------------------------------------------------------------ the library (server) */
 /** Draws the preview picture of a theme and stores it with the theme. Resolves the theme (with `preview`), or the theme as it was when that failed. */
@@ -159,12 +202,12 @@ function More({ items }) {
 const Poster = ({ user, downloads }) => html`<div class="tcard-who">
   <button type="button" class="tcard-poster" data-tip=${t('View profile')} onClick=${(e) => { addUsers([user]); openProfile(user.id, e.currentTarget); }}><${Avatar} user=${user} size=${20} /><span>${user.displayName}</span></button>
   <span class="tcard-dl" data-tip=${t(`${downloads} downloads`)} aria-label=${t(`${downloads} downloads`)}><${Icon} name="download" size=${13} sw=${2.4} />${downloads}</span></div>`;
-function DiscoverCard({ th, onInstall, onRemove, onVote }) {
+function DiscoverCard({ th, onInstall, onRemove, onVote, staff }) {
   const [busy, setBusy] = useState(false);
   const menu = isStaffMe() && !th.mine ? [{ label: t('Take down (staff)'), icon: 'trash', danger: true, onClick: () => onRemove(th) }] : null;
   const install = async () => { setBusy(true); await onInstall(th); setBusy(false); };
   return html`<article class="tcard" onContextMenu=${menu ? (e) => openContext(e, menu) : null}>
-    <${Picture} src=${th.preview}>${menu ? html`<${More} items=${menu} />` : null}<//>
+    <${Picture} src=${th.preview}>${menu ? html`<${More} items=${menu} />` : null}${staff ? html`<${Peek} th=${th} />` : null}<//>
     <div class="tcard-meta">
       <div class="tcard-top"><b class="tcard-name" title=${th.name}>${th.name}</b>
         <button type="button" class=${cx('tcard-vote', th.voted && 'on')} disabled=${th.mine} aria-pressed=${th.voted} data-tip=${th.mine ? t('Your own theme') : th.voted ? t('Take back your upvote') : t('Upvote')} aria-label=${t('Upvote')} onClick=${() => onVote(th)}><${Icon} name="arrow-up" size=${14} sw=${2.8} />${th.votes}</button></div>
@@ -186,7 +229,7 @@ function ReviewCard({ th, onReview }) {
   const [busy, setBusy] = useState(null);
   const go2 = async (yes) => { setBusy(yes ? 'yes' : 'no'); await onReview(th, yes); setBusy(null); };
   return html`<article class="tcard">
-    <${Picture} src=${th.preview}><span class="tcard-badge">${th.kind === 'site' ? t('Site theme') : t('Profile theme')}</span><//>
+    <${Picture} src=${th.preview}><span class="tcard-badge">${th.kind === 'site' ? t('Site theme') : t('Profile theme')}</span><${Peek} th=${th} onReview=${onReview} /><//>
     <div class="tcard-meta"><div class="tcard-top"><b class="tcard-name" title=${th.name}>${th.name}</b></div><${Poster} user=${th.author} downloads=${0} /></div>
     <div class="tcard-review"><${Btn} variant="primary" icon="check" loading=${busy === 'yes'} disabled=${!!busy} onClick=${() => go2(true)}>${t('Approve')}<//><${Btn} variant="danger" icon="x" loading=${busy === 'no'} disabled=${!!busy} onClick=${() => go2(false)}>${t('Turn away')}<//></div>
   </article>`;
@@ -241,8 +284,9 @@ export function ThemesPage() {
   useEffect(() => { loadWaiting(); }, [view, rev, staff]);
   const review = async (th, yes) => {
     const reason = yes ? '' : await new Promise((resolve) => openModal('theme-reject', { name: th.name, resolve }));
-    if (reason === null) return;
-    if (await act(api.post(`/themes/discover/${th.id}/review`, { approve: yes, reason }), { success: yes ? t('Approved: it’s on Discovery now') : t('Turned away') })) setWaiting((w) => w && { total: w.total - 1, themes: w.themes.filter((x) => x.id !== th.id) });
+    if (reason === null) return false;
+    if (!await act(api.post(`/themes/discover/${th.id}/review`, { approve: yes, reason }), { success: yes ? t('Approved: it’s on Discovery now') : t('Turned away') })) return false;
+    setWaiting((w) => w && { total: w.total - 1, themes: w.themes.filter((x) => x.id !== th.id) }); return true;
   };
   // your library: everything at once (it is at most 50 themes); the pictures that are missing get drawn now
   const loadLib = async () => {
@@ -326,7 +370,7 @@ export function ThemesPage() {
           ? html`<p class="text-muted themes-note">${t('Approve a theme to put it on Discovery for everyone, or turn it away (it stays in its author’s library). Orbit tells the author either way.')}</p><div class="theme-grid">${waiting.themes.map((th) => html`<${ReviewCard} key=${th.id} th=${th} onReview=${review} />`)}</div>`
           : html`<${Empty} icon="check-circle" title=${t('Nothing waiting')}>${t('New themes people send to Discovery show up here for you to approve.')}<//>`)
         : view === 'discover' ? (!pub ? html`<div class="pk-center"><${Spinner} /></div>` : html`
-          ${pub.themes.length || tile ? html`<div class="theme-grid">${tile}${pub.themes.map((th) => html`<${DiscoverCard} key=${th.id} th=${th} onInstall=${install} onRemove=${removeFromDiscovery} onVote=${vote} />`)}</div>` : null}
+          ${pub.themes.length || tile ? html`<div class="theme-grid">${tile}${pub.themes.map((th) => html`<${DiscoverCard} key=${th.id} th=${th} staff=${staff} onInstall=${install} onRemove=${removeFromDiscovery} onVote=${vote} />`)}</div>` : null}
           ${!pub.themes.length ? html`<${Empty} icon="globe-grid" title=${t(`No ${NOUN[kind]}s here yet`)}>${t('Be the first: press the + to send one of yours. Orata staff check each theme before it shows here.')}<//>` : null}
           ${pub.themes.length < pub.total ? html`<div class="themes-more"><${Btn} onClick=${async () => { setPubMore(true); await loadPub(true); setPubMore(false); }} loading=${pubMore}>${t('Show more')}<//></div>` : null}`)
           : !lib ? html`<div class="pk-center"><${Spinner} /></div>` : !shownLib.length
