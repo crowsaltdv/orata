@@ -370,22 +370,50 @@ async function main() {
   const dl = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-desktop-'));
   await stopServer(); startServer({ DESKTOP_DIR: dl, DESKTOP_APP_URL: '', DESKTOP_APP_VERSION: '' }); await ready();
   r = await api('GET', '/config'); ok(r.body.desktop === null, 'with no installer on the server, /api/config offers none (so the website shows no download button)');
-  let res = await fetch(`${base}/api/download/desktop`); ok(res.status === 404, '… and the download address says so');
+  let res = await fetch(`${base}/download/1.0.0`); ok(res.status === 404, '… and the download address says so');
   fs.writeFileSync(path.join(dl, 'Orata Setup 1.0.0.exe'), Buffer.alloc(3000, 1)); fs.writeFileSync(path.join(dl, 'Orata Setup 1.10.2.exe'), Buffer.alloc(5000, 2));
   fs.writeFileSync(path.join(dl, 'notes.txt'), 'not an installer'); fs.writeFileSync(path.join(dl, 'Orata Setup 9.9.9.exe.part'), 'unfinished'); fs.writeFileSync(path.join(dl, 'Other Setup 5.0.0.exe'), 'another program');
   await stopServer(); startServer({ DESKTOP_DIR: dl, DESKTOP_APP_URL: '', DESKTOP_APP_VERSION: '' }); await ready();
   r = await api('GET', '/config');
-  ok(r.body.desktop?.version === '1.10.2' && r.body.desktop.size === 5000 && r.body.desktop.url === '/api/download/desktop', 'the newest installer is offered (1.10.2 beats 1.0.0; other files in the folder are ignored)', JSON.stringify(r.body.desktop));
-  res = await fetch(`${base}/api/download/desktop`); const bytes = Buffer.from(await res.arrayBuffer());
+  ok(r.body.desktop?.version === '1.10.2' && r.body.desktop.size === 5000 && r.body.desktop.url === '/download/1.10.2', 'the newest installer is offered, at the site\'s own address /download/1.10.2 (1.10.2 beats 1.0.0; other files in the folder are ignored)', JSON.stringify(r.body.desktop));
+  res = await fetch(`${base}/download/1.10.2`); const bytes = Buffer.from(await res.arrayBuffer());
   ok(res.status === 200 && bytes.length === 5000 && bytes[0] === 2 && /attachment; filename="Orata Setup 1\.10\.2\.exe"/.test(res.headers.get('content-disposition') || ''), 'it downloads without signing in, as a file called "Orata Setup 1.10.2.exe"', res.headers.get('content-disposition'));
-  res = await fetch(`${base}/api/download/desktop`, { headers: { range: 'bytes=0-9' } }); ok(res.status === 206 && res.headers.get('content-range') === 'bytes 0-9/5000' && (await res.arrayBuffer()).byteLength === 10, 'a broken download can resume (Range requests are answered)');
+  res = await fetch(`${base}/download/1.10.2`, { headers: { range: 'bytes=0-9' } }); ok(res.status === 206 && res.headers.get('content-range') === 'bytes 0-9/5000' && (await res.arrayBuffer()).byteLength === 10, 'a broken download can resume (Range requests are answered)');
+  res = await fetch(`${base}/download/1.0.0`, { redirect: 'manual' }); ok(res.status === 302 && res.headers.get('location') === '/download/1.10.2', 'a link to an older version lands on the current one');
+  res = await fetch(`${base}/download`); await res.arrayBuffer(); ok(res.status === 200, '/download alone gives the current installer');
   fs.writeFileSync(path.join(dl, 'Orata Setup 2.0.0.exe'), Buffer.alloc(7000, 3)); await sleep(5300);
   r = await api('GET', '/config'); ok(r.body.desktop?.version === '2.0.0' && r.body.desktop.size === 7000, 'a new installer dropped into the folder is picked up within seconds, with no restart');
-  await stopServer(); startServer({ DESKTOP_DIR: path.join(dl, 'nothing-here'), DESKTOP_APP_URL: 'https://downloads.example.com/Orata-Setup.exe', DESKTOP_APP_VERSION: '3.1.0' }); await ready();
-  r = await api('GET', '/config'); ok(r.body.desktop?.url === 'https://downloads.example.com/Orata-Setup.exe' && r.body.desktop.version === '3.1.0' && r.body.desktop.size === null, 'without a file here, DESKTOP_APP_URL (an https link, e.g. a release page) is offered instead');
-  res = await fetch(`${base}/api/download/desktop`); ok(res.status === 404, '… and this server does not pretend to have the file');
+  /* DESKTOP_APP_URL: the server fetches the file itself, so people only ever see Orata's address. The upstream below stands in for a GitHub release: its link redirects to the file, like a real one. */
+  const BIG = 150_000; let hits = 0;
+  const upstream = http.createServer((q, s) => {
+    if (q.url === '/release/Orata%20Setup%203.1.0.exe') { s.writeHead(302, { location: '/cdn/blob' }); return s.end(); }
+    if (q.url === '/cdn/blob') { hits++; s.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': BIG }); return s.end(Buffer.alloc(BIG, 7)); }
+    if (q.url === '/page') { s.writeHead(200, { 'content-type': 'text/html' }); return s.end('<html>this is a web page, not the installer</html>'); }
+    s.writeHead(404); s.end('nope');
+  });
+  await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve)); const up = `http://127.0.0.1:${upstream.address().port}`;
+  const mirror = path.join(dl, 'mirror');
+  await stopServer(); startServer({ DESKTOP_DIR: mirror, DESKTOP_APP_URL: `${up}/release/Orata%20Setup%203.1.0.exe`, DESKTOP_APP_VERSION: '' }); await ready();
+  r = await api('GET', '/config'); ok(r.body.desktop?.url === '/download/3.1.0' && r.body.desktop.version === '3.1.0', 'with DESKTOP_APP_URL (a GitHub release file, say) the site still offers its own address /download/3.1.0, and reads the version from the link', JSON.stringify(r.body.desktop));
+  res = await fetch(`${base}/download/3.1.0`); let got = Buffer.from(await res.arrayBuffer());
+  ok(res.status === 200 && got.length === BIG && got[0] === 7 && /attachment; filename="Orata Setup 3\.1\.0\.exe"/.test(res.headers.get('content-disposition') || ''), '… and it downloads from Orata itself (no redirect away), as "Orata Setup 3.1.0.exe", though the file lives elsewhere', res.status + ' ' + res.headers.get('content-disposition'));
+  res = await fetch(`${base}/download`); got = Buffer.from(await res.arrayBuffer()); ok(res.status === 200 && got.length === BIG, '/download alone gives the installer too');
+  res = await fetch(`${base}/api/download/desktop`); await res.arrayBuffer(); ok(res.status === 200, '… and so does /api/download/desktop');
+  ok(hits === 1 && fs.existsSync(path.join(mirror, 'Orata Setup 3.1.0.exe')), 'the server fetched it once and keeps it (not once per download)', 'fetches from the link: ' + hits);
+  r = await api('GET', '/config'); ok(r.body.desktop?.size === BIG, 'once it has the file, the website knows its size');
+  res = await fetch(`${base}/download/2.5.0`, { redirect: 'manual' }); ok(res.status === 302 && res.headers.get('location') === '/download/3.1.0', 'a link to an older version lands on the current one');
+  await stopServer(); startServer({ DESKTOP_DIR: path.join(dl, 'dead'), DESKTOP_APP_URL: `${up}/gone.exe`, DESKTOP_APP_VERSION: '4.0.0' }); await ready();
+  r = await api('GET', '/config'); ok(r.body.desktop?.version === '4.0.0' && r.body.desktop.url === '/download/4.0.0', 'DESKTOP_APP_VERSION names the version when the link doesn\'t');
+  res = await fetch(`${base}/download/4.0.0`); ok(res.status === 404 && /isn’t available/.test(await res.text()), 'a link that doesn\'t work gives a plain "not available", not a broken download');
+  ok(!fs.existsSync(path.join(dl, 'dead')) || fs.readdirSync(path.join(dl, 'dead')).length === 0, '… and leaves no half-downloaded file behind');
+  await stopServer(); startServer({ DESKTOP_DIR: path.join(dl, 'page'), DESKTOP_APP_URL: `${up}/page`, DESKTOP_APP_VERSION: '4.0.0' }); await ready();
+  res = await fetch(`${base}/download/4.0.0`); ok(res.status === 404, 'a link to a web page instead of the file is refused, not handed out as the installer');
+  await stopServer(); startServer({ DESKTOP_DIR: path.join(dl, 'nothing-here'), DESKTOP_APP_URL: 'https://downloads.example.invalid/Orata-Setup.exe', DESKTOP_APP_VERSION: '1.0/../../x' }); await ready();
+  r = await api('GET', '/config'); ok(r.body.desktop?.version === null && r.body.desktop.url === '/download', 'a link and version with no x.y.z in them are offered at plain /download, nothing odd in the address');
   await stopServer(); startServer({ DESKTOP_DIR: path.join(dl, 'nothing-here'), DESKTOP_APP_URL: 'http://downloads.example.com/Orata-Setup.exe' }); await ready();
-  r = await api('GET', '/config'); ok(r.body.desktop === null, 'a link that is not https is ignored');
+  r = await api('GET', '/config'); ok(r.body.desktop === null, 'a link that is not https is ignored (so the installer can\'t be swapped on the way)');
+  res = await fetch(`${base}/download/1.0.0`); ok(res.status === 404, '… and /download says there is nothing');
+  upstream.close();
   fs.rmSync(dl, { recursive: true, force: true });
 
   /* the real helper (music-service/service.py), only the parts that need no internet: it starts, and refuses bad requests politely */

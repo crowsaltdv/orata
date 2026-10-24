@@ -147,7 +147,11 @@ Orata asks the provider for credentials on the server (never from the browser), 
 
 Orata can hand out the installer of its Windows desktop app. The first time someone opens Orata on Windows without being signed in, a screen offers **Continue to website** or **Download desktop app** (it is shown once per browser, and never inside the desktop app itself), and **Settings → Desktop App** — the first tab — introduces the app with a download button. Both only appear when the server has an installer to hand out.
 
-The installer is too big for git (GitHub refuses files over 100 MB), so it lives in a **`downloads/`** folder next to `server/` that git ignores. Put it there on every server that should offer it: the newest file called `Orata Setup x.y.z.exe` is used, and a new file is picked up within a few seconds, with no restart. On a Droplet, from your PC:
+The installer is too big for git (GitHub refuses files over 100 MB), so it lives in a **`downloads/`** folder next to `server/` that git ignores: the newest file called `Orata Setup x.y.z.exe` is used, and a new file is picked up within a few seconds, with no restart. There are two ways to get it there.
+
+**On Render (or any host where you can't copy files in):** attach the installer to a GitHub *release* (github.com → your repo → Releases → Draft a new release → drop the .exe into "Attach binaries" → Publish), copy the file's link from the release's Assets, and set `DESKTOP_APP_URL` to it (and `DESKTOP_APP_VERSION`, e.g. `1.0.0`, if the file's name doesn't contain the version). The server fetches it into `downloads/` itself when it starts (and again after each deploy, since Render's disk is wiped), so people never see the GitHub link: they download from `orata.fun/download`.
+
+**On a Droplet or your own machine:** copy the file in yourself. From your PC:
 
 ```bash
 ssh root@YOUR_DROPLET_IP "mkdir -p /home/orata/orata/downloads && chown orata:orata /home/orata/orata/downloads"
@@ -157,9 +161,10 @@ scp "Orata Setup 1.0.0.exe" root@YOUR_DROPLET_IP:/home/orata/orata/downloads/
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `DESKTOP_DIR` | `downloads` | The folder to look for the installer in |
-| `DESKTOP_APP_URL` | – | An `https://` link to the installer (for example a file attached to a GitHub release), offered when this server has no file of its own; `DESKTOP_APP_VERSION` is the version shown next to it |
+| `DESKTOP_APP_URL` | – | An `https://` link straight to the installer file (for example one attached to a GitHub release). The server fetches it once into `downloads/` and serves it from there; ignored if `downloads/` already holds that version or a newer one |
+| `DESKTOP_APP_VERSION` | read from the link | The version, like `1.0.0`, when the link's file name doesn't say |
 
-The file is served at `/api/download/desktop` (no login needed, 30 downloads an hour per address, and an interrupted download can resume). The installer isn't code-signed, so Windows shows "Windows protected your PC" the first time — *More info → Run anyway*; the website says so. Signing it takes a code-signing certificate from a certificate authority.
+The file is served at `/download` (and `/download/1.0.0`; `/api/download/desktop` works too) with no login, 30 downloads an hour per address, and an interrupted download can resume. A link to an older version lands on the current one. The installer isn't code-signed, so Windows shows "Windows protected your PC" the first time — *More info → Run anyway*; the website says so. Signing it takes a code-signing certificate from a certificate authority.
 
 ## Music (YouTube Music — no key needed)
 

@@ -29,7 +29,7 @@ import { mountMusic, musicReady, musicProblem, playlistCard, songCard } from './
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 import { mountBadges } from './badges.js';
 import { mountThemes, dropUserThemes } from './themes.js';
-import { desktopFile, desktopInfo } from './desktop.js';
+import { mirrorDesktop, desktopInfo } from './desktop.js';
 import { mountOrbit, addOrbit, reactionRole } from './orbit.js';
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -46,6 +46,22 @@ function limit(name, max, windowMs, keyFn = (req) => req.ip) {
   };
 }
 setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (b.reset < now) buckets.delete(k); }, 60_000).unref();
+
+/**
+ * The desktop app's installer, as a file download (with Range support, so a broken download can resume). Public: people download it before they have an account.
+ * Served at Orata's own addresses /download and /download/<version> (see index.js; /api/download/desktop too). With DESKTOP_APP_URL set, the server fetches the file from there
+ * into downloads/ first, once, so the person's browser only ever talks to Orata. A link to an older version lands on the current one.
+ */
+export const desktopDownload = [
+  limit('desktopdl', 30, 3600_000),
+  (req, res, next) => mirrorDesktop().then((f) => {
+    if (!f) throw notFound('The desktop app isn’t available from this server.');
+    if (req.params.version && req.params.version !== f.version) return res.redirect(302, `/download/${f.version}`);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.download(f.path, f.name);
+  }).catch(next),
+  (err, req, res, next) => res.status(err.status || 500).type('text/plain').send(err.status ? err.message : 'Something went wrong.'),   // this route lives outside /api, so it answers errors itself
+];
 
 const scrypt = (pw, salt) => new Promise((res, rej) => crypto.scrypt(pw, salt, 64, (e, k) => (e ? rej(e) : res(k.toString('hex')))));
 async function hashPassword(pw) { const salt = crypto.randomBytes(16).toString('hex'); return { salt, hash: await scrypt(pw, salt) }; }
@@ -187,12 +203,7 @@ export function createApi() {
     music: await musicReady(), musicWhy: musicProblem(),   // musicWhy: what the server still needs (Python, ytmusicapi), shown on the Music page
     desktop: desktopInfo(),   // the desktop app's installer, when this server has one to hand out: { version, size, url }
   })));
-  /** The desktop app's installer (the newest "Orata Setup x.y.z.exe" in downloads/). Public: people download it before they have an account. */
-  r.get('/download/desktop', limit('desktopdl', 30, 3600_000), h(async (req, res) => {
-    const f = desktopFile(); if (!f) throw notFound('The desktop app isn’t available from this server.');
-    res.set('Cache-Control', 'public, max-age=300');
-    res.download(f.path, f.name);   // sent as a download, with Range support so a broken download can resume
-  }));
+  r.get('/download/desktop', ...desktopDownload);   // the desktop app's installer (also at /download, see index.js)
 
   /* --------------------------- auth --------------------------- */
   r.post('/auth/check', limit('check', 60, 60_000), h(async (req, res) => {

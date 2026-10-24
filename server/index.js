@@ -8,12 +8,13 @@ import express from 'express';
 import sharp from 'sharp';
 import { ROOT, UPLOAD_DIR, ENV, ensureBot, db, pg, restoreUpload, storageSummary, BUILD } from './core.js';
 import { discordOn } from './discord.js';
-import { createApi, turnConfigured } from './api.js';
+import { createApi, turnConfigured, desktopDownload } from './api.js';
 import { attachGateway } from './gateway.js';
 import './bot.js';
 import { mailConfig } from './mail.js';
 import { verificationMode } from './verify.js';
 import { musicStatus } from './music.js';
+import { mirrorDesktop } from './desktop.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -41,6 +42,7 @@ app.use((req, res, next) => {
 });
 
 app.use('/api', createApi());
+app.get(['/download', '/download/:version'], ...desktopDownload);   // orata.fun/download — the desktop app's installer, whatever it is stored as
 
 // Uploaded files: only well-known media renders inline; everything else downloads. CSP sandbox keeps stray HTML inert.
 const INLINE = /\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm|mov|m4v|mp3|ogg|oga|wav|m4a|flac|opus|pdf|txt|woff2?|ttf|otf)$/i;   // (fonts: as fonts, for uploaded ones in Settings → Fonts and themes)
@@ -121,6 +123,7 @@ server.listen(PORT, HOST, () => {
   console.log(`    Discord bridge: ${discordOn ? 'on — /link in a channel (Orbit) links it with a Discord channel' : 'off (set DISCORD_BOT_TOKEN in .env, see README → "Discord bridge")'}`);
   console.log(`    Voice relay (TURN): ${turnConfigured() ? 'on — calls connect even across strict networks' : 'OFF — people on school or work Wi-Fi may not hear each other; add CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN (free) or TURN_URLS to .env, see README → "TURN relay"'}`);
   musicStatus().then((s) => console.log(`    Music: ${s}\n`));   // starts the music helper now, so a missing Python or library shows up in this log
+  mirrorDesktop();   // with DESKTOP_APP_URL set, fetches the desktop installer now, so the first person to click Download doesn't wait for it
   const vm = verificationMode(); const mc = mailConfig();
   console.log(`    Email verification: ${vm.enabled ? (mc ? `ON — sign-up needs a code emailed via ${mc.host}:${mc.port}` : 'ON (dev mode) — no SMTP_HOST, so sign-up codes are printed in this console') : 'OFF — add SMTP_HOST to .env to require an emailed code at sign-up (see README)'}\n`);
 });
