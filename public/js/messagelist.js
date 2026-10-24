@@ -107,7 +107,8 @@ export function MessageList({ chId }) {
   }, [jump?.ts]);
 
   const onScroll = () => {
-    const el = scroller.current; const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const el = scroller.current; if (!el) return;   // a scroll that lands after switching channels
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
     const ab = dist < 90; atBottom.current = ab;
     if (ab && showJump && !entry?.hasNewer) setShowJump(false);
     if (el.scrollTop < 260 && entry?.hasMore && !entry.loading) { prevH.current = el.scrollHeight; loadOlder(chId); }

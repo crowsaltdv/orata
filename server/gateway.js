@@ -10,7 +10,7 @@ import { isStage, isVoiceLike, isStageMod, stageJoinState, peersFor, mayLink, se
 
 const offlineTimers = new Map();
 
-/** Who is looking at a channel right now (the faces above the message box): a visible tab with it open, not idle, not invisible. Sent to each of them.
+/** Who is looking at a channel right now (the faces above the message box): a tab with it open (in front or not), not idle, not invisible. Sent to each of them.
  *  ponytail: walks every connection on each change; keep a per-channel index if that ever shows up in a profile. */
 function sendViewers(channelId) {
   const ids = new Set(); const to = [];
@@ -106,7 +106,7 @@ export function attachGateway(server) {
       switch (op) {
         case 'ping': send(conn, 'pong', { t: d.t }); break;
         case 'idle': { const v = !!d.idle; if (conn.idle !== v) { conn.idle = v; broadcastPresence(conn.userId); if (conn.viewing) sendViewers(conn.viewing); } break; }
-        case 'view': {   // the channel this tab shows (null: none, or the tab is hidden)
+        case 'view': {   // the channel this tab shows (null: none)
           const ch = d.channelId ? db.channels[String(d.channelId)] : null;
           const next = ch && canView(conn.userId, ch) ? ch.id : null; const prev = conn.viewing || null;
           if (next === prev) break;

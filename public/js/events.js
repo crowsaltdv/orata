@@ -208,15 +208,18 @@ function setDmRead(chId, userId, id) {
   state.dms = { ...state.dms, [chId]: { ...d, reads: { ...d.reads, [userId]: id } } };
 }
 gateway.on('dm_read', ({ channelId, userId, lastRead }) => { if (lastRead) { setDmRead(channelId, userId, lastRead); notify(); } });
-/* who else is looking at the channel you have open (composer.js shows their faces): the gateway is told which channel this tab shows */
+/* who else is looking at the channel you have open (composer.js shows their faces): the gateway is told which channel this tab shows.
+   A tab in the background still counts (two tabs, two accounts, one window); one left alone for 5 minutes goes idle and stops counting. */
 let viewSent;
 function sendView() {
-  const r = state.route; const id = document.visibilityState === 'visible' && (r.view === 'dm' || r.view === 'channel') ? r.channelId || null : null;
-  if (id !== viewSent && gateway.send('view', { channelId: id })) { viewSent = id; state.viewers = {}; }
+  const r = state.route; const id = r.view === 'dm' || r.view === 'channel' ? r.channelId || null : null;
+  if (id === viewSent || !gateway.send('view', { channelId: id })) return;
+  viewSent = id; if (Object.keys(state.viewers).length) set({ viewers: {} });
 }
-subscribe(sendView); document.addEventListener('visibilitychange', sendView);
+subscribe(sendView);
 gateway.on('ready', () => { viewSent = undefined; sendView(); });
-gateway.on('viewers', ({ channelId, users }) => { addUsers(users); set({ viewers: { ...state.viewers, [channelId]: users.map((u) => u.id) } }); });
+// only the list for the channel this tab shows now: one still on its way for a channel just left would stay up forever
+gateway.on('viewers', ({ channelId, users }) => { if (channelId !== viewSent) return; addUsers(users); set({ viewers: { [channelId]: users.map((u) => u.id) } }); });
 setInterval(() => {
   const now = Date.now(); let changed = false; const next = {};
   for (const [ch, users] of Object.entries(state.typing)) {

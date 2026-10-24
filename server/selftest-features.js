@@ -400,7 +400,7 @@ async function main() {
   gp.events.length = 0; view(gq, grp.id); ok(await viewers(gp, 2) === [P.user.id, Q.user.id].sort().join(), '… and told again when someone else opens it');
   gp.events.length = 0; gq.ws.send(JSON.stringify({ op: 'idle', d: { idle: true } })); ok(await viewers(gp, 1) === P.user.id, 'someone gone idle isn’t looking any more');
   gp.events.length = 0; gq.ws.send(JSON.stringify({ op: 'idle', d: { idle: false } })); ok(await viewers(gp, 2) !== null, '… until they are back');
-  gp.events.length = 0; view(gq, null); ok(await viewers(gp, 1) === P.user.id, 'leaving the channel (or hiding the tab) takes them off');
+  gp.events.length = 0; view(gq, null); ok(await viewers(gp, 1) === P.user.id, 'leaving the channel takes them off');
   view(gq, grp.id); await viewers(gp, 2); gp.events.length = 0; gq.ws.close(); ok(await viewers(gp, 1) === P.user.id, 'so does closing the tab');
   gp.events.length = 0; view(gz, grp.id); await sleep(400);
   ok(!gz.events.some((e) => e.op === 'viewers') && !gp.events.some((e) => e.op === 'viewers'), 'someone who can’t see the channel can’t look at it');
