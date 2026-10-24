@@ -11,7 +11,7 @@ import { Modal, Btn, IconBtn, Avatar, Segmented, Dropdown, Spinner, Empty, Field
 import { api } from '/js/api.js';
 import { act, errMsg, closeSettings } from '/js/actions.js';
 import { t } from '/js/i18n.js';
-import { LIBRARY_LIMIT, sanitizeSiteLook, siteLookOf, sanitizeProfileTheme, profileLookOf } from '/js/theme-data.js';
+import { LIBRARY_LIMIT, sanitizeSiteLook, siteLookOf, sanitizeProfileTheme, profileLookOf, searchWords, matchesWords } from '/js/theme-data.js';
 import { isStaffMe } from '/js/staff.js';
 import { ProfileCard } from '/js/profile.js';
 
@@ -266,20 +266,26 @@ export function ThemesPage() {
   const [sorts, setSorts] = useState({ discover: 'featured', library: 'alpha' }); const [seed, setSeed] = useState(newSeed);
   const [pub, setPub] = useState(null); const [pubMore, setPubMore] = useState(false); const [lib, setLib] = useState(null); const [error, setError] = useState(null);
   const [making, setMaking] = useState({}); const [, bump] = useState(0);
+  const [text, setText] = useState({ discover: '', library: '' }); const [applied, setApplied] = useState(''); const lastKey = useRef('');   // what is typed in each panel's search box (gone when the page closes); `applied` is Discovery's, after a short pause
   const kind = kindNow; const sort = sorts[view] || 'featured'; const staff = isStaffMe(); const closed = useRef(false);
   const asked = useRef(0); const tried = useRef(new Set()); const scroller = useRef(null);
   const [waiting, setWaiting] = useState(null);   // Orata staff: the themes waiting for them
   useEffect(() => { const f = () => bump((n) => n + 1); subs.add(f); return () => { subs.delete(f); closed.current = true; }; }, []);
 
-  // Discovery: one page of the kind and sort chosen, more on request
+  useEffect(() => { const q = text.discover.trim(); const id = setTimeout(() => setApplied(q), q ? 250 : 0); return () => clearTimeout(id); }, [text.discover]);
+  // Discovery: one page of the kind, sort and search chosen (the server searches every theme, not just the pages on screen), more on request
   const loadPub = async (more) => {
-    const mine = ++asked.current;   // (an answer that comes after you picked another tab or sort is dropped)
+    const mine = ++asked.current;   // (an answer that comes after you picked another tab, sort or search is dropped)
     try {
-      const r = await api.get(`/themes/discover?kind=${kind}&sort=${sort}&seed=${seed}&limit=48&offset=${more ? pub.themes.length : 0}`);
+      const r = await api.get(`/themes/discover?kind=${kind}&sort=${sort}&seed=${seed}&limit=48&offset=${more ? pub.themes.length : 0}${applied ? `&q=${encodeURIComponent(applied)}` : ''}`);
       if (closed.current || mine !== asked.current) return; setError(null); setPub(more ? { total: r.total, themes: [...pub.themes, ...r.themes] } : r);
     } catch (e) { if (!closed.current) setError(errMsg(e)); }
   };
-  useEffect(() => { if (view !== 'discover') return; setPub(null); setPubMore(false); loadPub(false); }, [view, kind, sort, seed, rev]);
+  useEffect(() => {
+    if (view !== 'discover') return;
+    const key = `${view}|${kind}|${sort}|${seed}|${rev}`; if (key !== lastKey.current) { lastKey.current = key; setPub(null); }   // (a new search keeps the cards on screen until its answer comes, so typing doesn't flash)
+    setPubMore(false); loadPub(false);
+  }, [view, kind, sort, seed, rev, applied]);
   const loadWaiting = async () => { if (!staff) return; try { const r = await api.get('/themes/discover?status=pending'); if (!closed.current) setWaiting(r); } catch (e) { if (!closed.current && view === 'review') setError(errMsg(e)); } };
   useEffect(() => { loadWaiting(); }, [view, rev, staff]);
   const review = async (th, yes) => {
@@ -345,11 +351,18 @@ export function ThemesPage() {
   const saveNow = async () => { if (await saveCurrentLook(kind)) loadLib(); };
 
   const mine = (lib || []).filter((x) => x.kind === kind); const counts = { profile: (lib || []).filter((x) => x.kind === 'profile').length, site: (lib || []).filter((x) => x.kind === 'site').length };
-  const shownLib = useMemo(() => (sort === 'alpha' ? [...mine].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) : shuffle(mine, seed)), [lib, kind, sort, seed]);
+  const libWords = searchWords(text.library);
+  const sortedLib = useMemo(() => (sort === 'alpha' ? [...mine].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) : shuffle(mine, seed)), [lib, kind, sort, seed]);
+  const shownLib = libWords.length ? sortedLib.filter((th) => matchesWords(libWords, th.name)) : sortedLib;   // (your library is all here, so it is searched here)
+  const search = text[view] || ''; const setSearch = (v) => setText((x) => ({ ...x, [view]: v })); const searching = view === 'discover' ? !!applied : !!libWords.length;
+  const searchBox = html`<div class="themes-search"><${TextInput} value=${search} onInput=${setSearch} icon="search" maxlength="60" placeholder=${view === 'library' ? t('Search your themes') : t('Search themes and people')} aria-label=${t('Search themes')}
+    onKeyDown=${(e) => { if (e.key === 'Escape' && search) { e.stopPropagation(); setSearch(''); } }}
+    right=${search ? html`<button type="button" class="themes-search-x" aria-label=${t('Clear search')} onClick=${() => setSearch('')}><${Icon} name="x" size=${15} sw=${2.6} /></button>` : null} /></div>`;
+  const noMatch = (icon) => html`<${Empty} icon="search" title=${t(`No themes match “${view === 'discover' ? applied : search.trim()}”`)}>${t('Try a different word, or')} <button type="button" class="link-btn" onClick=${() => { setSearch(''); if (view === 'discover') setApplied(''); }}>${t('clear the search')}</button>.<//>`;
   const full = mine.length >= LIBRARY_LIMIT;
   const goView = (v) => go(v === 'library' ? '/themes/library' : v === 'review' ? '/themes/review' : '/themes');
   const tab = (v, icon, label) => html`<button type="button" class=${cx('staff-tab', view === v && 'on')} onClick=${() => goView(v)}><${Icon} name=${icon} size=${16} />${label}</button>`;
-  const tile = me ? html`<${PostTile} onClick=${openPost} />` : null;
+  const tile = me && !searching ? html`<${PostTile} onClick=${openPost} />` : null;   // (not while searching)
   return html`<main class="main panel themes-page view-anim">
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
@@ -360,6 +373,7 @@ export function ThemesPage() {
     <div class="themes-scroll" ref=${scroller}>
       ${view === 'review' ? null : html`<div class="themes-bar">
         <${Segmented} size="sm" options=${KINDS.map((k) => ({ value: k.value, label: `${t(k.label)}${view === 'library' && lib ? ` · ${counts[k.value]}/${LIBRARY_LIMIT}` : ''}` }))} value=${kind} onChange=${setKindNow} />
+        ${searchBox}
         <span class="grow"></span>
         ${sort === 'random' ? html`<${IconBtn} icon="refresh" label=${t('Shuffle')} size=${17} glass=${null} onClick=${() => setSeed(newSeed())} />` : null}
         <${Dropdown} width=${158} value=${sort} options=${SORTS[view].map(([value, label]) => ({ value, label: t(label) }))} onChange=${(v) => setSorts((s) => ({ ...s, [view]: v }))} />
@@ -371,10 +385,10 @@ export function ThemesPage() {
           : html`<${Empty} icon="check-circle" title=${t('Nothing waiting')}>${t('New themes people send to Discovery show up here for you to approve.')}<//>`)
         : view === 'discover' ? (!pub ? html`<div class="pk-center"><${Spinner} /></div>` : html`
           ${pub.themes.length || tile ? html`<div class="theme-grid">${tile}${pub.themes.map((th) => html`<${DiscoverCard} key=${th.id} th=${th} staff=${staff} onInstall=${install} onRemove=${removeFromDiscovery} onVote=${vote} />`)}</div>` : null}
-          ${!pub.themes.length ? html`<${Empty} icon="globe-grid" title=${t(`No ${NOUN[kind]}s here yet`)}>${t('Be the first: press the + to send one of yours. Orata staff check each theme before it shows here.')}<//>` : null}
+          ${!pub.themes.length ? (searching ? noMatch() : html`<${Empty} icon="globe-grid" title=${t(`No ${NOUN[kind]}s here yet`)}>${t('Be the first: press the + to send one of yours. Orata staff check each theme before it shows here.')}<//>`) : null}
           ${pub.themes.length < pub.total ? html`<div class="themes-more"><${Btn} onClick=${async () => { setPubMore(true); await loadPub(true); setPubMore(false); }} loading=${pubMore}>${t('Show more')}<//></div>` : null}`)
           : !lib ? html`<div class="pk-center"><${Spinner} /></div>` : !shownLib.length
-            ? html`<${Empty} icon="folder" title=${t(`No ${NOUN[kind]}s saved yet`)}>${t('Save the look you have now, or install one from Discovery.')}<//>`
+            ? (searching && mine.length ? noMatch() : html`<${Empty} icon="folder" title=${t(`No ${NOUN[kind]}s saved yet`)}>${t('Save the look you have now, or install one from Discovery.')}<//>`)
             : html`<div class="theme-grid">${shownLib.map((th) => html`<${LibraryCard} key=${th.id} th=${th} worn=${isWorn(th)} working=${!!making[th.id] && !th.preview} onApply=${applyTheme} onRename=${rename} onDelete=${remove} onPost=${post} onRemove=${removeFromDiscovery} />`)}</div>`}
     </div>
   </main>`;

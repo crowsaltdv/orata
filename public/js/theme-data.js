@@ -110,6 +110,14 @@ export const profileLookOf = ({ profile, banner, bannerColor, accentColor } = {}
 /* ------------------------------------------------------------------ any theme */
 /** A clean theme of `kind` ('site' or 'profile'), or null when nothing usable is in it. */
 export const sanitizeTheme = (kind, data) => (kind === 'site' ? sanitizeSiteLook(data) : kind === 'profile' ? sanitizeProfileTheme(data) : null);
+/* ---- searching (the same on the server, for Discovery's pages, and in the browser, for your library) */
+/** Lower case with the accents taken off, so "cafe" finds "Café". */
+export const fold = (s) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+/** The words of a search (at most 6, each cut at 40 letters), folded. */
+export const searchWords = (q) => fold(q).split(/\s+/).filter(Boolean).slice(0, 6).map((w) => w.slice(0, 40));
+/** Does every word of a search appear somewhere in `text`? */
+export const matchesWords = (words, text) => { const h = fold(text); return words.every((w) => h.includes(w)); };
+
 /** A theme's name: one line, at most THEME_NAME_MAX characters ('' when there is none). */
 export const cleanThemeName = (name) => String(name ?? '').replace(/[\u0000-\u001f\u007f<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, THEME_NAME_MAX);
 

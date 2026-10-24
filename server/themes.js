@@ -16,7 +16,7 @@ import { isStaff } from './names.js';
 import { hasProfanity } from './profanity.js';
 import { staffLog } from './staff.js';
 import { orbitTells } from './applications.js';
-import { THEME_KINDS, LIBRARY_LIMIT, sanitizeTheme, cleanThemeName, themeFiles, mapThemeFiles } from '../public/js/theme-data.js';
+import { THEME_KINDS, LIBRARY_LIMIT, sanitizeTheme, cleanThemeName, themeFiles, mapThemeFiles, searchWords, matchesWords } from '../public/js/theme-data.js';
 
 db.themes ||= {};        // Discovery: id -> { id, kind, name, data, preview, authorId, createdAt, installs, status: 'pending' (waiting for staff) | 'approved' (none: posted before approval existed) }
 db.themeCopies ||= {};   // an upload's name -> the theme file that is its copy (so saving one wallpaper in many themes keeps one copy)
@@ -192,6 +192,9 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
     }
     const kind = THEME_KINDS.includes(req.query.kind) ? req.query.kind : 'site';
     let list = Object.values(db.themes).filter((t) => t.kind === kind && shown(t));
+    // a search (`q`): every word has to be in the theme's name or in its poster's name or username (so it covers every page, not only the one on screen)
+    const words = searchWords(String(req.query.q || '').slice(0, 200));
+    if (words.length) list = list.filter((t) => { const a = db.users[t.authorId]; return matchesWords(words, `${t.name} ${a?.displayName || ''} ${a?.username || ''}`); });
     // Featured (the default): the most upvoted first, newest first among equals; Most downloaded (installed); alphabetical; or a shuffle
     list = req.query.sort === 'alpha' ? list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || cmpId(a.id, b.id))
       : req.query.sort === 'random' ? shuffled(list, req.query.seed)

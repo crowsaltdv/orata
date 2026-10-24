@@ -8,6 +8,10 @@
 .th-undo { margin-left: auto; flex: none; }
 .themes-scroll { flex: 1; overflow-y: auto; padding: 20px 28px 48px; display: flex; flex-direction: column; gap: 22px; }
 .themes-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.themes-search { position: relative; flex: 1 1 220px; min-width: 160px; max-width: 360px; }
+.themes-search .input { height: 34px; padding-right: 34px; }
+.themes-search-x { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; color: var(--text-3); }
+.themes-search-x:hover, .themes-search-x:focus-visible { color: var(--text); background: rgb(var(--surface-rgb) / .14); }
 .themes-more { display: flex; justify-content: center; padding: 4px 0; }
 
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 26px 22px; align-items: start; }

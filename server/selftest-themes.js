@@ -320,6 +320,24 @@ async function main() {
   r = await api('GET', '/themes/discover?kind=site&sort=alpha&limit=2&offset=2', N.token); ok(r.body.themes.map((t) => t.name).join() === 'cherry,mango' && r.body.total === 5, 'it pages');
   r = await api('GET', '/themes/discover?kind=site', C.token); ok(r.body.themes.every((t) => t.mine), 'the creator sees their own themes marked as theirs');
 
+  /* ---------------------------------------------------------------- searching Discovery */
+  console.log('\nSearching Discovery');
+  const found = async (q, extra = '', tok = N.token) => (await api('GET', `/themes/discover?kind=site&sort=alpha&q=${encodeURIComponent(q)}${extra}`, tok)).body;
+  r = await found('APP'); ok(r.total === 1 && r.themes[0].name === 'Apple', 'a search finds themes by name, whatever the capital letters');
+  r = await found('ana'); ok(r.themes.map((t) => t.name).join() === 'Banana', '… from any part of the name');
+  r = await found('cora'); ok(r.total === 5, '… and by the poster’s name (every site theme here is Cora’s)');
+  r = await found('sunset glass'); ok(r.themes.map((t) => t.name).join() === 'Sunset Glass', 'several words all have to match');
+  r = await found('cora sun'); ok(r.themes.map((t) => t.name).join() === 'Sunset Glass', '… and may be spread between the name and the poster');
+  r = await found('zzzz'); ok(r.total === 0 && r.themes.length === 0, 'nothing matching gives an empty list, not an error');
+  r = await found('(['); ok(r.total === 0, 'odd characters are only letters to look for (no pattern is run)');
+  r = await found('   '); ok(r.total === 5, 'a search of only spaces is no search');
+  r = await found('cora', '&limit=2&offset=2'); ok(r.total === 5 && r.themes.map((t) => t.name).join() === 'cherry,mango', 'a search pages like the full list (the total is the number of matches)');
+  r = await found('an', '&limit=1&offset=1'); ok(r.total === 2 && r.themes.map((t) => t.name).join() === 'mango', '… and covers every page, not only the first');
+  r = await api('GET', '/themes/discover?kind=profile&sort=alpha&q=dan', N.token); ok(r.body.total === 1 && r.body.themes[0].name === 'Zebra', 'the profile tab is searched on its own (its poster is Dan)');
+  r = await api('GET', '/themes/discover?kind=site&sort=alpha&q=zebra', N.token); ok(r.body.total === 0, '… and a profile theme doesn’t turn up among site themes');
+  r = await api('GET', '/themes/discover?kind=site&sort=downloads&q=ban', N.token); ok(r.body.themes.map((t) => t.name).join() === 'Banana', 'it works with every sort');
+  r = await found('cora', '', A.token); ok(r.themes.every((t) => t.installed === false && t.mine === false), 'cards found by a search still say whether you installed or posted them');
+
   /* ---------------------------------------------------------------- upvotes and Featured */
   console.log('\nUpvotes and Featured');
   const named = Object.fromEntries((await api('GET', '/themes/discover?kind=site&sort=alpha', N.token)).body.themes.map((x) => [x.name, x]));
