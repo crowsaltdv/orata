@@ -2,6 +2,7 @@
 import { html, useEffect, useState, cx, ls, lsRemove } from '/js/lib.js';
 import { state, set, useSel, go, openModal, closeModal, unreadInfo, getChannel, dmName } from '/js/store.js';
 import { AuthScreen, Splash } from '/js/auth.js';
+import { DesktopPrompt } from '/js/desktop.js';
 import { ModalHost, ContextMenu, PopoverHost, ToastHost, SaveBarHost, Btn } from '/js/ui.js';
 import { Icon } from '/js/icons.js';
 import { t } from '/js/i18n.js';
@@ -140,7 +141,7 @@ export function App() {
   const verifying = useSel((s) => s.route.view === 'verify');
   useEffect(() => { if (phase !== 'ready') document.title = 'Orata'; }, [phase]);
   return html`<div class="app-root" key=${`${lang}:${i18nVer}`}>
-    ${verifying ? html`<${VerifyScreen} />` : phase === 'auth' ? html`<${AuthScreen} />` : phase === 'ready' ? (gated ? html`<${VerifyGate} />` : html`<${Shell} />`) : html`<${Splash} />`}
+    ${verifying ? html`<${VerifyScreen} />` : phase === 'auth' ? html`<${AuthScreen} /><${DesktopPrompt} />` : phase === 'ready' ? (gated ? html`<${VerifyGate} />` : html`<${Shell} />`) : html`<${Splash} />`}
     ${phase === 'ready' && !gated && !verifying ? html`<${CallOverlay} /><${QuickSwitcher} /><${SettingsHost} /><${ServerSettingsHost} /><${SaveBarHost} /><${ThemePreviewBar} /><${VerifyBanner} />` : null}
     ${phase === 'ready' && !gated && !verifying ? html`<${ModeChooser} />` : null}
     <${Lightbox} /><${ModalHost} /><${ContextMenu} /><${PopoverHost} /><${ToastHost} />

@@ -1,0 +1,15 @@
+/* the desktop app: the first-visit screen and the Settings page (desktop.js) */
+.dp-backdrop { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgb(6 4 14 / .62); backdrop-filter: blur(10px) saturate(1.1); animation: fade-in var(--t-med) ease both; }
+.dp-card { width: min(470px, 100%); display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 34px 30px 26px; text-align: center; border-radius: var(--radius-lg); }
+.dp-card h1 { margin: 6px 0 0; font-size: 26px; line-height: 1.2; } .dp-card p { margin: 0; color: var(--text-2); font-size: 15px; line-height: 1.5; }
+.dp-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: 100%; margin-top: 14px; }
+.dp-actions .btn { flex: 1 1 190px; justify-content: center; min-height: 46px; font-size: 15px; text-decoration: none; }
+.dp-meta { margin-top: 2px; color: var(--text-3); font-size: 12.5px; }
+.dp-note { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0 0; padding: 10px 12px; border-radius: 12px; background: rgb(var(--surface-rgb) / .07); color: var(--text-2); font-size: 13px; line-height: 1.45; text-align: left; } .dp-note .icon { flex: none; margin-top: 2px; color: var(--text-3); }
+.desk { display: flex; flex-direction: column; gap: 18px; }
+.desk-hero { display: flex; align-items: center; gap: 18px; padding: 20px; border-radius: 18px; border: 1px solid var(--border); background: rgb(var(--surface-rgb) / .06); } .desk-hero h3 { margin: 0 0 6px; font-size: 20px; } .desk-hero p { margin: 0; color: var(--text-2); font-size: 14.5px; line-height: 1.55; }
+.desk-points { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; } .desk-points li { display: flex; align-items: flex-start; gap: 10px; color: var(--text-2); font-size: 14px; } .desk-points .icon { flex: none; margin-top: 1px; color: var(--accent); }
+.desk-dl { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 16px; border: 1px solid var(--border); background: rgb(var(--surface-rgb) / .06); } .desk-dl .meta { flex: 1 1 200px; min-width: 0; } .desk-dl b { display: block; font-size: 15px; } .desk-dl small { color: var(--text-3); font-size: 13px; }
+.desk .btn, .dp-card .btn { text-decoration: none; }
+.desk-none { margin: 0; color: var(--text-3); font-size: 14px; }
+@media (max-width: 560px) { .desk-hero { flex-direction: column; align-items: flex-start; } .dp-card { padding: 28px 20px 22px; } }

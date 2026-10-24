@@ -366,6 +366,28 @@ async function main() {
   r = await api('GET', '/config'); ok(r.body.music === false, 'MUSIC=off turns the player off');
   r = await api('GET', '/music/search?q=night', A3); ok(r.status === 503 && r.body.code === 'music_not_configured', 'and searching explains it');
 
+  console.log('\nDesktop app download');
+  const dl = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-desktop-'));
+  await stopServer(); startServer({ DESKTOP_DIR: dl, DESKTOP_APP_URL: '', DESKTOP_APP_VERSION: '' }); await ready();
+  r = await api('GET', '/config'); ok(r.body.desktop === null, 'with no installer on the server, /api/config offers none (so the website shows no download button)');
+  let res = await fetch(`${base}/api/download/desktop`); ok(res.status === 404, '… and the download address says so');
+  fs.writeFileSync(path.join(dl, 'Orata Setup 1.0.0.exe'), Buffer.alloc(3000, 1)); fs.writeFileSync(path.join(dl, 'Orata Setup 1.10.2.exe'), Buffer.alloc(5000, 2));
+  fs.writeFileSync(path.join(dl, 'notes.txt'), 'not an installer'); fs.writeFileSync(path.join(dl, 'Orata Setup 9.9.9.exe.part'), 'unfinished'); fs.writeFileSync(path.join(dl, 'Other Setup 5.0.0.exe'), 'another program');
+  await stopServer(); startServer({ DESKTOP_DIR: dl, DESKTOP_APP_URL: '', DESKTOP_APP_VERSION: '' }); await ready();
+  r = await api('GET', '/config');
+  ok(r.body.desktop?.version === '1.10.2' && r.body.desktop.size === 5000 && r.body.desktop.url === '/api/download/desktop', 'the newest installer is offered (1.10.2 beats 1.0.0; other files in the folder are ignored)', JSON.stringify(r.body.desktop));
+  res = await fetch(`${base}/api/download/desktop`); const bytes = Buffer.from(await res.arrayBuffer());
+  ok(res.status === 200 && bytes.length === 5000 && bytes[0] === 2 && /attachment; filename="Orata Setup 1\.10\.2\.exe"/.test(res.headers.get('content-disposition') || ''), 'it downloads without signing in, as a file called "Orata Setup 1.10.2.exe"', res.headers.get('content-disposition'));
+  res = await fetch(`${base}/api/download/desktop`, { headers: { range: 'bytes=0-9' } }); ok(res.status === 206 && res.headers.get('content-range') === 'bytes 0-9/5000' && (await res.arrayBuffer()).byteLength === 10, 'a broken download can resume (Range requests are answered)');
+  fs.writeFileSync(path.join(dl, 'Orata Setup 2.0.0.exe'), Buffer.alloc(7000, 3)); await sleep(5300);
+  r = await api('GET', '/config'); ok(r.body.desktop?.version === '2.0.0' && r.body.desktop.size === 7000, 'a new installer dropped into the folder is picked up within seconds, with no restart');
+  await stopServer(); startServer({ DESKTOP_DIR: path.join(dl, 'nothing-here'), DESKTOP_APP_URL: 'https://downloads.example.com/Orata-Setup.exe', DESKTOP_APP_VERSION: '3.1.0' }); await ready();
+  r = await api('GET', '/config'); ok(r.body.desktop?.url === 'https://downloads.example.com/Orata-Setup.exe' && r.body.desktop.version === '3.1.0' && r.body.desktop.size === null, 'without a file here, DESKTOP_APP_URL (an https link, e.g. a release page) is offered instead');
+  res = await fetch(`${base}/api/download/desktop`); ok(res.status === 404, '… and this server does not pretend to have the file');
+  await stopServer(); startServer({ DESKTOP_DIR: path.join(dl, 'nothing-here'), DESKTOP_APP_URL: 'http://downloads.example.com/Orata-Setup.exe' }); await ready();
+  r = await api('GET', '/config'); ok(r.body.desktop === null, 'a link that is not https is ignored');
+  fs.rmSync(dl, { recursive: true, force: true });
+
   /* the real helper (music-service/service.py), only the parts that need no internet: it starts, and refuses bad requests politely */
   console.log('\nThe real music helper (offline checks)');
   let real = null;

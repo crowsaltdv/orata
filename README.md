@@ -143,6 +143,24 @@ Orata asks the provider for credentials on the server (never from the browser), 
 
 **Calls: nobody can hear / see anyone?** Two people on the same home Wi-Fi usually connect directly, but school and public Wi-Fi often stops devices on it from reaching each other, so two friends sitting next to each other can both be stuck on *Connecting…* (the same relay fixes that). Across the internet the usual culprit is a network that blocks direct connections (mobile data, school / work Wi-Fi, some routers) and **no relay**. Orata shows *Connecting…* / *Can't connect* on each person's tile and explains it once with a message; the fix is the relay above. Also remember that the microphone, camera and screen share only work on `https://` or `localhost` (a plain `http://192.168…` address can listen but can't talk).
 
+## Desktop app
+
+Orata can hand out the installer of its Windows desktop app. The first time someone opens Orata on Windows without being signed in, a screen offers **Continue to website** or **Download desktop app** (it is shown once per browser, and never inside the desktop app itself), and **Settings → Desktop App** — the first tab — introduces the app with a download button. Both only appear when the server has an installer to hand out.
+
+The installer is too big for git (GitHub refuses files over 100 MB), so it lives in a **`downloads/`** folder next to `server/` that git ignores. Put it there on every server that should offer it: the newest file called `Orata Setup x.y.z.exe` is used, and a new file is picked up within a few seconds, with no restart. On a Droplet, from your PC:
+
+```bash
+ssh root@YOUR_DROPLET_IP "mkdir -p /home/orata/orata/downloads && chown orata:orata /home/orata/orata/downloads"
+scp "Orata Setup 1.0.0.exe" root@YOUR_DROPLET_IP:/home/orata/orata/downloads/
+```
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `DESKTOP_DIR` | `downloads` | The folder to look for the installer in |
+| `DESKTOP_APP_URL` | – | An `https://` link to the installer (for example a file attached to a GitHub release), offered when this server has no file of its own; `DESKTOP_APP_VERSION` is the version shown next to it |
+
+The file is served at `/api/download/desktop` (no login needed, 30 downloads an hour per address, and an interrupted download can resume). The installer isn't code-signed, so Windows shows "Windows protected your PC" the first time — *More info → Run anyway*; the website says so. Signing it takes a code-signing certificate from a certificate authority.
+
 ## Music (YouTube Music — no key needed)
 
 The note icon above Home opens the **Music page** (`/music`): search YouTube Music or browse **categories** — Top Songs, Trending, the popular genres (Pop, Hip-hop, Rock, R&B & soul, Dance & electronic, Latin, K-Pop, Country, Jazz, Classical, Metal …, with the other ~30 behind *More*) and moods (Chill, Focus, Workout, Party, Sleep …) — press play, and what you're listening to shows on your profile (and in friends' *Active Now*) while it plays. A big *Now playing* card with the song's album cover, a mini player above your user bar and your recently played songs are always at hand. It plays **full songs** and needs **no account and no API key**.

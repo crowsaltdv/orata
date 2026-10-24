@@ -29,6 +29,7 @@ import { mountMusic, musicReady, musicProblem, playlistCard, songCard } from './
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 import { mountBadges } from './badges.js';
 import { mountThemes, dropUserThemes } from './themes.js';
+import { desktopFile, desktopInfo } from './desktop.js';
 import { mountOrbit, addOrbit, reactionRole } from './orbit.js';
 
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -184,7 +185,14 @@ export function createApi() {
     users: Object.keys(db.users).length, botId: db.botId,
     emailVerification: verificationMode(),   // { enabled, required, smtp }
     music: await musicReady(), musicWhy: musicProblem(),   // musicWhy: what the server still needs (Python, ytmusicapi), shown on the Music page
+    desktop: desktopInfo(),   // the desktop app's installer, when this server has one to hand out: { version, size, url }
   })));
+  /** The desktop app's installer (the newest "Orata Setup x.y.z.exe" in downloads/). Public: people download it before they have an account. */
+  r.get('/download/desktop', limit('desktopdl', 30, 3600_000), h(async (req, res) => {
+    const f = desktopFile(); if (!f) throw notFound('The desktop app isn’t available from this server.');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.download(f.path, f.name);   // sent as a download, with Range support so a broken download can resume
+  }));
 
   /* --------------------------- auth --------------------------- */
   r.post('/auth/check', limit('check', 60, 60_000), h(async (req, res) => {

@@ -1,5 +1,7 @@
 node_modules/
 /data/
+# the desktop app's installer (115 MB: GitHub refuses files over 100 MB): copy it to downloads/ on each server, see README → Desktop app
+/downloads/
 .env
 # the Music page's Python side, set up by `npm install` (music-service/install.mjs)
 /music-service/vendor/
