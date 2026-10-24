@@ -123,6 +123,7 @@ const ChannelItem = memo(function ChannelItem({ ch, active, serverId, dragging, 
     <div class=${cx('ch-item', active && 'active', unread === '1' && muted === '0' && 'unread', muted === '1' && 'muted', inCall && 'in-call', dragging && 'dnd-placeholder')} role="button" tabindex="0" onClick=${click} onKeyDown=${(e) => e.key === 'Enter' && click()} onContextMenu=${(e) => openContext(e, channelMenu(ch))} onPointerDown=${onGrab ? (e) => onGrab(e, 'channel', ch.id) : null}>
       ${ch.emoji ? html`<span class="ch-icon ch-emoji" aria-hidden="true">${ch.emoji}</span>` : html`<${Icon} name=${isVoice ? 'volume' : ch.type === 'stage' ? 'stage' : ch.type === 'forum' ? (ch.apply ? 'file-text' : 'forum') : ch.private ? 'hash-lock' : 'hash'} size=${19} class="ch-icon" />`}
       <span class="ch-name">${ch.name}</span>
+      ${ch.locked ? html`<${Icon} name="lock" size=${13} class="ch-lockmark" data-tip=${t('Locked')} />` : null}
       ${Number(mentions) ? html`<${Badge} n=${Number(mentions)} />` : null}
       <span class="ch-actions">
         ${hasChannelPerm(ch, 'CREATE_INVITE') ? html`<span data-tip="Create Invite" onClick=${(e) => { e.stopPropagation(); openModal('invite', { serverId, channelId: ch.id }); }}><${Icon} name="user-plus" size=${15} /></span>` : null}

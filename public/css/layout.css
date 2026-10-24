@@ -101,6 +101,7 @@
 .ch-item { position: relative; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 10px; margin: 1px 0; border-radius: var(--radius-sm); color: var(--text-3); font-size: 15px; font-weight: 500; width: 100%; text-align: left; cursor: pointer; transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast) var(--ease); }
 .ch-item .ch-icon { flex: none; opacity: .75; }
 .ch-item .ch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-item .ch-lockmark { flex: none; color: var(--text-3); opacity: .85; }   /* a channel Orbit's /lock has locked */
 .ch-item:hover { background: var(--hover); color: var(--text); transform: translateX(2px); }
 .ch-item.active { background: var(--accent-soft); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
 .ch-item.active .ch-icon { color: var(--accent); opacity: 1; }

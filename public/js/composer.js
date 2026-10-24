@@ -284,7 +284,7 @@ export function Composer({ chId }) {
 
   if (blockedBy) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="ban" size=${18} /> You have blocked this user. <button type="button" class="link-btn" onClick=${() => act(api.del(`/relationships/${dmUserId(ch)}`))}>Unblock</button></div></div>`;
   if (pending) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name="shield" size=${18} /> ${t('Read the rules and pick your roles to start chatting.')} <button type="button" class="link-btn" onClick=${() => openModal('onboarding', { serverId: server.id })}>${t('Open the rules')}</button></div></div>`;
-  if (!canSend) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name=${timedOut ? 'clock' : 'lock'} size=${18} /> ${lockedPost ? t('This post is locked.') : timedOut ? `${t('You are timed out until')} ${new Date(timeoutUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : t('You do not have permission to send messages in this channel.')}</div></div>`;
+  if (!canSend) return html`<div class="composer-wrap"><div class="composer-notice"><${Icon} name=${timedOut ? 'clock' : 'lock'} size=${18} /> ${lockedPost ? t('This post is locked.') : timedOut ? `${t('You are timed out until')} ${new Date(timeoutUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : ch?.locked && ch.type !== 'post' ? t('This channel is locked. Only moderators can send messages.') : t('You do not have permission to send messages in this channel.')}</div></div>`;
 
   return html`<div class="composer-wrap" ref=${dropdownRef}>
     <${ViewersBar} chId=${chId} serverId=${ch?.serverId} />

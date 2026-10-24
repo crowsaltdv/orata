@@ -265,7 +265,7 @@ gateway.on('server_delete', ({ serverId }) => {
 });
 const patchServer = (id, fn) => { const s = state.servers[id]; if (s) { set({ servers: { ...state.servers, [id]: fn(s) } }); rebuildIndex(); } };
 gateway.on('channel_create', ({ channel }) => patchServer(channel.serverId, (s) => ({ ...s, channels: s.channels.some((c) => c.id === channel.id) ? s.channels : [...s.channels, channel].sort((a, b) => a.position - b.position) })));
-gateway.on('channel_update', ({ channel }) => patchServer(channel.serverId, (s) => ({ ...s, channels: s.channels.some((c) => c.id === channel.id) ? s.channels.map((c) => (c.id === channel.id ? { ...c, ...channel, lastMessageId: c.lastMessageId } : c)) : [...s.channels, channel] })));
+gateway.on('channel_update', ({ channel }) => patchServer(channel.serverId, (s) => ({ ...s, channels: s.channels.some((c) => c.id === channel.id) ? s.channels.map((c) => (c.id === channel.id ? { ...c, cperms: undefined, overwrites: undefined, ...channel, lastMessageId: c.lastMessageId } : c)) : [...s.channels, channel] })));   // (an update without cperms/overwrites means the channel has none now: e.g. back to its category's rules after /unlock)
 gateway.on('channel_delete', ({ serverId, channelId }) => {
   patchServer(serverId, (s) => ({ ...s, channels: s.channels.filter((c) => c.id !== channelId) }));
   if (state.route.channelId === channelId) go({ view: 'channel', serverId, channelId: null });

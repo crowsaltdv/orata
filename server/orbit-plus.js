@@ -1,10 +1,10 @@
 // Orata — what Discord servers add third-party bots for, built into Orbit: a counting channel, welcome and goodbye messages, a role for everyone
 // who joins, levels (XP, /rank, /leaderboard, level-up roles), giveaways, a starboard, tickets, warnings, saved replies (/tag), suggestions,
-// a member-count channel and /slowmode. Settings live in `server.orbit` (next to the roles each command is narrowed to, orbit.js); warnings in
+// a member-count channel, /slowmode and /lock + /unlock. Settings live in `server.orbit` (next to the roles each command is narrowed to, orbit.js); warnings in
 // `server.warnings`; running giveaways in `db.giveaways`. orbit.js runs the commands through plusCommand(); the rest reacts to messages,
 // reactions and people joining or leaving (hooks in messages.js).
 import crypto from 'node:crypto';
-import { db, save, newId, emitTo, audienceOf, messageView, channelView, listedFor, serverAudience, memberView, sanitizeOverwrites, can, isOwner, topRolePos, audit, bad, forbidden } from './core.js';
+import { db, save, newId, emitTo, audienceOf, messageView, channelView, listedFor, serverAudience, memberView, sanitizeOverwrites, can, canIn, isSynced, isOwner, topRolePos, audit, bad, forbidden } from './core.js';
 import { hooks, postMessage } from './messages.js';
 import { parseDuration, formatDuration } from '../public/js/orbit-commands.js';
 
@@ -51,6 +51,50 @@ function channelArg(s, token) {
   if (id) return list.find((c) => c.id === id) || null;
   return t.startsWith('#') ? list.find((c) => c.name.toLowerCase() === t.slice(1).toLowerCase()) || null : null;
 }
+/** "#general", "general", "<#id>" or an id (spaces may stand for dashes: "off topic") → a text, forum, voice or stage channel of this server, or null. */
+function lockableArg(s, text) {
+  const raw = String(text || '').trim(); const t = raw.replace(/^#/, ''); const id = (/^<#(\d+)>$/.exec(raw) || /^(\d{6,20})$/.exec(t))?.[1];
+  const list = Object.values(db.channels).filter((c) => c.serverId === s.id && LOCKABLE[c.type]);
+  if (id) return list.find((c) => c.id === id) || null;
+  const want = t.toLowerCase();
+  return list.find((c) => c.name.toLowerCase() === want) || list.find((c) => c.name.toLowerCase() === want.replace(/\s+/g, '-')) || null;
+}
+/* /lock: what a locked channel takes away from @everyone — sending messages in a text or forum channel, joining a voice or stage channel. People with Manage Messages
+ * or Manage Channels (through a role) keep it, so a lock never shuts the moderators out, and admins always have it. What /lock changes is written down in
+ * `channel.lockdown`, so /unlock puts back exactly what was there before (and a channel that followed its category goes back to following it). */
+const LOCKABLE = { text: ['SEND_MESSAGES'], forum: ['SEND_MESSAGES'], voice: ['CONNECT'], stage: ['CONNECT'] };
+const sameRules = (a, b) => { const norm = (l) => JSON.stringify([...l].map((o) => [o.type, o.id, [...o.allow].sort(), [...o.deny].sort()]).sort()); return norm(a) === norm(b); };
+function lockChannel(s, ch, uid) {
+  const perms = LOCKABLE[ch.type]; const lock = { by: uid, at: Date.now(), perms, saved: [], wasSynced: false };
+  if (isSynced(ch)) { const parent = db.channels[ch.parentId]; ch.overwrites = structuredClone(parent.overwrites || []); ch.synced = false; lock.wasSynced = true; }   // its own rules from now on (a copy of its category's)
+  const list = (ch.overwrites ||= []);
+  const entry = (id) => {
+    let o = list.find((x) => x.type === 'role' && x.id === id); const existed = !!o;
+    if (!o) { o = { type: 'role', id, allow: [], deny: [] }; list.push(o); }
+    lock.saved.push({ id, existed, allow: perms.filter((p) => o.allow.includes(p)), deny: perms.filter((p) => o.deny.includes(p)) });
+    return o;
+  };
+  const all = entry(s.id); all.allow = all.allow.filter((p) => !perms.includes(p)); all.deny = [...new Set([...all.deny, ...perms])];
+  for (const role of s.roles) {
+    if (role.id === s.id || !(role.permissions.includes('MANAGE_MESSAGES') || role.permissions.includes('MANAGE_CHANNELS'))) continue;
+    const o = entry(role.id); o.deny = o.deny.filter((p) => !perms.includes(p)); o.allow = [...new Set([...o.allow, ...perms])];
+  }
+  ch.lockdown = lock; save(); pushChannel(s, ch, 'channel_update');
+}
+function unlockChannel(s, ch) {
+  const lock = ch.lockdown; delete ch.lockdown;
+  if (isSynced(ch)) { save(); pushChannel(s, ch, 'channel_update'); return; }   // someone made it follow its category again: the lock is gone already
+  const list = (ch.overwrites ||= []);
+  for (const was of lock.saved) {
+    const o = list.find((x) => x.type === 'role' && x.id === was.id); if (!o) continue;
+    o.allow = o.allow.filter((p) => !lock.perms.includes(p)).concat(was.allow); o.deny = o.deny.filter((p) => !lock.perms.includes(p)).concat(was.deny);
+    if (!was.existed && !o.allow.length && !o.deny.length) list.splice(list.indexOf(o), 1);
+  }
+  const parent = lock.wasSynced && db.channels[ch.parentId];
+  if (parent && sameRules(list, parent.overwrites || [])) { ch.synced = true; delete ch.overwrites; }   // back to exactly its category's rules: follow it again
+  save(); pushChannel(s, ch, 'channel_update');
+}
+
 /** "@Name", "<@&id>", a role's name or its id → one of this server's roles (not @everyone). */
 function roleArg(s, text) {
   const t = String(text || '').trim(); const id = (/^<@&(\d+)>$/.exec(t) || /^(\d{6,20})$/.exec(t))?.[1];
@@ -291,6 +335,22 @@ export function plusCommand(name, x) {
       const c = makeChannel(s, { type: 'voice', name: countName(s), position: -1, overwrites: sanitizeOverwrites(s, [{ type: 'role', id: s.id, allow: [], deny: ['CONNECT'] }]) });
       o.memberCount = c.id; save();
       return only(`👥 <#${c.id}> now shows how many members the server has, and keeps itself up to date.`);
+    }
+    case 'lock': case 'unlock': {   // here, or the channel named after it
+      const lock = name === 'lock'; const where = args ? lockableArg(s, args) : ch;
+      if (!where || !canIn(me, where, 'VIEW_CHANNEL')) throw bad(args ? `Orbit can’t find a channel called “${args.slice(0, 60)}”. Try /${name} #channel (text, forum, voice and stage channels can be locked).` : `This kind of channel can’t be locked. Use /${name} #channel for a text, forum, voice or stage channel.`);
+      if (!LOCKABLE[where.type]) throw bad('Only text, forum, voice and stage channels can be locked.');
+      if (!canIn(me, where, 'MANAGE_CHANNELS')) throw forbidden(`You can’t manage ${where.id === ch.id ? 'this channel' : '#' + where.name}.`);
+      const talk = where.type === 'voice' || where.type === 'stage' ? 'join it' : 'send messages here';
+      if (lock && where.lockdown) return only(`🔒 <#${where.id}> is already locked. /unlock opens it again.`);
+      if (!lock && !where.lockdown) return only(`🔓 <#${where.id}> isn’t locked by Orbit. (If someone locked it by hand in Edit Permissions, undo it there.)`);
+      if (lock) lockChannel(s, where, me); else unlockChannel(s, where);
+      const note = lock ? `🔒 ${who} locked this channel. Only moderators can ${talk}.${where.type === 'voice' || where.type === 'stage' ? ' People already in it can stay.' : ''}` : `🔓 ${who} unlocked this channel. Everybody can ${talk} again.`;
+      const textual = where.type === 'text';   // (only a text channel has messages to leave a note in)
+      if (textual && where.id === ch.id) return post(note);
+      audit(s, me, 'orbit_command', { command: name, channel: where.name });
+      if (textual) postMessage(where, s.orbitId, { content: note, command: { name, by: me } });
+      return only(`${lock ? '🔒 Locked' : '🔓 Unlocked'} <#${where.id}>.`);
     }
     case 'slowmode': {
       const stop = off || args === '0'; const ms = stop ? 0 : parseDuration(first);

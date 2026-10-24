@@ -1,5 +1,5 @@
 // Orata self-test for what Orbit does that Discord servers add other bots for (server/orbit-plus.js): counting, welcome and goodbye messages,
-// a role for newcomers, the member count, levels, giveaways, the starboard, tickets, warnings, saved replies, suggestions and slowmode.
+// a role for newcomers, the member count, levels, giveaways, the starboard, tickets, warnings, saved replies, suggestions, slowmode, and /lock and /unlock.
 // Runs with the other suites:  npm test
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -138,6 +138,63 @@ async function main() {
   r = await cmd(A, 'slowmode', '10s'); ok(r.status === 200 && (await view()).channels.find((c) => c.id === text.id)?.slowmode === 10, '/slowmode slows the channel');
   await cmd(A, 'slowmode', 'off');
   r = await cmd(B, 'help'); ok(/\/rank/.test(r.body.ephemeral) && /\/ticket/.test(r.body.ephemeral) && !/\/welcome/.test(r.body.ephemeral), '/help shows each person what they can use');
+
+  console.log('\nLock and unlock');
+  const lockcmd = async (...a) => { for (let i = 0; i < 6; i++) { const x = await cmd(...a); if (x.status !== 429) return x; await sleep(2000); } return cmd(...a); };   // (a person may run 12 commands in 10 seconds; this test runs more)
+  const mods = (await api('POST', `/servers/${S.id}/roles`, A.token, { name: 'Mods', permissions: ['MANAGE_MESSAGES'] })).body;
+  await api('PUT', `/servers/${S.id}/members/${D.user.id}/roles/${mods.id}`, A.token);   // Dave moderates messages (not channels); Bob is an ordinary member
+  const lounge = (await api('POST', `/servers/${S.id}/channels`, A.token, { name: 'off-topic', type: 'text' })).body;
+  const info = (await api('POST', `/servers/${S.id}/channels`, A.token, { name: 'Info', type: 'category' })).body;
+  const rules = (await api('POST', `/servers/${S.id}/channels`, A.token, { name: 'rules', type: 'text', parentId: info.id })).body;
+  const hangout = (await api('POST', `/servers/${S.id}/channels`, A.token, { name: 'hangout', type: 'voice' })).body;
+  const chan = async (id, who = A) => (await view(who)).channels.find((c) => c.id === id);
+  const rulesOf = async (id) => (await chan(id)).overwrites || [];
+  r = await lockcmd(B, 'lock'); ok(r.status === 403, 'only people who can manage channels lock a channel');
+  r = await say(B, 'before'); ok(r.status === 200, '(Bob can talk here)');
+  r = await lockcmd(A, 'lock'); ok(r.status === 200 && /locked this channel/.test((await last(A.token, text.id)).content) && (await last(A.token, text.id)).authorId === S.orbitId, '/lock by itself locks the channel it is used in, and says so there');
+  r = await say(B, 'during'); ok(r.status === 403, '… so an ordinary member can’t send messages in it');
+  r = await say(D, 'moderators talk'); ok(r.status === 200, '… but moderators (Manage Messages) still can');
+  r = await say(A, 'and the owner'); ok(r.status === 200, '… and so can the owner');
+  ok((await chan(text.id, B)).locked === true && !(await chan(text.id, B)).cperms.includes('SEND_MESSAGES') && (await chan(lounge.id, B)).locked === false, 'members are told it is locked (the message box and the channel list show it)');
+  ok((await chan(text.id, B)).cperms.includes('VIEW_CHANNEL'), '… and it stays readable');
+  r = await lockcmd(A, 'lock'); ok(r.status === 200 && /already locked/.test(r.body.ephemeral), 'locking it again says it already is');
+  r = await lockcmd(B, 'unlock'); ok(r.status === 403, 'an ordinary member can’t unlock it');
+  r = await lockcmd(A, 'unlock'); ok(r.status === 200 && /unlocked this channel/.test((await last(B.token, text.id)).content), '/unlock by itself unlocks the channel it is used in');
+  r = await say(B, 'after'); ok(r.status === 200 && (await chan(text.id, B)).locked === false, '… and everybody can talk again');
+  ok(!(await rulesOf(text.id)).some((o) => o.id === S.id || o.id === mods.id), '… with the channel’s permissions exactly as they were (nothing left behind)');
+  r = await lockcmd(A, 'unlock'); ok(r.status === 200 && /isn’t locked/.test(r.body.ephemeral), 'unlocking a channel that isn’t locked says so');
+
+  r = await lockcmd(A, 'lock', '#off-topic'); ok(r.status === 200 && /Locked <#/.test(r.body.ephemeral), '/lock #channel locks the channel you name, from wherever you are');
+  ok((await say(B, 'still here')).status === 200 && (await say(B, 'blocked', lounge.id)).status === 403, '… and only that channel');
+  ok(/locked this channel/.test((await last(A.token, lounge.id)).content), '… with the note left in the locked channel');
+  r = await lockcmd(A, 'lock', 'off-topic'); ok(/already locked/.test(r.body.ephemeral), 'the name works with or without the #');
+  r = await lockcmd(A, 'unlock', 'OFF-TOPIC'); ok(r.status === 200 && (await say(B, 'welcome back', lounge.id)).status === 200, '… whatever the capital letters, and /unlock the same way');
+  r = await lockcmd(A, 'lock', 'no such place'); ok(r.status === 400 && /can’t find a channel/.test(r.body.error), 'a name that isn’t a channel gets a clear answer');
+  r = await lockcmd(A, 'lock', `<#${lounge.id}>`); ok(r.status === 200 && (await chan(lounge.id, B)).locked, 'a channel mention works too');
+  r = await lockcmd(A, 'unlock', `<#${lounge.id}>`);
+  r = await lockcmd(B, 'lock', '#off-topic'); ok(r.status === 403, 'naming a channel doesn’t get around the permission');
+  // a channel with rules of its own keeps them; one that follows its category follows it again afterwards
+  await api('PATCH', `/channels/${lounge.id}`, A.token, { overwrites: [{ type: 'role', id: S.id, allow: ['SEND_MESSAGES'], deny: ['ATTACH_FILES'] }] });
+  await lockcmd(A, 'lock', '#off-topic'); let ev = (await rulesOf(lounge.id)).find((o) => o.id === S.id);
+  ok(ev.deny.includes('SEND_MESSAGES') && ev.deny.includes('ATTACH_FILES') && !ev.allow.includes('SEND_MESSAGES'), 'locking keeps the rules the channel already had (and wins over an Allow)');
+  await lockcmd(A, 'unlock', '#off-topic'); ev = (await rulesOf(lounge.id)).find((o) => o.id === S.id);
+  ok(ev.allow.join() === 'SEND_MESSAGES' && ev.deny.join() === 'ATTACH_FILES', 'unlocking puts every one of them back');
+  ok((await chan(rules.id)).synced === true, '(the rules channel follows its category)');
+  await lockcmd(A, 'lock', '#rules'); ok((await say(B, 'x', rules.id)).status === 403 && (await chan(rules.id)).synced === false, 'locking a channel that follows its category gives it rules of its own');
+  await lockcmd(A, 'unlock', '#rules'); ok((await say(B, 'y', rules.id)).status === 200 && (await chan(rules.id)).synced === true, '… and unlocking makes it follow the category again');
+
+  r = await lockcmd(A, 'lock', '#hangout'); ok(r.status === 200 && !(await chan(hangout.id, B)).cperms.includes('CONNECT') && (await chan(hangout.id, B)).locked, 'a voice channel can be locked too (nobody new can join; moderators can)');
+  ok((await chan(hangout.id, D)).cperms.includes('CONNECT'), '(Dave, a moderator, can still join it)');
+  await lockcmd(A, 'unlock', '#hangout'); ok((await chan(hangout.id, B)).locked === false, '… and unlocked again');
+  const sec = (await api('POST', `/servers/${S.id}/channels`, A.token, { name: 'secret', type: 'text', overwrites: [{ type: 'role', id: S.id, allow: [], deny: ['VIEW_CHANNEL'] }] })).body;
+  await api('PUT', `/servers/${S.id}/members/${B.user.id}/roles/${(await api('POST', `/servers/${S.id}/roles`, A.token, { name: 'Channel keeper', permissions: ['MANAGE_CHANNELS'] })).body.id}`, A.token);
+  r = await lockcmd(B, 'lock', '#secret'); ok(r.status === 400, 'a channel you can’t even see is not found');
+  r = await lockcmd(B, 'lock', '#off-topic'); ok(r.status === 200 && (await api('POST', `/channels/${lounge.id}/messages`, B.token, { content: 'the keeper may still talk' })).status === 200, 'a role with Manage Channels can lock, and keeps being able to talk');
+  await lockcmd(B, 'unlock', '#off-topic');
+
+  r = await lockcmd(A, 'lock', 'Info'); ok(r.status === 400, 'a category isn’t a channel to lock (lock the channels in it)');
+  r = await lockcmd(D, 'help'); ok(!/\/lock/.test(r.body.ephemeral), '/help leaves /lock out for people who can’t use it');
+  r = await lockcmd(A, 'help'); ok(/`\/lock \[#channel\]`/.test(r.body.ephemeral) && /`\/unlock \[#channel\]`/.test(r.body.ephemeral), '… and lists both for people who can');
 
   await stopServer();
   console.log(`\n${pass} passed, ${fail} failed`);

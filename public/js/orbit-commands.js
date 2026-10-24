@@ -44,6 +44,8 @@ export const ORBIT_COMMANDS = [
   { name: 'suggest', desc: 'Suggest an idea for people to vote on', arg: 'idea', args: [{ name: 'idea', type: 'text' }] },
   { name: 'suggestions', desc: 'Pick the channel suggestions go to', arg: '#channel | off', perm: 'MANAGE_SERVER', only: true },
   { name: 'membercount', desc: 'A channel that shows how many members there are', arg: '[off]', perm: 'MANAGE_CHANNELS', only: true },
+  { name: 'lock', desc: 'Stop people from talking in a channel (this one, or the one you name)', arg: '[#channel]', perm: 'MANAGE_CHANNELS' },
+  { name: 'unlock', desc: 'Let people talk in a channel again (this one, or the one you name)', arg: '[#channel]', perm: 'MANAGE_CHANNELS' },
   { name: 'slowmode', desc: 'Slow this channel down', arg: '10s | off', perm: 'MANAGE_CHANNELS', only: true, args: [{ name: 'delay', type: 'duration', choices: ['5s', '10s', '30s', '1m', '5m', 'off'], off: true, max: 6 * 3600_000 }] },
 ];
 export const orbitCommand = (name) => ORBIT_COMMANDS.find((c) => c.name === String(name || '').toLowerCase()) || null;

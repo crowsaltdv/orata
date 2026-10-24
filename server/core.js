@@ -492,7 +492,7 @@ export function channelView(c, userId) {
     id: c.id, serverId: c.serverId || null, type: c.type, name: c.name || null, topic: c.topic || '',
     parentId: c.parentId || null, position: c.position || 0,
     recipients: c.recipients || undefined, ownerId: c.ownerId || undefined,
-    icon: c.icon || undefined, emoji: c.emoji || undefined, lastMessageId: lastMessageId(c.id), nsfw: !!c.nsfw, slowmode: c.slowmode || 0,
+    icon: c.icon || undefined, emoji: c.emoji || undefined, lastMessageId: lastMessageId(c.id), nsfw: !!c.nsfw, slowmode: c.slowmode || 0, locked: !!c.lockdown,   // (locked: /lock in Orbit, server/orbit-plus.js)
   };
   if (c.serverId) {
     const ows = overwritesOf(c);
