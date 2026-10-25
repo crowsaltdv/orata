@@ -7,8 +7,7 @@ import { t } from '/js/i18n.js';
 
 const CLIENT = document.querySelector('meta[name="google-adsense-account"]')?.content || null;
 /** The ad unit made in AdSense (Ads → By ad unit) for each spot. An empty one shows nothing, except to Orata staff, who see where it will be. */
-const SLOTS = { home: '', settings: '', rail: '', page: '' };
-const FORMAT = { home: 'rectangle', settings: 'vertical', rail: 'rectangle', page: 'horizontal' };
+const SLOTS = { home: '9803896804', settings: '7772007714', rail: '9496775045', page: '6490629913' };   // Orata Home, Orata Settings, Orata Member list, Orata End of page
 const NAME = { home: 'Home', settings: 'Settings', rail: 'Member list', page: 'End of page' };
 
 export function Ad({ spot }) {
@@ -17,5 +16,5 @@ export function Ad({ spot }) {
   useEffect(() => { if (CLIENT && slot && ref.current && !ref.current.dataset.adsbygoogleStatus) try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch { /* blocked */ } }, [slot]);
   if (!CLIENT || !slot) return staff ? html`<div class=${cx('ad', `ad-${spot}`, 'ad-preview')}><b>${t('Ad spot')}: ${t(NAME[spot])}</b><small>${t('Only Orata staff see this box until its ad unit is set (public/js/ads.js).')}</small></div>` : null;
   return html`<div class=${cx('ad', `ad-${spot}`)}><span class="ad-label">${t('Ad')}</span>
-    <ins class="adsbygoogle" ref=${ref} style="display:block" data-ad-client=${CLIENT} data-ad-slot=${slot} data-ad-format=${FORMAT[spot]} data-full-width-responsive="true"></ins></div>`;
+    <ins class="adsbygoogle" ref=${ref} style="display:block" data-ad-client=${CLIENT} data-ad-slot=${slot} data-ad-format="auto" data-full-width-responsive="true"></ins></div>`;
 }
