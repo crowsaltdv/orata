@@ -10,6 +10,7 @@ import { userMenu } from '/js/profile.js';
 import { voice } from '/js/voice.js';
 import { copyText } from '/js/lib.js';
 import { t } from '/js/i18n.js';
+import { Ad } from '/js/ads.js';
 import { UserName } from '/js/profile-style.js';
 
 function FriendRow({ id, type }) {
@@ -93,6 +94,6 @@ export function ActiveNow() {
   }).filter((x) => x.room || x.u.customStatus || x.u.listening).slice(0, 12);
   return html`<aside class="right panel wide right-enter"><div class="panel-pane"><div class="pane-head"><b>${t('Active Now')}</b></div>
     <div class="pane-scroll">${rows.length ? rows.map(({ u, room }) => html`<div class="active-card" key=${u.id} onClick=${(e) => openProfile(u.id, e.currentTarget)}><${Avatar} user=${u} size=${40} status=${u.status} /><div><b><${UserName} user=${u} /></b><span>${room ? html`<${Icon} name="volume" size=${13} /> ${room.name}` : u.listening ? html`<${Icon} name="music" size=${13} /> ${u.listening.title} — ${u.listening.artist}` : `${u.customStatus.emoji || ''} ${u.customStatus.text}`}</span></div></div>`)
-      : html`<div class="active-empty"><b>${t("It's quiet for now…")}</b><p>${t("When a friend starts an activity — like hopping in a voice channel — we'll show it here!")}</p></div>`}</div></div></aside>`;
+      : html`<div class="active-empty"><b>${t("It's quiet for now…")}</b><p>${t("When a friend starts an activity — like hopping in a voice channel — we'll show it here!")}</p></div>`}</div><${Ad} spot="home" /></div></aside>`;
 }
 void IconBtn; void openModal;
