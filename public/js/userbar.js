@@ -12,6 +12,7 @@ import { copyText } from '/js/lib.js';
 import { t } from '/js/i18n.js';
 import { UserName } from '/js/profile-style.js';
 import { MiniPlayer } from '/js/music.js';
+import { openParty, PartyLine, partyLabel } from '/js/party.js';
 
 export async function setStatus(status) { await act(api.patch('/me', { status })); }
 
@@ -82,6 +83,7 @@ export function UserBar() {
   const joinMuted = useSel((s) => s.local.voice.joinMuted);
   const muted = conn ? conn.muted || conn.deafened : joinMuted; const deaf = !!conn?.deafened;
   const [bump, setBump] = useState(0);
+  const watchOn = useSel((s) => s.watchOk !== false); const onWatch = useSel((s) => s.route.view === 'watch'); const watching = useSel((s) => !!s.party && s.party.channelId === s.voice.conn?.channelId); const hosting = useSel((s) => !!s.party && s.party.channelId === s.voice.conn?.channelId && s.party.hostId === s.me.id);   // Watch (videos): the button by the mute button opens the page; the one in a call watches together
   const status = me.status === 'invisible' ? 'invisible' : me.status;
   return html`<div class="userbar panel">
     ${conn ? html`<div class="vc-panel">
@@ -90,7 +92,9 @@ export function UserBar() {
       <div class="vc-btns" style=${conn.stage && !conn.speaker ? 'display:none' : undefined}>
         <${IconBtn} icon=${conn.video ? 'video' : 'video-off'} label=${conn.video ? t('Turn Off Camera') : t('Turn On Camera')} active=${conn.video} onClick=${() => voice.toggleCamera()} glass="buttons" />
         <${IconBtn} icon="monitor" label=${conn.screen ? t('Stop Sharing') : t('Share Your Screen')} active=${conn.screen} onClick=${() => voice.toggleScreen()} glass="buttons" />
-      </div></div>` : null}
+        ${watchOn && !conn.stage ? html`<${IconBtn} icon="play-circle" label=${partyLabel(watching, hosting)} active=${watching} onClick=${openParty} glass="buttons" />` : null}
+        ${watchOn && conn.stage ? html`<${IconBtn} icon="play-circle" label=${t('Watch Videos')} active=${onWatch} onClick=${() => go('/watch')} glass="buttons" />` : null}
+      </div><${PartyLine} /></div>` : null}
     <${MiniPlayer} />
     <div class="ub-row">
       <button type="button" class="ub-user" onClick=${(e) => openPopover(e.currentTarget, 'user-menu', {}, { placement: 'top-start' })} data-popover-anchor>
@@ -98,6 +102,7 @@ export function UserBar() {
         <span class="ub-text"><span class="ub-name"><${UserName} user=${me} /></span><span class="ub-status">${me.customStatus ? `${me.customStatus.emoji || ''} ${me.customStatus.text}`.trim() : t(STATUS_META[status]?.label || 'Online')}</span></span>
       </button>
       <div class="ub-icons">
+        ${watchOn ? html`<${IconBtn} icon="play-circle" label=${t('Watch')} active=${onWatch} onClick=${() => go('/watch')} pos="top" glass="buttons" />` : null}
         <${IconBtn} icon=${muted ? 'mic-off' : 'mic'} label=${muted ? t('Unmute') : t('Mute')} class=${muted ? 'muted-state' : ''} onClick=${() => { voice.toggleMute(); setBump(bump + 1); }} onContextMenu=${(e) => { e.preventDefault(); openSettings('voice'); }} pos="top" glass="buttons" />
         <${IconBtn} icon=${deaf ? 'headphones-off' : 'headphones'} label=${deaf ? t('Undeafen') : t('Deafen')} class=${deaf ? 'muted-state' : ''} onClick=${() => voice.toggleDeafen()} pos="top" glass="buttons" />
         <${IconBtn} icon="settings" label=${t('User Settings')} onClick=${() => openSettings('account')} pos="top" glass="buttons" />

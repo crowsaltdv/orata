@@ -20,6 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------------------------------------------------------------- a fake music helper (what music-service/service.py would answer) */
 const HELPER = path.join(ROOT, 'server', 'selftest-music-helper.mjs'); const HELPER_LOG = path.join(data, 'music-helper.log');
+const WATCH_CLIENT = path.join(ROOT, 'server', 'selftest-watch-client.mjs'); const WATCH_LOG = path.join(data, 'watch-client.log');   // stands in for YouTube.js
 const helperCalls = (op) => { let list = []; try { list = fs.readFileSync(HELPER_LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { /* nothing asked yet */ } return op ? list.filter((x) => x.op === op) : list; };
 /** Starts a helper program, waits for its "ready" line, sends it `requests` and collects the answers; { error } when it can't be started. */
 function talkToHelper(cmd, args, requests, ms = 20000) {
@@ -49,7 +50,8 @@ let child = null;
 function startServer(extra = {}) {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '',
-      MUSIC: '', MUSIC_HELPER: JSON.stringify([process.execPath, HELPER]), FAKE_MUSIC_LOG: HELPER_LOG, ...extra },
+      MUSIC: '', MUSIC_HELPER: JSON.stringify([process.execPath, HELPER]), FAKE_MUSIC_LOG: HELPER_LOG,
+      WATCH: '', WATCH_CLIENT, FAKE_WATCH_LOG: WATCH_LOG, ...extra },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
 }
@@ -365,6 +367,194 @@ async function main() {
   await stopServer(); startServer({ MUSIC: 'off' }); await ready();
   r = await api('GET', '/config'); ok(r.body.music === false, 'MUSIC=off turns the player off');
   r = await api('GET', '/music/search?q=night', A3); ok(r.status === 503 && r.body.code === 'music_not_configured', 'and searching explains it');
+
+  console.log('\nWatch (videos, found with YouTube.js)');
+  await stopServer(); startServer({}); await ready();   // (the YouTube.js stand-in, server/selftest-watch-client.mjs, is what answers)
+  const wcalls = (op) => { let list = []; try { list = fs.readFileSync(WATCH_LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { /* nothing asked yet */ } return op ? list.filter((x) => x.op === op) : list; };
+  const isId = (v) => /^[A-Za-z0-9_-]{11}$/.test(v.id) && v.title && /^https:\/\/i\.ytimg\.com\//.test(v.thumbnail);
+  r = await api('GET', '/config'); ok(r.body.watch === true, '/api/config says Watch is on');
+  r = await api('GET', '/watch/home'); ok(r.status === 401, 'Watch is for signed-in people');
+  r = await api('GET', '/watch/home', A3);
+  ok(r.status === 200 && r.body.chips[0].key === 'all' && r.body.chips.some((c) => c.key === 'music') && r.body.videos.length === 30 && r.body.hasMore === true, 'the home page offers categories and a first page of videos', JSON.stringify(r.body).slice(0, 200));
+  ok(new Set(r.body.videos.map((v) => v.title.replace(/ result \d+.*/, ''))).size >= 5 && new Set(r.body.videos.map((v) => v.id)).size === r.body.videos.length && r.body.videos.every(isId), '… a mix taken from several categories, with no video twice, every one with a real id, title and thumbnail');
+  const home = await api('GET', '/watch/home?chip=gaming&limit=7', A3); const home2 = await api('GET', '/watch/home?chip=gaming&limit=7&offset=7', A3); const home3 = await api('GET', '/watch/home?chip=gaming&limit=40&offset=14', A3);
+  const gaming = [...home.body.videos, ...home2.body.videos, ...home3.body.videos];
+  ok(home.body.videos.length === 7 && home.body.hasMore && new Set(gaming.map((v) => v.id)).size === gaming.length && gaming.length > 20 && !home3.body.hasMore, 'a category is read a page at a time, later pages come from YouTube\'s own "next page", and a video repeated across pages shows once', `${gaming.length} videos, more=${home3.body.hasMore}`);
+  { const h = { authorization: 'Bearer ' + A3, 'accept-encoding': 'gzip' };
+    let res2 = await fetch(`${base}/api/watch/home?chip=gaming`, { headers: h });
+    ok(res2.status === 200 && /private/.test(res2.headers.get('cache-control') || '') && /max-age=300/.test(res2.headers.get('cache-control') || ''), 'what Watch finds is kept by the browser for a few minutes (so going back to a page costs nothing)', res2.headers.get('cache-control')); await res2.arrayBuffer();
+    ok(res2.headers.get('content-encoding') === 'gzip', '… and goes out gzipped (a fraction of the bytes)', res2.headers.get('content-encoding'));
+    res2 = await fetch(`${base}/api/watch/search?q=`, { headers: h }); ok(res2.status === 400 && !/max-age/.test(res2.headers.get('cache-control') || ''), 'an error is never kept'); await res2.arrayBuffer();
+    res2 = await fetch(`${base}/js/watch.js`, { headers: h }); ok(res2.status === 200 && res2.headers.get('content-encoding') === 'gzip', 'the site’s own scripts go out gzipped too', res2.headers.get('content-encoding')); await res2.arrayBuffer();
+    res2 = await fetch(`${base}/api/config`, { headers: { 'accept-encoding': 'identity' } }); ok(res2.status === 200 && !res2.headers.get('content-encoding'), '… but only for browsers that ask for it'); await res2.arrayBuffer(); }
+  r = await api('GET', '/watch/home?chip=live', A3); ok(r.body.videos[0].live === true && r.body.videos[0].duration === '' && /watching/.test(r.body.videos[0].views), 'live streams are marked LIVE and have no length');
+  r = await api('GET', '/watch/home?chip=nonsense', A3); ok(r.status === 404, 'an unknown category is refused');
+
+  r = await api('GET', '/watch/search?q=lofi', A3);
+  ok(r.status === 200 && r.body.videos.length === 24 && r.body.videos.every(isId) && r.body.videos[0].channel.name === 'Test Channel' && r.body.videos[0].channel.id === 'UCtestchannel00000000001' && r.body.videos[0].duration === '3:33' && r.body.videos[0].views === '1.2M views' && r.body.videos[0].published === '2 days ago',
+    'search returns videos with their channel, length, views and age', JSON.stringify(r.body.videos?.[0]));
+  ok(!r.body.videos.some((v) => v.title === 'Broken id' || v.title === '') && r.body.videos.find((v) => v.title === 'Stranger avatar')?.channel.avatar === null, '… leaving out shelves, broken ids and untitled things, and picture addresses from other websites');
+  ok(r.body.channels.length === 1 && r.body.channels[0].name === 'Test Channel' && r.body.channels[0].handle === '@testchannel' && r.body.channels[0].subscribers === '1.2M subscribers' && r.body.channels[0].description === '', '… and the best matching channel (YouTube moves the handle and subscribers around; "N/A" is dropped)', JSON.stringify(r.body.channels));
+  const searchesBefore = wcalls('search').length; await api('GET', '/watch/search?q=lofi', A3); ok(wcalls('search').length === searchesBefore, 'repeat searches come from the cache');
+  r = await api('GET', '/watch/search?q=lofi&offset=24', A3); ok(r.status === 200 && r.body.channels.length === 0 && r.body.videos.length > 0 && !r.body.videos.some((v) => v.title.endsWith('result 1')), 'later pages carry on from there, without the channel again');
+  r = await api('GET', '/watch/search?q=', A3); ok(r.status === 400, 'a blank search is refused');
+  r = await api('GET', '/watch/search?q=explode', A3); ok(r.status === 502 && r.body.code === 'watch_upstream' && !JSON.stringify(r.body).includes('exploded'), 'when YouTube fails people get a plain message (the technical error stays on the server)');
+  r = await api('GET', '/watch/suggest?q=lofi', A3); ok(r.body.suggestions.join('|') === 'lofi one|lofi two', 'the search box suggests what people search for (blanks dropped)');
+  r = await api('GET', '/watch/suggest?q=', A3); ok(r.status === 200 && r.body.suggestions.length === 0, '… and suggests nothing for nothing');
+
+  const V = 'v0000000042';
+  r = await api('GET', `/watch/videos/${V}`, A3); const vd = r.body.video;
+  ok(r.status === 200 && vd.id === V && vd.title === `Video ${V}` && vd.views === 1234567 && vd.likes === 4321 && vd.published === 'Oct 25, 2009' && vd.duration === 213 && vd.live === false, 'a video comes with its title, views, likes, date and length', JSON.stringify(vd));
+  ok(vd.channel.id === 'UCtestchannel00000000001' && vd.channel.name === 'Test Channel' && vd.channel.subscribers === '4.55M subscribers' && /^https:\/\/yt3\.ggpht\.com\//.test(vd.channel.avatar), '… its channel (name, picture, subscribers)');
+  ok(vd.description === 'line one\n\nline two https://example.com/page', '… and its description with the paragraphs kept (not three blank lines in a row)', JSON.stringify(vd.description));
+  const rel = r.body.related;
+  ok(rel.length === 3 && rel.every(isId) && !rel.some((x) => x.id === V) && rel[0].title === 'Related one' && rel[0].channel.name === 'Related Channel' && rel[0].channel.id === 'UCtestchannel00000000001' && rel[0].duration === '12:34' && rel[0].views === '55K views' && rel[0].published === '3 weeks ago' && rel[2].live === true,
+    'related videos are read from YouTube\'s new layout too — not the video itself or playlists, and a LIVE badge marks a stream', JSON.stringify(rel.map((x) => x.title)));
+  const infoCalls = wcalls('info').length; await api('GET', `/watch/videos/${V}`, A3); ok(wcalls('info').length === infoCalls, 'a video that was just looked at comes from the cache');
+  r = await api('GET', '/watch/videos/short', A3); ok(r.status === 400, 'something that isn\'t a video id is refused without asking YouTube');
+  r = await api('GET', '/watch/videos/gone0000000', A3); ok(r.status === 404 && /isn’t available/.test(r.body.error), 'a deleted or private video says it isn\'t available');
+  r = await api('GET', '/watch/videos/boom0000000', A3); ok(r.status === 502 && r.body.code === 'watch_upstream', 'any other trouble is a "try again", not a missing video');
+
+  r = await api('GET', `/watch/videos/${V}/comments?limit=5`, A3); const c0 = r.body.comments;
+  ok(r.status === 200 && c0.length === 5 && r.body.hasMore && c0[0].pinned === true && c0[0].owner === true && c0[0].author.channelId === 'UCtestchannel00000000001' && c0[1].author.channelId === null && c0[1].replies === '3' && c0[2].hearted === true && c0[0].likes === '1.5K' && c0[0].text === 'comment 0.0\nsecond line', 'comments come with who wrote them, when, likes, replies, pinned and hearted', JSON.stringify(c0[0]));
+  r = await api('GET', `/watch/videos/${V}/comments?limit=20&offset=5`, A3); ok(r.body.comments.length === 11 && !r.body.hasMore && r.body.comments[0].id === 'c-0-5' && r.body.comments[3].id === 'c-1-0', 'more comments carry on from where the last page ended (across YouTube\'s pages)', JSON.stringify(r.body.comments.map((x) => x.id)));
+
+  const CH = 'UCtestchannel00000000001';
+  r = await api('GET', `/watch/channels/${CH}`, A3); const cd = r.body.channel;
+  ok(r.status === 200 && cd.name === 'Test Channel' && cd.handle === '@testchannel' && cd.subscribers === '4.55M subscribers' && cd.videoCount === '437 videos' && cd.description === 'About this channel' && /googleusercontent\.com/.test(cd.banner) && /googleusercontent\.com/.test(cd.avatar), 'a channel has a name, handle, subscribers, video count, description, picture and banner', JSON.stringify(cd));
+  r = await api('GET', `/watch/channels/${CH}/videos?limit=30`, A3); ok(r.status === 200 && r.body.videos.length === 24 && r.body.videos.every(isId) && r.body.videos[0].views === '55K views' && r.body.videos[0].published === '3 weeks ago' && r.body.videos[0].channel === null && !r.body.hasMore, 'its videos list (an upload has no channel line: it is all views and age)', JSON.stringify(r.body.videos?.[0]));
+  r = await api('GET', '/watch/channels/UCgonegonegonegonegone00', A3); ok(r.status === 404, 'a channel that is gone says so');
+  r = await api('GET', '/watch/channels/nonsense', A3); ok(r.status === 400, 'something that isn\'t a channel id is refused');
+
+  await stopServer(); startServer({ WATCH_API_PER_MIN: '3' }); await ready();
+  for (const id of ['v0000000001', 'v0000000002', 'v0000000003']) await api('GET', `/watch/videos/${id}`, A3);   // each video asks YouTube once
+  r = await api('GET', '/watch/videos/v0000000004', A3); ok(r.status === 429 && r.body.code === 'rate_limited', 'Orata never sends YouTube more than WATCH_API_PER_MIN requests a minute, however many people browse');
+  await stopServer(); startServer({ WATCH: 'off' }); await ready();
+  r = await api('GET', '/config'); ok(r.body.watch === false, 'WATCH=off turns Watch off (and /api/config says so, which hides its buttons)');
+  r = await api('GET', '/watch/home', A3); ok(r.status === 503 && r.body.code === 'watch_not_configured', '… and the pages explain it');
+  await stopServer(); startServer({ WATCH_CLIENT: path.join(os.tmpdir(), 'no-such-youtube-library.mjs') }); await ready();
+  r = await api('GET', '/watch/home', A3); ok(r.status === 503 && r.body.code === 'watch_not_configured' && /npm install/.test(r.body.error), 'without the library on the server the pages say what to install, and the rest of Orata carries on');
+  r = await api('GET', '/config'); ok(r.status === 200, '… (the rest of Orata still answers)');
+
+  console.log('\nWatching together in a call');
+  {   // (a block of its own: this section's names stay out of the rest of the file)
+  await stopServer(); startServer({ WATCH_API_PER_MIN: '1000' }); await ready();
+  const movie = (await api('POST', `/servers/${S.id}/channels`, A3, { name: 'Movie Night', type: 'voice' })).body;
+  const pa = await connect(A3); const pb = await connect(B.token); const pc = await connect(C.token); const pd = await connect(D.token);
+  const put = (w, op, d = {}) => w.ws.send(JSON.stringify({ op, d }));
+  const until = async (fn, ms = 2500) => { for (let t = 0; t < ms; t += 40) { if (fn()) return true; await sleep(40); } return false; };
+  const party = (w) => {   // what this person's screen knows: the latest state, with the queue it already had when a state doesn't carry one (as public/js/party.js does)
+    let cur; for (const e of w.events) {
+      if (e.op === 'voice_joined' && e.d.channelId === movie.id) cur = e.d.party;
+      else if (e.op === 'voice_left' && e.d.channelId === movie.id) cur = null;
+      else if (e.op === 'party_state' && e.d.channelId === movie.id) { const p = e.d.party; cur = p && { ...p, queue: p.queue ?? cur?.queue ?? [] }; }
+    } return cur;
+  };
+  const raw = (w, act) => [...w.events].reverse().find((e) => e.op === 'party_state' && e.d.party?.last?.act === act)?.d.party;   // the state as it came over the wire
+  const errors = (w) => w.events.filter((e) => e.op === 'error' && e.d.party).map((e) => e.d.message);
+  const vid = (n) => `v${String(n).padStart(10, '0')}`;
+  const joinCall = async (w) => { const n = w.events.length; const mine = () => w.events.slice(n).find((e) => e.op === 'voice_joined' && e.d.channelId === movie.id)?.d; put(w, 'voice_join', { channelId: movie.id }); await until(mine); return mine() || null; };
+  const ja = await joinCall(pa); await joinCall(pb); await joinCall(pc);
+  ok(ja && ja.party === null, 'a call with nobody watching has no watch party');
+  put(pd, 'party_start', { videoId: vid(1) }); await sleep(400);
+  ok(!party(pa) && !errors(pd).length, 'somebody who isn’t in the call can’t start one (and nothing happens)');
+
+  put(pb, 'party_start', { videoId: vid(1) });
+  ok(await until(() => party(pa)?.current?.id === vid(1) && party(pc)?.current?.id === vid(1)), 'pressing Watch Together starts a party that everybody in the call is told about');
+  let pt = party(pa);
+  ok(pt.hostId === B.user.id && pt.controllers.length === 0 && pt.playing === true && pt.rate === 1 && pt.current.title === `Video ${vid(1)}` && pt.current.seconds === 213 && pt.current.addedBy === B.user.id && /^https:\/\/i\.ytimg\.com\//.test(pt.current.thumbnail), 'the first person to start it is the host, and the video starts playing (title, length and picture come from the server)', JSON.stringify(pt));
+  put(pc, 'party_start', {}); await sleep(300);
+  ok(party(pc).hostId === B.user.id && !errors(pc).length, 'starting it again just joins the existing party — the host stays the host');
+
+  put(pa, 'party_add', { videoId: vid(2) }); put(pa, 'party_control', { action: 'pause', key: pt.current.key }); put(pa, 'party_stop'); put(pa, 'party_grant', { userId: A.user.id, on: true }); put(pa, 'party_skip'); await sleep(500);
+  ok(errors(pa).length === 5 && errors(pa).every((m) => /host/.test(m)) && party(pa).playing === true && party(pa).queue.length === 0 && party(pa).controllers.length === 0, 'everybody else can only watch: choosing videos, pausing, ending the party, handing out control and skipping are all refused');
+
+  { const n0 = pa.events.filter((e) => e.op === 'party_state').length; put(pa, 'party_control', { action: 'seek', key: pt.current.key, pos: 50 });
+    ok(await until(() => pa.events.filter((e) => e.op === 'party_state').length > n0) && party(pa).pos < 10, 'a refused button is answered with the real state (so a screen that guessed the result is put right)'); }
+  put(pb, 'party_add', { videoId: vid(2) }); put(pb, 'party_add', { videoId: vid(3) }); put(pb, 'party_add', { videoId: 'gone0000000' }); put(pb, 'party_add', { videoId: 'nonsense' });
+  ok(await until(() => party(pa).queue.length === 2 && errors(pb).length === 2), 'the host adds videos to the queue (a missing or invalid one is refused)');
+  ok(party(pa).queue.map((x) => x.id).join() === [vid(2), vid(3)].join() && party(pa).current.id === vid(1), '… in the order they were asked for, behind the video that is playing');
+
+  put(pb, 'party_grant', { userId: A.user.id, on: true });
+  ok(await until(() => party(pc).controllers.includes(A.user.id)) && party(pa).hostId === B.user.id, 'the host gives somebody the right to control the video');
+  put(pb, 'party_grant', { userId: B.user.id, on: true }); put(pb, 'party_grant', { userId: D.user.id, on: true }); await sleep(300);
+  ok(party(pa).controllers.join() === A.user.id, '… but not to themselves or to somebody who isn’t in the call');
+
+  pt = party(pa);
+  put(pa, 'party_control', { action: 'seek', key: pt.current.key, pos: 100 });
+  ok(await until(() => party(pc)?.last?.act === 'seek'), 'somebody the host allowed jumps to another spot');
+  let s1 = party(pc);
+  ok(s1.pos >= 100 && s1.pos < 103 && s1.playing && s1.last.by === A.user.id && s1.last.arg === 100, '… everybody is told where (about 1:40, still playing) and who did it', JSON.stringify(s1));
+  ok(raw(pc, 'seek').queue === undefined && Array.isArray(raw(pc, 'add').queue) && s1.queue.length === 2, 'a state that doesn’t change the queue doesn’t carry it (the queue is the biggest part); one that does, does');
+  put(pa, 'party_control', { action: 'rate', key: pt.current.key, rate: 2 });
+  ok(await until(() => party(pc).rate === 2), '… and sets 2× speed');
+  const rev = party(pc).rev; put(pa, 'party_control', { action: 'rate', key: pt.current.key, rate: 3 }); put(pa, 'party_control', { action: 'seek', key: pt.current.key, pos: 'soon' }); put(pa, 'party_control', { action: 'seek', key: 'stale', pos: 5 }); await sleep(400);
+  ok(party(pc).rev === rev && party(pc).rate === 2, 'a speed that doesn’t exist, a position that isn’t a number and a button for an earlier video change nothing');
+  const t0 = party(pc).pos; await sleep(1000); put(pc, 'voice_leave'); await sleep(300); const jc = await joinCall(pc);
+  ok(Array.isArray(jc.party.queue) && jc.party.queue.length === 2, 'somebody who joins gets the whole party, queue included');
+  ok(jc.party.current.id === vid(1) && jc.party.playing && jc.party.pos >= t0 + 1.5 && jc.party.pos < t0 + 4, 'somebody who joins the call a moment later is handed the video at the right moment (it ran at 2× meanwhile)', `${t0} → ${jc.party?.pos}`);
+  put(pa, 'party_control', { action: 'pause', key: pt.current.key });
+  ok(await until(() => party(pb)?.playing === false), 'a controller pauses it for everybody');
+  const frozen = party(pb).pos; await sleep(700);
+  ok(party(pb).pos === frozen && frozen >= 100, '… and the position stays where it stopped');
+  put(pa, 'party_control', { action: 'seek', key: pt.current.key, pos: 99999 }); await sleep(300);
+  ok(party(pb).pos === 213, 'jumping past the end stops at the end of the video');
+  put(pa, 'party_control', { action: 'play', key: pt.current.key }); put(pa, 'party_control', { action: 'seek', key: pt.current.key, pos: 20 }); put(pa, 'party_control', { action: 'rate', key: pt.current.key, rate: 1 });
+  ok(await until(() => party(pb).playing && party(pb).rate === 1 && party(pb).pos >= 20 && party(pb).pos < 22), 'play, jump back, normal speed');
+
+  put(pc, 'party_ended', { key: pt.current.key }); await sleep(300);
+  ok(party(pb).current.id === vid(1), 'a browser saying the video ended when it hasn’t does nothing');
+  put(pb, 'party_control', { action: 'seek', key: pt.current.key, pos: 205 });
+  await until(() => party(pc).pos >= 205);
+  put(pc, 'party_ended', { key: pt.current.key });
+  ok(await until(() => party(pa).current?.id === vid(2)), 'when the video ends (any browser can say so) the next one in the queue starts');
+  pt = party(pa);
+  ok(pt.queue.length === 1 && pt.pos < 2 && pt.rate === 1 && pt.playing && pt.last.act === 'next' && pt.last.by === null, '… from the beginning, at normal speed');
+
+  put(pa, 'party_skip');
+  ok(await until(() => party(pb).current?.id === vid(3) && party(pb).queue.length === 0), 'a controller skips to the next video');
+  for (const n of [4, 5, 6]) put(pb, 'party_add', { videoId: vid(n) });
+  await until(() => party(pb).queue.length === 3);
+  const q = party(pb).queue; put(pb, 'party_move', { key: q[2].key, to: 0 }); await until(() => party(pa).queue[0]?.id === vid(6));
+  ok(party(pa).queue.map((x) => x.id).join() === [vid(6), vid(4), vid(5)].join(), 'the host drags a video to the front of the queue');
+  put(pb, 'party_remove', { key: party(pb).queue[1].key });
+  ok(await until(() => party(pa).queue.length === 2) && party(pa).queue.map((x) => x.id).join() === [vid(6), vid(5)].join(), '… and takes one out');
+  put(pa, 'party_play_now', { key: party(pa).queue[1].key });
+  ok(await until(() => party(pb).current?.id === vid(5)) && party(pb).queue.map((x) => x.id).join() === vid(6) && party(pb).pos < 2, 'or plays a queued video right now');
+  put(pa, 'party_add', { videoId: vid(7), now: true });
+  ok(await until(() => party(pb).current?.id === vid(7)) && party(pb).queue.length === 1, 'adding with "play now" starts it at once');
+
+  put(pc, 'party_react', { emoji: '🔥' }); put(pc, 'party_react', { emoji: 'not an emoji' });
+  const heard = await pa.wait('party_react', (d) => d.userId === C.user.id, 1500).catch(() => null);
+  ok(heard?.emoji === '🔥' && heard.channelId === movie.id && !pa.events.some((e) => e.op === 'party_react' && e.d.emoji === 'not an emoji'), 'anybody can send a reaction (from a short list), and everyone sees who sent it');
+
+  put(pa, 'voice_leave'); await until(() => party(pb) && !party(pb).controllers.length);
+  ok(party(pb).hostId === B.user.id && party(pb).controllers.length === 0 && party(pb).current.id === vid(7), 'a controller who leaves the call just loses the right — the party goes on');
+  for (let n = 0; n < 52; n++) put(pb, 'party_add', { videoId: vid(1000 + n) });
+  ok(await until(() => party(pb).queue.length === 50, 6000) && await until(() => errors(pb).some((m) => /queue is full/.test(m)), 3000), 'the queue holds 50 videos and says so when it is full');
+
+  put(pb, 'voice_leave');
+  ok(await until(() => party(pc) === null), 'when the host leaves the call, the watch party ends for everybody');
+  const jb = await joinCall(pb); ok(jb.party === null, '… and there is nothing to join afterwards');
+  put(pc, 'party_start', { videoId: vid(9) });
+  ok(await until(() => party(pc)?.hostId === C.user.id && party(pb)?.current?.id === vid(9)), 'the next person to press Watch Together starts a new party and becomes the host');
+  put(pc, 'party_stop');
+  ok(await until(() => party(pb) === null), 'the host can end it for everybody');
+
+  put(pc, 'party_start', { videoId: vid(10) }); await until(() => party(pb)?.current?.id === vid(10));
+  put(pc, 'party_control', { action: 'seek', key: party(pb).current.key, pos: 212 });
+  ok(await until(() => party(pb)?.current === null, 12000), 'if no browser says a video ended, the server moves on a few seconds later (here: to the end of the queue)');
+
+  // stages and DMs
+  r = await api('POST', `/servers/${S.id}/channels`, A3, { name: 'Town Square', type: 'stage' }); const stg = r.body;
+  put(pa, 'voice_join', { channelId: stg.id }); await pa.wait('voice_joined', (d) => d.channelId === stg.id, 2000).catch(() => null);
+  put(pa, 'party_start', {}); await sleep(400);
+  ok(errors(pa).some((m) => /stage/.test(m)), 'a stage has no watch party (people there can still use the Watch page)');
+  await joinCall(pd); for (let n = 0; n < 130; n++) put(pd, 'party_react', { emoji: '👍' });
+  ok(await until(() => errors(pd).some((m) => /Slow down/.test(m))), 'sending far too many things at once is slowed down');
+  for (const w of [pa, pb, pc, pd]) w.ws.close();
+  await sleep(200);
+  }
 
   console.log('\nDesktop app download');
   const dl = fs.mkdtempSync(path.join(os.tmpdir(), 'orate-desktop-'));

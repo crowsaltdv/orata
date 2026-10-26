@@ -16,7 +16,7 @@ initTheme();
 initTooltips();
 initFx();
 startPerfWatchdog();
-const route = parseRoute(location.pathname);
+const route = parseRoute(location.pathname + location.search);
 set({ route: { ...state.route, ...route } });
 if (state.token) { set({ phase: 'loading' }); gateway.connect(); } else {
   set({ phase: 'auth' });

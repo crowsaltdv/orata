@@ -26,6 +26,7 @@ import { beginSignup, confirmSignup, resendSignup } from './signup.js';
 import { closeConns, storeUpload, restoreUpload, BUILD } from './core.js';
 import { createSession, findSession, touchSession, endSession, endUserSessions, listSessions } from './sessions.js';
 import { mountMusic, musicReady, musicProblem, playlistCard, songCard } from './music.js';
+import { mountWatch, watchEnabled } from './watch.js';
 import { isStage, isVoiceLike, revalidateStage } from './stage.js';
 import { mountBadges } from './badges.js';
 import { mountThemes, dropUserThemes } from './themes.js';
@@ -201,6 +202,7 @@ export function createApi() {
     users: Object.keys(db.users).length, botId: db.botId,
     emailVerification: verificationMode(),   // { enabled, required, smtp }
     music: await musicReady(), musicWhy: musicProblem(),   // musicWhy: what the server still needs (Python, ytmusicapi), shown on the Music page
+    watch: watchEnabled(),   // the Watch page (videos from YouTube): false when WATCH=off, which also hides its buttons
     desktop: desktopInfo(),   // the desktop app's installer, when this server has one to hand out: { version, size, url }
   })));
   r.get('/download/desktop', ...desktopDownload);   // the desktop app's installer (also at /download, see index.js)
@@ -397,6 +399,7 @@ export function createApi() {
   }));
 
   mountMusic(r, { h, limit, getChannel });
+  mountWatch(r, { h, limit });
   mountBadges(r, { h });
   mountThemes(r, { h, limit, fetchImage: safeFetch });
   mountOrbit(r, { h, limit, getServer, getChannel, pushServerUpdate, guardText, automod, kickMember, banMember, timeoutMember });

@@ -18,7 +18,7 @@ export const state = {
   settings: deepMerge(DEFAULT_SETTINGS, migrateSettings(ls('settings', {}))),
   local: deepMerge(DEFAULT_LOCAL, ls('local', {})),
   focused: document.hasFocus(), idle: false, width: window.innerWidth, mobileNav: false,
-  music: { genres: null, category: 'top', charts: {}, chartLoading: false, chartError: null, recent: ls('musicRecentYT', []) || [], playlists: null, artists: [], query: '', results: null, searching: false, error: null, queue: [], orig: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7, muted: false, shuffle: ['off', 'playlist', 'library'].includes(ls('musicShuffle', 'off')) ? ls('musicShuffle', 'off') : 'off', repeat: ['off', 'all', 'one'].includes(ls('musicRepeat', 'off')) ? ls('musicRepeat', 'off') : 'off', library: [], showQueue: false, chartMore: {}, loadingMore: false, resultsMore: false }, musicOk: null, postIndex: {}, postLists: {},
+  music: { genres: null, category: 'top', charts: {}, chartLoading: false, chartError: null, recent: ls('musicRecentYT', []) || [], playlists: null, artists: [], query: '', results: null, searching: false, error: null, queue: [], orig: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7, muted: false, shuffle: ['off', 'playlist', 'library'].includes(ls('musicShuffle', 'off')) ? ls('musicShuffle', 'off') : 'off', repeat: ['off', 'all', 'one'].includes(ls('musicRepeat', 'off')) ? ls('musicRepeat', 'off') : 'off', library: [], showQueue: false, chartMore: {}, loadingMore: false, resultsMore: false }, musicOk: null, watchOk: null, party: null, partyPanel: false, postIndex: {}, postLists: {},
   gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, themesRev: 0, replyTo: null, editing: null, searchQuery: '', speaking: {},
 };
 state.panel = state.local.panel;
@@ -185,6 +185,12 @@ export function parseRoute(path) {
   if ((m = p.match(/^\/invite\/([\w-]+)$/))) return { view: 'invite', serverId: '@me', channelId: null, param: m[1] };
   if ((m = p.match(/^\/music\/(artist|album|playlist|shared)\/([\w-]+)$/))) return { view: 'music', serverId: '@me', channelId: null, musicView: m[1], musicId: m[2] };   // an artist's, an album's or one of your playlists' page
   if (p === '/music') return { view: 'music', serverId: '@me', channelId: null, musicView: null, musicId: null };
+  if (p === '/watch' || p === '/results') {   // videos (watch.js): /watch is the home page, /watch?v=<id> a video, /watch?q=<words> (or YouTube's /results?search_query=) a search
+    const q = new URLSearchParams(path.split('?')[1] || ''); const v = q.get('v') || ''; const words = (q.get('q') || q.get('search_query') || '').trim().slice(0, 100);
+    const base = { view: 'watch', serverId: '@me', channelId: null, watchView: 'home', watchId: null, watchQuery: '' };
+    return /^[A-Za-z0-9_-]{11}$/.test(v) ? { ...base, watchView: 'video', watchId: v } : words ? { ...base, watchView: 'search', watchQuery: words } : base;
+  }
+  if ((m = p.match(/^\/watch\/channel\/(UC[\w-]{22})$/))) return { view: 'watch', serverId: '@me', channelId: null, watchView: 'channel', watchId: m[1], watchQuery: '' };
   if (p === '/staff') return { view: 'staff', serverId: '@me', channelId: null };   // Orata staff tools (staff.js)
   if (p === '/themes' || p === '/themes/discover') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'discover' };   // Discovery and your theme library (themes.js)
   if (p === '/themes/library') return { view: 'themes', serverId: '@me', channelId: null, themesView: 'library' };
@@ -198,6 +204,7 @@ export function routePath(r) {
     case 'dm': return `/channels/@me/${r.channelId}`;
     case 'friends': return '/channels/@me';
     case 'music': return r.musicView && r.musicId ? `/music/${r.musicView}/${r.musicId}` : '/music';
+    case 'watch': return r.watchView === 'video' && r.watchId ? `/watch?v=${r.watchId}` : r.watchView === 'search' && r.watchQuery ? `/watch?q=${encodeURIComponent(r.watchQuery)}` : r.watchView === 'channel' && r.watchId ? `/watch/channel/${r.watchId}` : '/watch';
     case 'staff': return '/staff';
     case 'themes': return r.themesView === 'library' ? '/themes/library' : r.themesView === 'review' ? '/themes/review' : '/themes';
     case 'channel': return r.channelId ? `/channels/${r.serverId}/${r.channelId}` : `/channels/${r.serverId}`;
@@ -222,7 +229,7 @@ export function resolveRoute(r) {
 export function go(path, { replace = false } = {}) {
   const r = resolveRoute(typeof path === 'string' ? parseRoute(path) : path);
   const url = routePath(r);
-  if (location.pathname !== url) history[replace ? 'replaceState' : 'pushState']({}, '', url);
+  if (location.pathname + location.search !== url) history[replace ? 'replaceState' : 'pushState']({}, '', url);
   const prev = state.route;
   set({ route: { ...prev, tab: prev.tab, ...r }, mobileNav: false });
   if (r.channelId && r.serverId !== '@me') updateSettings({ lastChannel: { [r.serverId]: r.channelId } }, { sync: false });
@@ -230,7 +237,7 @@ export function go(path, { replace = false } = {}) {
 }
 export const goChannel = (serverId, channelId) => go({ view: 'channel', serverId, channelId });
 export const goDm = (channelId) => go({ view: 'dm', serverId: '@me', channelId });
-window.addEventListener('popstate', () => { if (state.phase === 'ready') { set({ route: { ...state.route, ...resolveRoute(parseRoute(location.pathname)) } }); } });
+window.addEventListener('popstate', () => { if (state.phase === 'ready') { set({ route: { ...state.route, ...resolveRoute(parseRoute(location.pathname + location.search)) } }); } });
 
 /* ----------------------------------------------------------- overlays */
 export function openModal(kind, props = {}) {

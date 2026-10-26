@@ -205,6 +205,30 @@ npm run music:update                         # update ytmusicapi later — worth
 
 **What others see:** the title, artist, artwork and a progress bar, only while it plays. They always come from YouTube Music via the server — a client can't make up a "listening to" status — and disappear when you pause, stop, close the last tab or the song ends. Nothing is shown when **Settings → Privacy → Show my status to everyone** is off or you are *Invisible* (the switch is also on the Music page). The player links every song back to YouTube Music.
 
+## Watch (videos — no key needed)
+
+The **play button** next to the mute button on your user bar (bottom left) opens **Watch** (`/watch`) — your voice carries on while you browse. The play button next to *Share Your Screen* in a call is **Watch Together** (see below). It is laid out like YouTube: a search bar on top (it suggests what people search for as you type), a row of categories (All, Music, Gaming, Live, News, Movies & TV, Sports, Comedy, Learning) over a grid of videos, and a page for each video with the player, its title, channel, likes, description, comments and related videos beside it. Channels have their own page with their videos. It needs **no account and no API key**.
+
+The addresses are YouTube's, on your own site: `/watch` (home), `/watch?v=<video id>` (a video), `/watch?q=<words>` (a search; `/results?search_query=<words>` works too) and `/watch/channel/<channel id>`. Playing a video pauses the music player.
+
+Orata finds the videos with [YouTube.js](https://github.com/LuanRT/YouTube.js) (`youtubei.js`, MIT), a JavaScript client for YouTube's own web API, and plays each one in YouTube's embedded player. It is an ordinary npm package, so **`npm install` is all it needs** — on Render, a Droplet or your own machine alike. The server only *finds* things (search, a video's details and related videos, comments, channels, search suggestions); the video itself never passes through Orata. A video's owner can switch embedding off, and then the player shows YouTube's own message for that one.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `WATCH` | on | `WATCH=off` turns Watch off for everybody (its buttons disappear) |
+| `WATCH_API_PER_MIN` | `60` | The most requests Orata sends to YouTube per minute, however many people browse |
+
+**Watch Together.** In a voice channel, a DM call or a group call, the play button next to *Share Your Screen* puts a big video tile in the call, like a shared screen, with everybody else's faces in a strip below it. Whoever presses it first is the **host**. The host picks videos for a **queue** (the list button on the tile opens the *Queue*, *Add* and *People* panel: search, drag videos into a new order, play one now, take one out), and in *People* can **allow** other people to do the same. Only the host and the people they allow can choose videos, pause and play, jump around in the video (the seek bar, −10 / +10 seconds) and change the speed (0.5× to 2×); everybody else just watches, with their own volume and full screen. **Everybody sees the same moment of the same video**: the server keeps one position that is true at a moment in time, so nothing is sent while the video plays — each browser works out where the video is *now* and moves its player back whenever it drifts by more than a second and a half, and somebody who joins late starts at the right spot. A line over the video says who just did what ("Sam jumped to 1:40", "Lee paused"), anybody can send a floating emoji reaction, and when a video ends the next one in the queue starts. The bars over the video slip away a few seconds after the mouse stops moving over it, and come back when it moves. The party ends when the host leaves the call, or when the host presses the lit *Watch Together* button again (it then reads *End Watch Together* and asks first), until somebody else presses it. It needs the call itself to work (see the voice notes above) and isn't available on a stage; in *Watch*, a video's page has a *Watch together* / *Add to queue* button while you are in a call. If a browser won't start a video nobody clicked, it shows a *Click to join the video* button.
+
+**Bandwidth.** The video itself never passes through Orata: each person's browser plays it straight from YouTube, so watching (alone or together) costs your host and your TURN relay nothing — TURN only carries voice, camera and screen-share media, and only for people whose networks can't connect directly (leave `ICE_TRANSPORT_POLICY` unset, or `all`, so that stays true). What Orata does send is small: lists of videos and comments (the browser keeps them for five minutes, and they go out gzipped), thumbnails come from YouTube, and a watch party sends a few hundred bytes whenever someone pauses, jumps or adds a video (the queue is only sent when it changes). The whole site is gzipped too (a first visit is about 70% fewer bytes).
+
+Searches, categories, videos, comments and channels are cached for 10–30 minutes, and long lists load a page at a time as you scroll, so most clicks cost YouTube nothing. YouTube hands a signed-out visitor no personal home feed, so each category on the home page is a search for what is popular right now (the last week for most of them).
+
+**Good to know:**
+* Like Music, YouTube only plays embedded videos on pages with a real address (`localhost` or a domain name), not a bare IP number.
+* YouTube sometimes refuses requests that come from a cloud host's address, taking them for a robot. Then people see *Videos couldn't be loaded right now* and the server log has the details; it comes and goes, and it doesn't affect anything else in Orata.
+* YouTube.js is unofficial and YouTube changes its pages now and then. If Watch stops finding things, update it: `npm update youtubei.js`.
+
 ## Discord bridge
 
 Link an Orata channel with a Discord channel and they act as one conversation: messages, pictures, files, GIFs, stickers, replies, edits and deletes go both ways. Discord people show up in Orata with their Discord name and picture and a **DISCORD** tag; Orata people show up in Discord with their Orata name and picture (Discord adds its usual **APP** label). Mentions become plain names on the other side, custom Discord emoji plain `:name:` text, and nothing from Orata can ping anyone on Discord. Bots' messages and polls aren't mirrored. GIFs from Discord's GIF picker play as GIFs, and Discord stickers come across as stickers (Discord's own animated ones are played with [lottie-web](https://github.com/airbnb/lottie-web)). Discord can't show WebP profile pictures (Orata saves cropped pictures as WebP), so the bridge gives Discord a PNG copy, made once per picture with [sharp](https://sharp.pixelplumbing.com).
@@ -338,6 +362,8 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 
 **Music** — a full Music page with YouTube Music search, charts, genres and moods and a full-song player (YouTube's embedded player) behind the note icon above Home (no key needed; needs Python and ytmusicapi on the server), and a "Listening to" card on your profile (see [Music](#music-youtube-music--no-key-needed)).
 
+**Watch** — a YouTube-style video page at `/watch` (a search bar with suggestions, categories, a grid of videos, a page per video with its comments and related videos, and channel pages), opened from the play button beside the mute button on your user bar or the one beside *Share Your Screen* in a call; videos are found with YouTube.js and play in YouTube's embedded player (no key needed, see [Watch](#watch-videos--no-key-needed)).
+
 **Customization** (User Settings → Appearance) — new accounts start with a slate-blue dark theme, the Snow Peaks wallpaper, light rain and the Montserrat font; everything below can be changed. The sign-in and sign-up screens always show this default look (a new account starts from it too), and your own look returns when you log in.
 
 * **Theme** — dark / light / midnight / system, solid or gradient accent, solid or gradient panels, panel opacity, panel blur, saturation, corner radius, spacing, custom text color.
@@ -374,6 +400,8 @@ server/
   verify.js     email verification tokens, modes and gating
   sessions.js   sign-in sessions (never expire; in their own Postgres table when DATABASE_URL is set)
   music.js      YouTube Music search, charts, artist and album pages, your playlists and the "listening to" status, through the Python helper below
+  watch.js      Watch: video search, home categories, a video's details, related videos, comments and channels, found with YouTube.js (youtubei.js)
+  party.js      watching together in a call: the host, the queue, who may control the video and where it is, kept the same for everybody
   discord.js    the Discord bridge: gateway connection, /link codes, mirroring both ways
   badges.js     profile badges: the catalog, developers (the "dev" badge) and their routes
   themes.js     the theme library and Discovery: routes, theme pictures kept as files of their own, previews, the sweep of unused theme files

@@ -22,9 +22,11 @@
     "node": ">=20"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "express": "^4.21.2",
     "pg": "^8.23.1",
     "sharp": "^0.33.5",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "youtubei.js": "^18.3.0"
   }
 }

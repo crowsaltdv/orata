@@ -10,6 +10,7 @@ import { openProfile } from '/js/sidebar.js';
 import { userMenu } from '/js/profile.js';
 import { t } from '/js/i18n.js';
 import { UserName } from '/js/profile-style.js';
+import { PartyTile, openParty, partyLabel } from '/js/party.js';
 
 function Video({ stream, muted, mirror, screen }) {
   const ref = useRef(null);
@@ -35,7 +36,7 @@ export function Tile({ uid, kind, stream, expanded, onExpand, avatarSize = 84 })
 }
 
 export function Controls({ compact }) {
-  const c = useSel((s) => s.voice.conn);
+  const c = useSel((s) => s.voice.conn); const watchOn = useSel((s) => s.watchOk !== false); const watching = useSel((s) => !!s.party && s.party.channelId === s.voice.conn?.channelId); const hosting = useSel((s) => !!s.party && s.party.channelId === s.voice.conn?.channelId && s.party.hostId === s.me.id);
   if (!c) return null;
   const muted = c.muted || c.deafened;
   const btn = (icon, label, fn, cls) => html`<button type="button" class=${cx('ctl', cls)} data-tip=${label} data-tip-pos="top" aria-label=${label} onClick=${fn}><${Icon} name=${icon} size=${22} /></button>`;
@@ -44,6 +45,7 @@ export function Controls({ compact }) {
     ${btn(c.deafened ? 'headphones-off' : 'headphones', c.deafened ? t('Undeafen') : t('Deafen'), () => voice.toggleDeafen(), c.deafened ? 'bad' : '')}
     ${btn(c.video ? 'video' : 'video-off', c.video ? t('Turn Off Camera') : t('Turn On Camera'), () => voice.toggleCamera(), c.video ? 'on' : '')}
     ${btn('monitor', c.screen ? t('Stop Sharing') : t('Share Your Screen'), () => voice.toggleScreen(), c.screen ? 'on' : '')}
+    ${watchOn ? btn('play-circle', partyLabel(watching, hosting), openParty, watching ? 'on' : '') : null}
     <button type="button" class="ctl hang" data-tip=${t('Disconnect')} data-tip-pos="top" aria-label="Disconnect" onClick=${() => voice.leave()}><${Icon} name="phone-off" size=${22} /></button>
     ${compact ? null : null}
   </div>`;
@@ -67,7 +69,7 @@ export function fitGrid(n, w, h, gap = 12) {
 }
 
 /** Lays `tiles` out with fitGrid() in whatever space its container gets. */
-function FitGrid({ tiles, big, setBig, className }) {
+function FitGrid({ tiles, big, setBig, className, chId }) {
   const ref = useRef(null); const [box, setBox] = useState({ w: 0, h: 0 });
   useEffect(() => {
     const el = ref.current; if (!el) return undefined;
@@ -77,12 +79,13 @@ function FitGrid({ tiles, big, setBig, className }) {
   const gap = 12; const { cols, rows } = fitGrid(tiles.length, box.w, box.h, gap);
   const tw = (box.w - gap * (cols - 1)) / cols; const th = (box.h - gap * (rows - 1)) / rows;
   const avatar = Math.round(Math.max(40, Math.min(150, Math.min(tw, th) * 0.4)) || 84);
-  return html`<div class=${cx('fit-grid', className)} ref=${ref} style=${{ '--cols': cols, '--rows': rows, '--gap': gap + 'px' }}>${tiles.map((x) => html`<${Tile} key=${x.key} uid=${x.uid} kind=${x.kind} stream=${x.stream} avatarSize=${avatar} expanded=${big === x.key} onExpand=${() => setBig(big === x.key ? null : x.key)} />`)}</div>`;
+  return html`<div class=${cx('fit-grid', className)} ref=${ref} style=${{ '--cols': cols, '--rows': rows, '--gap': gap + 'px' }}>${tiles.map((x) => (x.kind === 'party' ? html`<${PartyTile} key=${x.key} chId=${chId} />` : html`<${Tile} key=${x.key} uid=${x.uid} kind=${x.kind} stream=${x.stream} avatarSize=${avatar} expanded=${big === x.key} onExpand=${() => setBig(big === x.key ? null : x.key)} />`))}</div>`;
 }
 
 /** The tiles of a room (or, with `uids`, of just those people — the speakers of a stage). */
 export function Grid({ chId, uids }) {
   const room = useSel((s) => s.voice.states[chId]); useSel((s) => s.voice.rev);
+  const watching = useSel((s) => !uids && !!s.party && s.party.channelId === chId && s.voice.conn?.channelId === chId);   // watching together in this call (not on a stage)
   const [big, setBig] = useState(null);
   const ids = uids || Object.keys(room || {});
   const tiles = [];
@@ -93,13 +96,13 @@ export function Grid({ chId, uids }) {
   }
   if (!tiles.length) return null;
   // a shared screen (or a tile you double-clicked) takes the big area; everybody else sits in a strip below it
-  const main = big ? tiles.filter((x) => x.key === big) : tiles.filter((x) => x.kind === 'screen');
+  const main = [...(watching ? [{ key: 'party', kind: 'party' }] : []), ...(big ? tiles.filter((x) => x.key === big) : tiles.filter((x) => x.kind === 'screen'))];
   if (main.length) {
     const rest = tiles.filter((x) => !main.includes(x));
-    return html`<div class="stage-grid focus"><${FitGrid} tiles=${main} big=${big} setBig=${setBig} className="fg-main" />
+    return html`<div class="stage-grid focus"><${FitGrid} tiles=${main} big=${big} setBig=${setBig} className="fg-main" chId=${chId} />
       ${rest.length ? html`<div class="stage-strip">${rest.map((x) => html`<${Tile} key=${x.key} uid=${x.uid} kind=${x.kind} stream=${x.stream} avatarSize=${40} onExpand=${() => setBig(x.key)} />`)}</div>` : null}</div>`;
   }
-  return html`<div class="stage-grid"><${FitGrid} tiles=${tiles} big=${big} setBig=${setBig} /></div>`;
+  return html`<div class="stage-grid"><${FitGrid} tiles=${tiles} big=${big} setBig=${setBig} chId=${chId} /></div>`;
 }
 
 /** Inline stage above the messages of a DM / group DM while a call is active. */

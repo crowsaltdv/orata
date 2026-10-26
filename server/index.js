@@ -15,10 +15,12 @@ import { mailConfig } from './mail.js';
 import { verificationMode } from './verify.js';
 import { musicStatus } from './music.js';
 import { mirrorDesktop } from './desktop.js';
+import compression from 'compression';
 
 const app = express();
 app.disable('x-powered-by');
 if (ENV.TRUST_PROXY) app.set('trust proxy', true);
+app.use(compression({ threshold: 1024 }));   // scripts, styles, pages and API answers go out gzipped (a fraction of the bytes, which is what a host bills for); pictures, video and downloads are skipped, being compressed already
 
 app.use((req, res, next) => {
   res.set({

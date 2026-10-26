@@ -1,6 +1,6 @@
 // Orata — stage channel view: speakers on the stage, the audience below (raised hands first) and the controls for both.
 import { html, cx } from '/js/lib.js';
-import { state, set, useSel, getChannel, hasChannelPerm, openContext } from '/js/store.js';
+import { state, set, useSel, getChannel, hasChannelPerm, openContext, go } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { Avatar, Btn } from '/js/ui.js';
 import { voice, isStageMod } from '/js/voice.js';
@@ -29,6 +29,7 @@ function StageControls({ ch, conn, mine, mod }) {
       ${btn(muted ? 'mic-off' : 'mic', muted ? t('Unmute') : t('Mute'), () => voice.toggleMute(), muted ? 'bad' : '')}
       ${btn(conn.video ? 'video' : 'video-off', conn.video ? t('Turn Off Camera') : t('Turn On Camera'), () => voice.toggleCamera(), conn.video ? 'on' : '')}
       ${btn('monitor', conn.screen ? t('Stop Sharing') : t('Share Your Screen'), () => voice.toggleScreen(), conn.screen ? 'on' : '')}
+      ${state.watchOk !== false ? btn('play-circle', t('Watch Videos'), () => go('/watch'), '') : null}
       <${Btn} icon="users" onClick=${() => voice.setSpeaker(state.me.id, false)}>${t('Move to Audience')}<//>`
     : html`
       <${Btn} variant=${hand ? 'secondary' : 'primary'} icon="hand" disabled=${!hasChannelPerm(ch, 'SPEAK')} onClick=${() => voice.toggleHand()}>${hand ? t('Lower Hand') : t('Raise Hand')}<//>

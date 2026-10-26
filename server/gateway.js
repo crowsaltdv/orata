@@ -7,6 +7,7 @@ import { accountBlock } from './staff.js';
 import { expireListening } from './music.js';
 import { isGated } from './verify.js';
 import { isStage, isVoiceLike, isStageMod, stageJoinState, peersFor, mayLink, setSpeaker, setHand } from './stage.js';
+import { partyOp, partyLeft, partyView } from './party.js';
 
 const offlineTimers = new Map();
 
@@ -50,6 +51,7 @@ export function attachGateway(server) {
         }
       }
       broadcastVoice(channelId, conn.userId, null);
+      partyLeft(channelId, conn.userId);   // the host leaving ends the watch party
       send(conn, 'voice_left', { channelId, reason });
     };
 
@@ -70,7 +72,7 @@ export function attachGateway(server) {
       const peers = peersFor(ch, room, state);
       room.set(conn.userId, state);
       conn.voice = ch.id;
-      send(conn, 'voice_joined', { channelId: ch.id, peers, states: [...room.values()] });
+      send(conn, 'voice_joined', { channelId: ch.id, peers, states: [...room.values()], party: partyView(ch.id) });   // party: what the call is watching together, if anything
       broadcastVoice(ch.id, conn.userId, state);
       if (!ch.serverId && wasEmpty) emitTo(ch.recipients.filter((id) => id !== conn.userId), 'call_ring', { channelId: ch.id, from: conn.userId, users: [publicUser(db.users[conn.userId])] });
     }
@@ -136,6 +138,9 @@ export function attachGateway(server) {
           const err = setSpeaker(ch, target, on); if (err) send(conn, 'error', { message: err });
           break;
         }
+        case 'party_start': case 'party_stop': case 'party_add': case 'party_remove': case 'party_move': case 'party_play_now': case 'party_skip': case 'party_control': case 'party_grant': case 'party_ended': case 'party_react':
+          partyOp(conn, op, d).catch((e) => console.error('[party]', op, e));   // watching together in a call (party.js)
+          break;
         case 'voice_signal': {
           if (!conn.voice || !voice.get(conn.voice)?.has(String(d.to))) break;
           if (!mayLink(db.channels[conn.voice], voice.get(conn.voice), conn.userId, String(d.to))) break;   // on a stage two listeners never connect to each other

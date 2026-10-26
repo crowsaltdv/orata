@@ -36,7 +36,7 @@ function clearSession() {
   gateway.disconnect(); lsRemove('token');
   set({
     token: null, phase: 'auth', gated: false, verifyDismissed: false, me: null, users: {}, servers: {}, dms: {}, relationships: {}, channelIndex: {}, msgs: {}, reads: {}, lastMsg: {}, typing: {}, viewers: {},
-    voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel, musicOk: null, musicWhy: null, postIndex: {}, postLists: {},
+    voice: { states: {}, conn: null }, calls: {}, modals: [], ctx: null, popover: null, settingsPage: null, serverSettings: null, panel: state.local.panel, musicOk: null, musicWhy: null, watchOk: null, party: null, partyPanel: false, postIndex: {}, postLists: {},
   });
 }
 export async function logout({ silent } = {}) {
@@ -121,14 +121,14 @@ function bootstrap(d) {
   // a link to a forum post: it isn't in the channel list, so fetch it and go there once we know it
   const deep = parseRoute(location.pathname);
   if (deep.view === 'channel' && deep.channelId && servers[deep.serverId] && !servers[deep.serverId].channels.some((c) => c.id === deep.channelId)) ensurePost(deep.channelId).then((p) => { if (p && p.serverId === deep.serverId) go({ view: 'channel', serverId: p.serverId, channelId: p.id }); });
-  const r = resolveRoute(state.route.view === 'login' || state.route.view === 'register' || state.route.view === 'boot' ? parseRoute(location.pathname) : state.route);
+  const r = resolveRoute(state.route.view === 'login' || state.route.view === 'register' || state.route.view === 'boot' ? parseRoute(location.pathname + location.search) : state.route);
   if (r.view !== 'verify' && (!reconnect || !getChannel(state.route.channelId))) go(r.view === 'login' || r.view === 'register' ? { view: 'friends', serverId: '@me', channelId: null } : r, { replace: true });
   if (reconnect) { // re-sync whatever is on screen after a dropped connection
     for (const chId of Object.keys(state.msgs)) if (state.msgs[chId].loaded) loadMessages(chId, { force: true });
   }
   if (state.settings.notif.desktop && 'Notification' in window && Notification.permission === 'default') { /* asked from settings, never on load */ }
 }
-gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, musicOk: !!c.music, musicWhy: c.musicWhy || null, discordOk: !!c.discord, maxUpload: c.maxUpload, turn: !!c.turn, emailVerif: { enabled: !!c.emailVerification?.enabled, required: !!c.emailVerification?.required, smtp: !!c.emailVerification?.smtp } })).catch(() => {}); });
+gateway.on('ready', (d) => { bootstrap(d); api.get('/config').then((c) => set({ gifOk: !!c.gifs, musicOk: !!c.music, musicWhy: c.musicWhy || null, watchOk: c.watch !== false, discordOk: !!c.discord, maxUpload: c.maxUpload, turn: !!c.turn, emailVerif: { enabled: !!c.emailVerification?.enabled, required: !!c.emailVerification?.required, smtp: !!c.emailVerification?.smtp } })).catch(() => {}); });
 
 /* ------------------------------------------------------------ helpers */
 function isMentioned(m, ch) {
