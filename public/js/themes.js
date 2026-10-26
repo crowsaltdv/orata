@@ -14,6 +14,7 @@ import { t } from '/js/i18n.js';
 import { LIBRARY_LIMIT, sanitizeSiteLook, siteLookOf, sanitizeProfileTheme, profileLookOf, searchWords, matchesWords } from '/js/theme-data.js';
 import { isStaffMe } from '/js/staff.js';
 import { ProfileCard } from '/js/profile.js';
+import { Ad } from '/js/ads.js';
 
 const KINDS = [{ value: 'profile', label: 'Profile themes' }, { value: 'site', label: 'Site themes' }];
 const NOUN = { profile: 'profile theme', site: 'site theme' };
@@ -386,7 +387,8 @@ export function ThemesPage() {
         : view === 'discover' ? (!pub ? html`<div class="pk-center"><${Spinner} /></div>` : html`
           ${pub.themes.length || tile ? html`<div class="theme-grid">${tile}${pub.themes.map((th) => html`<${DiscoverCard} key=${th.id} th=${th} staff=${staff} onInstall=${install} onRemove=${removeFromDiscovery} onVote=${vote} />`)}</div>` : null}
           ${!pub.themes.length ? (searching ? noMatch() : html`<${Empty} icon="globe-grid" title=${t(`No ${NOUN[kind]}s here yet`)}>${t('Be the first: press the + to send one of yours. Orata staff check each theme before it shows here.')}<//>`) : null}
-          ${pub.themes.length < pub.total ? html`<div class="themes-more"><${Btn} onClick=${async () => { setPubMore(true); await loadPub(true); setPubMore(false); }} loading=${pubMore}>${t('Show more')}<//></div>` : null}`)
+          ${pub.themes.length < pub.total ? html`<div class="themes-more"><${Btn} onClick=${async () => { setPubMore(true); await loadPub(true); setPubMore(false); }} loading=${pubMore}>${t('Show more')}<//></div>` : null}
+          <${Ad} spot="page" />`)
           : !lib ? html`<div class="pk-center"><${Spinner} /></div>` : !shownLib.length
             ? (searching && mine.length ? noMatch() : html`<${Empty} icon="folder" title=${t(`No ${NOUN[kind]}s saved yet`)}>${t('Save the look you have now, or install one from Discovery.')}<//>`)
             : html`<div class="theme-grid">${shownLib.map((th) => html`<${LibraryCard} key=${th.id} th=${th} worn=${isWorn(th)} working=${!!making[th.id] && !th.preview} onApply=${applyTheme} onRename=${rename} onDelete=${remove} onPost=${post} onRemove=${removeFromDiscovery} />`)}</div>`}

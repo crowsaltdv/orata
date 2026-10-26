@@ -754,3 +754,14 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 .bulk-row { display: flex; gap: 14px; flex-wrap: wrap; } .bulk-row > .field { flex: 1 1 220px; }
 .bulk-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--border); }
 .bulk-count { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 14px; }
+/* ads (ads.js): a few quiet spots; each hides where it would crowd things. Nothing shows until an ad actually loads (an unfilled one is hidden, as AdSense suggests). */
+.ad { position: relative; flex: none; display: flex; flex-direction: column; gap: 4px; }
+.ad-label { display: none; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.ad:has(ins[data-ad-status="filled"]) .ad-label { display: block; } ins.adsbygoogle[data-ad-status="unfilled"] { display: none !important; }
+.ad-preview { align-items: center; justify-content: center; text-align: center; gap: 6px; padding: 12px; border: 2px dashed rgb(var(--accent-rgb) / .55); border-radius: 14px; background: rgb(var(--accent-rgb) / .07); color: var(--text-2); }
+.ad-preview b { font-size: 13px; } .ad-preview small { font-size: 11.5px; color: var(--text-3); }
+.ad-home, .ad-rail { margin: 8px 10px 10px; } .ad-settings { position: sticky; top: 10px; width: 160px; } .ad-page { margin: 26px auto 10px; width: min(728px, 100%); }
+.ad-preview.ad-home, .ad-preview.ad-rail { min-height: 250px; } .ad-preview.ad-settings { min-height: 600px; } .ad-preview.ad-page { min-height: 90px; }
+.s-row { display: flex; gap: 28px; align-items: flex-start; } .s-row > .s-wrap { flex: 1; min-width: 0; }
+@media (max-width: 1320px) { .ad-settings { display: none; } }
+@media (max-height: 780px) { .ad-rail { display: none; } }

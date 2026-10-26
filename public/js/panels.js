@@ -10,6 +10,7 @@ import { ProfileCard, userMenu } from '/js/profile.js';
 import { renderMarkdown, plainPreview } from '/js/markdown.js';
 import { addUsers } from '/js/store.js';
 import { t } from '/js/i18n.js';
+import { Ad } from '/js/ads.js';
 import { UserName } from '/js/profile-style.js';
 import { ServerTag } from '/js/server-tag.js';
 
@@ -58,7 +59,7 @@ export function MembersPanel({ chId }) {
     <div class="pane-scroll">
       ${groups.map((g) => html`<div class="member-group" key=${g.key}><h5 style=${g.color ? { color: g.color } : null}>${g.title} — ${g.list.length}</h5>${g.list.map((x) => html`<${MemberRow} key=${x.id} id=${x.id} serverId=${ch.serverId} />`)}</div>`)}
       ${!total ? html`<${Empty} icon="users" title="No members found" />` : null}
-    </div></div>`;
+    </div>${ch.serverId ? html`<${Ad} spot="rail" />` : null}</div>`;
 }
 
 /* ------------------------------------------------------------------ DM profile */

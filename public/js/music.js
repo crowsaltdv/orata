@@ -8,6 +8,7 @@ import { Icon } from '/js/icons.js';
 import { Spinner, IconBtn, Toggle } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
+import { Ad } from '/js/ads.js';
 import { createPlayer } from '/js/youtube-player.js';
 import { ArtistLinks, AlbumLink, ArtistView, AlbumView, PlaylistView, SharedPlaylistView, PlaylistsSection, openAddMenu, openSongMenu, openArtist, back } from '/js/music-pages.js';
 
@@ -394,7 +395,7 @@ export function MusicPage() {
           ${q ? html`<button type="button" class="mpg-clear" aria-label=${t('Clear')} onClick=${() => { setQ(''); clearTimeout(timer.current); music.search(''); }}><${Icon} name="x" size=${16} /></button>` : null}</div></div><${LayoutSwitch} /></div>
         <${Hero} />
         ${queueOpen ? html`<${QueuePanel} />` : null}
-        ${searching ? html`<${SearchResults} />` : html`<${PlaylistsSection} /><${Categories} /><${Chart} /><${Recent} />`}`}
+        ${searching ? html`<${SearchResults} />` : html`<${PlaylistsSection} /><${Categories} /><${Chart} /><${Recent} /><${Ad} spot="page" />`}`}
     </div>
   </main>`;
 }
