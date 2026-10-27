@@ -7,7 +7,8 @@ import { Icon } from '/js/icons.js';
 import { Spinner, Btn, Field, Modal, MODALS, confirmDialog, Avatar } from '/js/ui.js';
 import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
-import { music, Cover, Art, clock } from '/js/music.js';
+import { music, Cover, Art, clock, Progress } from '/js/music.js';
+import { chooseAndUploadImage } from '/js/imageutil.js';
 
 const setMusic = (patch) => set({ music: { ...state.music, ...patch } });
 const fail = (e) => toast(e?.message || t('Something went wrong.'), 'error');
@@ -93,7 +94,8 @@ export async function openSongMenu(e, track, { onRemove, extra = [] } = {}) {
   ]);
 }
 
-export function Mosaic({ covers }) {
+export function Mosaic({ covers, image }) {
+  if (image) return html`<span class="pl-mosaic"><img src=${image} alt="" draggable=${false} /></span>`;   // a picture of its own
   const four = covers.length >= 4;
   return html`<span class=${cx('pl-mosaic', four && 'four')}>${covers.length ? (four ? covers.slice(0, 4) : covers.slice(0, 1)).map((c, i) => html`<img key=${i} src=${c} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable=${false} />`) : html`<${Icon} name="list" size=${36} sw=${1.5} />`}</span>`;
 }
@@ -105,7 +107,7 @@ export function PlaylistsSection() {
   return html`<section class="mpg-section"><h3 class="mpg-h"><span>${t('Your playlists')}</span><button type="button" class="link-btn" onClick=${() => newPlaylist()}><${Icon} name="plus" size=${15} sw=${2.4} /> ${t('New playlist')}</button></h3>
     ${lists === null ? html`<div class="pk-center"><${Spinner} /></div>` : !lists.length ? html`<p class="mpg-hint">${t('Make a playlist, then add songs to it with the ⋯ on any song.')}</p>`
       : html`<div class="mpg-grid">${byRecent(lists).map((p) => html`<button type="button" key=${p.id} class="mpg-card" onClick=${() => openPlaylist(p.id)} title=${p.name}>
-        <span class="mpg-cover"><${Mosaic} covers=${p.covers} /></span><b>${p.name}</b><small>${songs(p.count)}${p.duration ? ` · ${span(p.duration)}` : ''}</small></button>`)}</div>`}
+        <span class="mpg-cover"><${Mosaic} covers=${p.covers} image=${p.image} /></span><b>${p.name}</b><small>${songs(p.count)}${p.duration ? ` · ${span(p.duration)}` : ''}</small></button>`)}</div>`}
   </section>`;
 }
 
@@ -113,21 +115,23 @@ export function PlaylistsSection() {
 /** Songs as rows: number or play button, cover, title, artists, album, length and ⋯. With `onMove` the rows can be dragged into a new order. */
 export function Rows({ tracks, numbered = true, showAlbum = true, onRemove, onMove, all = tracks }) {
   const cur = useSel((s) => s.music.track?.id); const playing = useSel((s) => s.music.playing);
-  const [drag, setDrag] = useState(null); const [over, setOver] = useState(null);
+  const [drag, setDrag] = useState(null); const [over, setOver] = useState(null); const [seeking, setSeeking] = useState(false);
   const play = (tr) => (cur === tr.id ? music.toggle() : music.play(tr, all));
+  useEffect(() => { if (!seeking) return undefined; const up = () => setSeeking(false); window.addEventListener('pointerup', up); return () => window.removeEventListener('pointerup', up); }, [seeking]);
   const menu = (e, tr, i) => openSongMenu(e, tr, { onRemove, extra: onMove ? [i > 0 && { label: t('Move up'), icon: 'arrow-up', onClick: () => onMove(i, i - 1) }, i < tracks.length - 1 && { label: t('Move down'), icon: 'arrow-down', onClick: () => onMove(i, i + 1) }] : [] });
   const end = () => { setDrag(null); setOver(null); };
   return html`<div class="mpg-rows">${tracks.map((tr, i) => html`<div key=${`${tr.id}:${i}`} class=${cx('mpg-row', cur === tr.id && 'cur', drag === i && 'dragging', over === i && drag !== null && drag !== i && (drag < i ? 'drop-after' : 'drop-before'))} role="button" tabindex="0"
       onClick=${() => play(tr)} onKeyDown=${(e) => { if (e.key === 'Enter') play(tr); }} onContextMenu=${(e) => { e.preventDefault(); menu(e, tr, i); }}
-      draggable=${!!onMove} onDragStart=${onMove ? (e) => { setDrag(i); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', tr.id); } : null}
+      draggable=${!!onMove && !seeking} onDragStart=${onMove ? (e) => { setDrag(i); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', tr.id); } : null}
       onDragOver=${onMove ? (e) => { if (drag === null) return; e.preventDefault(); if (over !== i) setOver(i); } : null}
       onDrop=${onMove ? (e) => { e.preventDefault(); if (drag !== null && drag !== i) onMove(drag, i); end(); } : null} onDragEnd=${onMove ? end : null}>
     ${onMove ? html`<span class="mpg-grip" aria-hidden="true"><${Icon} name="grip" size=${16} /></span>` : null}
     <span class="mpg-n">${cur === tr.id && playing ? html`<span class="eq sm"><i></i><i></i><i></i><i></i></span>` : html`<span class="num">${numbered ? i + 1 : ''}</span><${Icon} name="play" size=${14} fill=${true} sw=${1} />`}</span>
     <${Art} src=${tr.artwork} size=${40} seed=${tr.id} />
-    <span class="mpg-rt"><b title=${tr.title}>${tr.title}</b><small>${tr.explicit ? html`<i class="mpg-e">E</i>` : null}<${ArtistLinks} track=${tr} /></small></span>
+    <span class="mpg-rt"><b title=${tr.title}>${tr.title}</b><small>${tr.explicit ? html`<i class="mpg-e">E</i>` : null}<${ArtistLinks} track=${tr} /></small>
+      ${cur === tr.id ? html`<span class="mpg-row-prog" onClick=${(e) => e.stopPropagation()} onKeyDown=${(e) => e.stopPropagation()} onPointerDown=${() => setSeeking(true)}><${Progress} /></span>` : null}</span>
     ${showAlbum ? html`<span class="mpg-ra"><${AlbumLink} track=${tr} /></span>` : null}
-    <span class="mpg-rd">${tr.duration ? clock(tr.duration / 1000) : ''}</span>
+    <span class="mpg-rd">${tr.duration && cur !== tr.id ? clock(tr.duration / 1000) : ''}</span>
     <button type="button" class="mpg-ib" data-tip=${t('More options')} aria-label=${t('More options')} onClick=${(e) => { e.stopPropagation(); menu(e, tr, i); }}><${Icon} name="more-h" size=${17} /></button>
   </div>`)}</div>`;
 }
@@ -215,15 +219,21 @@ export function PlaylistView({ id }) {
     if (!(await confirmDialog({ title: t('Delete playlist'), body: `${t('Delete')} “${data.name}”? ${t('This can’t be undone.')}`, confirmLabel: t('Delete'), danger: true }))) return;
     try { await api.del(`/me/playlists/${id}`); setMusic({ playlists: (state.music.playlists || []).filter((x) => x.id !== id) }); back(); } catch (e) { fail(e); }
   };
+  const setImage = async (image) => { try { const r = await api.patch(`/me/playlists/${id}`, { image }); setData({ ...data, image: r.playlist.image }); upsert(r.playlist); } catch (e) { fail(e); } };
+  const picture = async (e) => {   // a picture of its own in place of the covers (cropped square), or back to the covers
+    const upload = async () => { try { const url = await chooseAndUploadImage({ aspect: 1, out: 600, title: t('Playlist picture'), allowGif: true }); if (url) setImage(url); } catch (err) { fail(err); } };
+    if (!data.image) return upload();
+    openContext(e, [{ label: t('Upload a new picture'), icon: 'upload', onClick: upload }, { label: t('Use the song covers'), icon: 'grid', onClick: () => setImage(null) }]);
+  };
   const total = data.tracks.reduce((n, x) => n + (x.duration || 0), 0); const query = q.trim().toLowerCase();
   const shown = data.tracks.filter(matches(query));
   return html`<div class="al">
-    <header class="al-head"><div class="al-cover"><${Mosaic} covers=${data.tracks.map((x) => x.artwork).filter(Boolean)} /></div>
+    <header class="al-head"><button type="button" class="al-cover al-cover-edit" data-tip=${t('Change picture')} aria-label=${t('Change picture')} onClick=${picture}><${Mosaic} covers=${data.tracks.map((x) => x.artwork).filter(Boolean)} image=${data.image} /><span class="al-cover-cam"><${Icon} name="image" size=${22} /></span></button>
       <div class="ar-info"><small class="m-kicker">${t('Playlist')}</small><h1>${data.name}</h1><div class="ar-stats">${[songs(data.tracks.length), total ? span(total) : null].filter(Boolean).join(' · ')}</div>
         <div class="ar-actions"><${Btn} variant="primary" icon="play" disabled=${!data.tracks.length} onClick=${() => music.playAll(data.tracks)}>${t('Play')}<//>
           <${Btn} icon="shuffle" disabled=${!data.tracks.length} onClick=${() => music.playAll(data.tracks, { shuffle: true })}>${t('Shuffle')}<//>
           <${Btn} icon="send" disabled=${!data.tracks.length} onClick=${() => openModal('forward', { playlist: { id: data.id, name: data.name } })}>${t('Share')}<//>
-          <${Btn} icon="edit" onClick=${rename}>${t('Rename')}<//><${Btn} variant="danger" icon="trash" onClick=${del}>${t('Delete')}<//></div></div>
+          <${Btn} icon="edit" onClick=${rename}>${t('Rename')}<//><${Btn} icon="image" onClick=${picture}>${t('Picture')}<//><${Btn} variant="danger" icon="trash" onClick=${del}>${t('Delete')}<//></div></div>
     </header>
     ${data.tracks.length > 6 ? html`<${FindInList} value=${q} onInput=${setQ} />` : null}
     ${!data.tracks.length ? html`<div class="m-empty"><b>${t('This playlist is empty')}</b><p>${t('Add songs with the ⋯ on any song.')}</p></div>`
@@ -242,7 +252,7 @@ export function SharedPlaylistView({ id }) {
   const saveCopy = () => savePlaylist(chId, mid);
   const query = q.trim().toLowerCase(); const shown = data.tracks.filter(matches(query));
   return html`<div class="al">
-    <header class="al-head"><div class="al-cover"><${Mosaic} covers=${data.tracks.map((x) => x.artwork).filter(Boolean)} /></div>
+    <header class="al-head"><div class="al-cover"><${Mosaic} covers=${data.tracks.map((x) => x.artwork).filter(Boolean)} image=${data.image} /></div>
       <div class="ar-info"><small class="m-kicker">${t('Shared playlist')}</small><h1>${data.name}</h1>
         <div class="ar-stats">${owner ? html`<${Avatar} user=${owner} size=${20} /> <b>${owner.displayName}</b> · ` : null}${[songs(data.tracks.length), data.duration ? span(data.duration) : null].filter(Boolean).join(' · ')}</div>
         <div class="ar-actions"><${Btn} variant="primary" icon="play" disabled=${!data.tracks.length} onClick=${() => music.playAll(data.tracks)}>${t('Play')}<//>

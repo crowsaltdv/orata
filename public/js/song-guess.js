@@ -1,6 +1,6 @@
 // Orata — Song guess (like Songspot): name a song from a split second of it. Pick a genre, an era and an artist (or leave them open) and a difficulty,
 // play 0.1 s of the song's highlight (the part people replay most), and each skip (or wrong guess) lets more of it play — 0.5 s, 2 s, 8 s, 15 s — until you name it or give up.
-// Only its testers see it while it's new (server/music.js GUESS_TESTERS). The song plays in a player of its own, so the mini player never gives it away.
+// The song plays in a player of its own, so the mini player never gives it away.
 import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
 import { useSel } from '/js/store.js';
 import { Icon } from '/js/icons.js';
@@ -10,7 +10,6 @@ import { errMsg } from '/js/actions.js';
 import { t } from '/js/i18n.js';
 import { createPlayer } from '/js/youtube-player.js';
 
-export const canGuess = (me) => me?.username === 'orata_dev';
 const STAGES = [0.1, 0.5, 2, 8, 15];   // seconds of the song each try lets you hear
 const LEVELS = [['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard'], ['expert', 'Expert'], ['impossible', 'Impossible']];
 const secs = (s) => `${s}s`;

@@ -39,7 +39,7 @@ export function PlaylistCard({ m }) {
   const play = async (shuffle) => { setBusy(shuffle ? 'shuffle' : 'play'); const list = await tracks(); setBusy(null); if (list?.length) (await player()).music.playAll(list, { shuffle }); };
   const open = async () => (await pages()).openShared(m.channelId, m.id);
   const save = async () => { setBusy('save'); const r = await (await pages()).savePlaylist(m.channelId, m.id); setBusy(null); if (!r) setGone(true); };
-  const covers = p.covers || []; const four = covers.length >= 4;
+  const covers = p.image ? [p.image] : p.covers || []; const four = covers.length >= 4;   // (a picture of its own in place of the covers)
   const btn = (key, icon, label, onClick, primary) => html`<button type="button" class=${cx('plc-btn', primary && 'primary')} disabled=${!!busy || gone} onClick=${onClick}><${Icon} name=${busy === key ? 'refresh' : icon} size=${15} fill=${icon === 'play'} sw=${icon === 'play' ? 1 : 2} />${label}</button>`;
   return html`<div class="pl-card">
     <button type="button" class=${cx('plc-art', four && 'four')} onClick=${open} aria-label=${`${t('Open')} ${p.name}`}>${covers.length ? (four ? covers.slice(0, 4) : covers.slice(0, 1)).map((c, i) => html`<img key=${i} src=${c} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable=${false} />`) : html`<${Icon} name="list-music" size=${36} />`}</button>

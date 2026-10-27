@@ -803,3 +803,10 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 .gs-entry { width: 100%; display: flex; align-items: center; gap: 14px; margin: 4px 0 18px; padding: 14px 18px; border-radius: 16px; text-align: left; color: var(--text); background: linear-gradient(110deg, rgb(30 215 96 / .22), rgb(30 215 96 / .06)); border: 1px solid rgb(30 215 96 / .35); }
 .gs-entry > .icon:first-child { color: #1ed760; } .gs-entry span { flex: 1; } .gs-entry b { display: block; font-size: 16px; } .gs-entry small { color: var(--text-2); }
 @media (max-width: 560px) { .gs-play { width: 96px; height: 96px; } .gs-len { left: calc(50% + 62px); font-size: 18px; } .gs-title { font-size: 30px; } }
+/* the row of the song playing in a list: its time, a bar to seek with and its length (music-pages.js Rows) */
+.mpg-row-prog { display: block; margin-top: 4px; cursor: default; } .mpg-row-prog .m-progress { gap: 8px; font-size: 11px; }
+/* a playlist's own picture: click the cover to change it (music-pages.js PlaylistView) */
+.al-cover-edit { position: relative; padding: 0; border: 0; background: none; cursor: pointer; }
+.al-cover-cam { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: inherit; background: rgb(0 0 0 / .45); color: #fff; opacity: 0; transition: opacity var(--t-fast); }
+.al-cover-edit:hover .al-cover-cam, .al-cover-edit:focus-visible .al-cover-cam { opacity: 1; }
+.pl-mosaic > img:only-child { width: 100%; height: 100%; object-fit: cover; }

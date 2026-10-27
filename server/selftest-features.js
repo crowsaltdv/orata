@@ -351,15 +351,10 @@ async function main() {
   ok(!!gone, 'closing the last tab clears the status (the music stopped with it)');
   w2.ws.close();
 
-  console.log('\nSong guess (only its testers for now)');
+  console.log('\nSong guess');
   const G = await register('guesser', 'g@feat.dev');
-  r = await api('GET', '/music/guess', G.token); ok(r.status === 403, 'nobody but its testers can open Song guess');
-  r = await api('POST', '/music/guess/round', G.token, {}); ok(r.status === 403, '… or get a song to guess');
-  await stopServer();
-  { const f = path.join(data, 'db.json'); const j = JSON.parse(fs.readFileSync(f, 'utf8')); j.users[G.user.id].username = 'orata_dev'; fs.writeFileSync(f, JSON.stringify(j)); }
-  startServer(); await ready();
   r = await api('GET', '/music/guess', G.token);
-  ok(r.status === 200 && r.body.genres.includes('Pop') && r.body.eras.includes('2010s') && r.body.artists.includes('Taylor Swift') && r.body.difficulties.join() === 'easy,medium,hard,expert,impossible', 'orata_dev gets the genres, eras, artists and difficulties');
+  ok(r.status === 200 && r.body.genres.includes('Pop') && r.body.genres.includes('Phonk') && r.body.eras.includes('2010s') && r.body.artists.includes('Taylor Swift') && r.body.difficulties.join() === 'easy,medium,hard,expert,impossible', 'anyone can open it: the genres (Phonk too), eras, artists and difficulties');
   r = await api('POST', '/music/guess/round', G.token, { difficulty: 'easy' }); ok(r.status === 200 && r.body.song?.id === 'overallhit0' && !!r.body.song.title, 'everything left open: a song from the top chart');
   ok(r.body.start === 80, 'it plays from the most replayed part (YouTube’s heat map), not the start everyone replays', r.body.start);
   const askedFor = () => helperCalls('search').slice(-1)[0]?.q;
@@ -372,6 +367,16 @@ async function main() {
   r = await api('POST', '/music/guess/round', G.token, { genre: 'Rock', era: '1980s', difficulty: 'impossible' }); ok(r.status === 200 && askedFor() === '1980s Rock hits' && !!r.body.song, 'a genre and an era: their hits; Impossible on a short list takes its deepest end');
   r = await api('POST', '/music/guess/round', G.token, { genre: 'Polka Metal' }); ok(r.status === 400, 'only the choices on the list');
   r = await api('POST', '/music/guess/round', G.token, { difficulty: 'legendary' }); ok(r.status === 400, '… and the five difficulties');
+
+  console.log('\nPlaylist pictures');
+  r = await api('POST', '/me/playlists', G.token, { name: 'Road Trip' }); const PL = r.body.playlist;
+  ok(PL.image === null, 'a new playlist shows its songs’ covers (no picture of its own)');
+  r = await api('PATCH', `/me/playlists/${PL.id}`, G.token, { image: '/uploads/cover123.webp' }); ok(r.status === 200 && r.body.playlist.image === '/uploads/cover123.webp' && r.body.playlist.name === 'Road Trip', 'give it a picture of your own (its name stays)');
+  r = await api('GET', '/me/playlists', G.token); ok(r.body.playlists.find((x) => x.id === PL.id)?.image === '/uploads/cover123.webp', '… it shows in your playlists');
+  r = await api('PATCH', `/me/playlists/${PL.id}`, G.token, { name: 'Night Drive' }); ok(r.body.playlist.name === 'Night Drive' && r.body.playlist.image === '/uploads/cover123.webp', 'renaming keeps the picture');
+  r = await api('PATCH', `/me/playlists/${PL.id}`, G.token, { image: 'https://evil.example/x.png' }); ok(r.status === 400, 'only a picture uploaded here');
+  r = await api('PATCH', `/me/playlists/${PL.id}`, G.token, { image: '/uploads/notes.txt' }); ok(r.status === 400, '… and a picture, not any file');
+  r = await api('PATCH', `/me/playlists/${PL.id}`, G.token, { image: null }); ok(r.status === 200 && r.body.playlist.image === null, 'back to the songs’ covers');
 
   console.log('\nRequest budget');
   await stopServer(); startServer({ MUSIC_API_PER_MIN: '4' }); await ready();

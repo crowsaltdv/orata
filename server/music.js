@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { ENV, ROOT, db, save, emitTo, relatedUserIds, publicUser, selfUser, ApiError, bad, notFound, forbidden, newId } from './core.js';
+import { ENV, ROOT, db, save, emitTo, relatedUserIds, publicUser, selfUser, ApiError, bad, notFound, newId } from './core.js';
 
 const COUNTRY = (String(ENV.MUSIC_COUNTRY || 'US').trim().toUpperCase().match(/^[A-Z]{2}$/) || ['US'])[0];
 const PER_MIN = Math.max(1, Number(ENV.MUSIC_API_PER_MIN) || 40);
@@ -219,7 +219,7 @@ const MAX_PLAYLISTS = 50; const MAX_PLAYLIST_TRACKS = 500;
 const playlistsOf = (u) => (u.playlists ||= []);
 const playlistName = (v) => { const n = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 60); if (!n) throw bad('Give the playlist a name'); return n; };
 const findPlaylist = (u, id) => { const p = playlistsOf(u).find((x) => x.id === String(id)); if (!p) throw notFound('That playlist doesn’t exist'); return p; };
-const playlistSummary = (p) => ({ id: p.id, name: p.name, count: p.tracks.length, duration: p.tracks.reduce((n, t) => n + (t.duration || 0), 0), covers: p.tracks.map((t) => t.artwork).filter(Boolean).slice(0, 4), updatedAt: p.updatedAt });
+const playlistSummary = (p) => ({ id: p.id, name: p.name, count: p.tracks.length, duration: p.tracks.reduce((n, t) => n + (t.duration || 0), 0), covers: p.tracks.map((t) => t.artwork).filter(Boolean).slice(0, 4), image: p.image || null, updatedAt: p.updatedAt });   // image: a picture of its own, in place of the covers
 /** What a song shared in a chat shows (/song): the server's own details of it (from YouTube Music), never what the client says. */
 export async function songCard(id) {
   const tid = String(id ?? ''); if (!TRACK_ID.test(tid)) throw bad('Unknown track');
@@ -263,11 +263,10 @@ export function setListening(u, value) {
 
 /* ------------------------------------------------------------ routes */
 /* ------------------------------------------------------------ Song guess (like Songspot): name a song from a split second of it
- * Only its testers see it while it's new. A round is a random song for the genre, era and artist picked (any of them may be left open), from the part
+ * A round is a random song for the genre, era and artist picked (any of them may be left open), from the part
  * of the list the difficulty asks for: searches and charts come most popular first, so Easy takes the top of the list and Impossible goes deep. */
-export const GUESS_TESTERS = new Set(['orata_dev']);
 export const GUESS = {
-  genres: ['Pop', 'Rock', 'Hip-Hop', 'R&B', 'Teen Pop', 'Vocal', 'Country', 'Latin', 'Electronic', 'K-Pop', 'Indie', 'Alternative', 'Metal', 'Reggaeton', 'Jazz'],
+  genres: ['Pop', 'Rock', 'Hip-Hop', 'R&B', 'Teen Pop', 'Vocal', 'Country', 'Latin', 'Electronic', 'K-Pop', 'Indie', 'Alternative', 'Metal', 'Phonk', 'Reggaeton', 'Jazz'],
   eras: ['1960s', '1970s', '1980s', '1990s', '2000s', '2010s', '2020s', 'Classic'],
   artists: ['Taylor Swift', 'Michael Jackson', 'Bad Bunny', 'Katy Perry', 'Drake', 'The Weeknd', 'Billie Eilish', 'Ed Sheeran', 'Ariana Grande', 'Queen', 'Eminem', 'Rihanna', 'Bruno Mars', 'Olivia Rodrigo', 'Dua Lipa', 'Coldplay', 'Adele', 'Harry Styles', 'Kendrick Lamar', 'BTS'],
   difficulties: ['easy', 'medium', 'hard', 'expert', 'impossible'],
@@ -328,10 +327,9 @@ export function mountMusic(r, { h, limit, getChannel }) {
     res.json({ ...page, artists });
   }));
   r.get('/music/charts', h(async (req, res) => { needEnabled(); res.json({ genres: await categories() }); }));
-  const tester = (req) => { if (!GUESS_TESTERS.has(req.user.username)) throw forbidden('Song guess isn’t open yet'); needEnabled(); };
-  r.get('/music/guess', h(async (req, res) => { tester(req); res.json(GUESS); }));
+  r.get('/music/guess', h(async (req, res) => { needEnabled(); res.json(GUESS); }));
   r.post('/music/guess/round', limit('musicguess', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
-    tester(req);
+    needEnabled();
     const b = req.body || {};
     const choice = (list, v) => { if (v == null || v === '') return null; if (!list.includes(v)) throw bad('Pick from the list'); return v; };
     const pick = { genre: choice(GUESS.genres, b.genre), era: choice(GUESS.eras, b.era), artist: choice(GUESS.artists, b.artist) };
@@ -381,8 +379,12 @@ export function mountMusic(r, { h, limit, getChannel }) {
     const p = findPlaylist(req.user, req.params.id);
     res.json({ playlist: { ...playlistSummary(p), tracks: p.tracks.map(songView).filter(Boolean) } });
   }));
-  r.patch('/me/playlists/:id', lim, h(async (req, res) => {
-    const p = findPlaylist(req.user, req.params.id); p.name = playlistName(req.body?.name); p.updatedAt = Date.now(); save();
+  r.patch('/me/playlists/:id', lim, h(async (req, res) => {   // { name } renames it, { image } sets its picture (an upload; null takes it off)
+    const p = findPlaylist(req.user, req.params.id); const b = req.body || {};
+    if (b.image !== undefined && b.image !== null && !/^\/uploads\/[A-Za-z0-9_.-]+\.(png|jpe?g|webp|gif)$/i.test(String(b.image))) throw bad('That isn’t a picture you uploaded');
+    if (b.name !== undefined || b.image === undefined) p.name = playlistName(b.name);
+    if (b.image !== undefined) p.image = b.image || undefined;
+    p.updatedAt = Date.now(); save();
     res.json({ playlist: playlistSummary(p) });
   }));
   r.delete('/me/playlists/:id', lim, h(async (req, res) => {
@@ -416,7 +418,7 @@ export function mountMusic(r, { h, limit, getChannel }) {
   r.post('/channels/:id/messages/:mid/playlist/save', lim, h(async (req, res) => {   // your own copy: changing it never touches theirs
     const { p, owner } = shared(req);
     const list = playlistsOf(req.user); if (list.length >= MAX_PLAYLISTS) throw bad(`You can have up to ${MAX_PLAYLISTS} playlists`);
-    const copy = { id: newId(), name: p.name, tracks: p.tracks.map((t) => ({ ...t })), createdAt: Date.now(), updatedAt: Date.now(), savedFrom: owner.id === req.user.id ? undefined : { ownerId: owner.id, playlistId: p.id } };
+    const copy = { id: newId(), name: p.name, image: p.image, tracks: p.tracks.map((t) => ({ ...t })), createdAt: Date.now(), updatedAt: Date.now(), savedFrom: owner.id === req.user.id ? undefined : { ownerId: owner.id, playlistId: p.id } };
     list.push(copy); save();
     res.json({ playlist: playlistSummary(copy) });
   }));

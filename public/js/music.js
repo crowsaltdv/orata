@@ -10,7 +10,7 @@ import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
 import { createPlayer } from '/js/youtube-player.js';
 import { ArtistLinks, AlbumLink, ArtistView, AlbumView, PlaylistView, SharedPlaylistView, PlaylistsSection, openAddMenu, openSongMenu, openArtist, back } from '/js/music-pages.js';
-import { GuessView, canGuess } from '/js/song-guess.js';
+import { GuessView } from '/js/song-guess.js';
 
 const setMusic = (patch) => set({ music: { ...state.music, ...patch } });
 export const openMusic = () => go('/music');
@@ -209,7 +209,8 @@ export function Art({ src, size = 44, playing, seed }) {
   const bare = !src || broken;
   return html`<span class=${cx('m-art', playing && 'on')} style=${{ width: size + 'px', height: size + 'px', ...(bare && seed ? { background: `linear-gradient(135deg, hsl(${hue(seed)} 45% 38%), hsl(${(hue(seed) + 50) % 360} 50% 22%))`, color: 'rgb(255 255 255 / .8)' } : null) }}>${!bare ? html`<img src=${size <= 64 ? src.replace('=w400-h400', '=w120-h120') : src} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable=${false} onError=${() => setBroken(true)} />` : html`<${Icon} name="music" size=${Math.round(size * 0.45)} />`}${playing ? html`<span class="eq sm"><i></i><i></i><i></i><i></i></span>` : null}</span>`;
 }
-function Progress() {
+/** Where the song playing is: the time, a bar to seek with and its length (the big player and the row of the song playing in a list). */
+export function Progress() {
   const pos = useSel((s) => s.music.position); const dur = useSel((s) => s.music.duration);
   const [drag, setDrag] = useState(null);
   const shown = drag ?? pos;
@@ -380,9 +381,8 @@ export function MusicPage() {
   useEffect(() => { if (ok !== false) { music.loadGenres(); music.openChart(state.music.category || 'top'); } }, [ok]);
   useEffect(() => { if (scroller.current) scroller.current.scrollTop = 0; }, [view, vid]);
   const typing = (v) => { setQ(v); clearTimeout(timer.current); timer.current = setTimeout(() => music.search(v), 450); };
-  const me = useSel((s) => s.me);
-  const searching = !!query.trim(); const sub = ok !== false && !!view && !!vid && (view !== 'guess' || canGuess(me));   // (Song guess: only its testers)
-  const page = view === 'guess' && canGuess(me) ? html`<${GuessView} />` : view === 'artist' ? html`<${ArtistView} key=${vid} id=${vid} />` : view === 'album' ? html`<${AlbumView} key=${vid} id=${vid} />` : view === 'shared' ? html`<${SharedPlaylistView} key=${vid} id=${vid} />` : html`<${PlaylistView} key=${vid} id=${vid} />`;
+  const searching = !!query.trim(); const sub = ok !== false && !!view && !!vid;
+  const page = view === 'guess' ? html`<${GuessView} />` : view === 'artist' ? html`<${ArtistView} key=${vid} id=${vid} />` : view === 'album' ? html`<${AlbumView} key=${vid} id=${vid} />` : view === 'shared' ? html`<${SharedPlaylistView} key=${vid} id=${vid} />` : html`<${PlaylistView} key=${vid} id=${vid} />`;
   return html`<main class="main panel music-page view-anim">
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
@@ -395,7 +395,7 @@ export function MusicPage() {
         <div class="mpg-top"><div class="mpg-search"><div class="input-wrap"><${Icon} name="search" size=${18} /><input class="input" placeholder=${t('Search songs and artists…')} value=${q} onInput=${(e) => typing(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter') { clearTimeout(timer.current); music.search(q); } }} />
           ${q ? html`<button type="button" class="mpg-clear" aria-label=${t('Clear')} onClick=${() => { setQ(''); clearTimeout(timer.current); music.search(''); }}><${Icon} name="x" size=${16} /></button>` : null}</div></div><${LayoutSwitch} /></div>
         <${Hero} />
-        ${canGuess(me) ? html`<button type="button" class="gs-entry" onClick=${() => go('/music/guess')}><${Icon} name="music" size=${22} /><span><b>${t('Song guess')}</b><small>${t('Name the song from a split second of it. Only you can see this for now.')}</small></span><${Icon} name="arrow-right" size=${18} /></button>` : null}
+        <button type="button" class="gs-entry" onClick=${() => go('/music/guess')}><${Icon} name="music" size=${22} /><span><b>${t('Song guess')}</b><small>${t('Name the song from a split second of it, from Easy to Impossible.')}</small></span><${Icon} name="arrow-right" size=${18} /></button>
         ${queueOpen ? html`<${QueuePanel} />` : null}
         ${searching ? html`<${SearchResults} />` : html`<${PlaylistsSection} /><${Categories} /><${Chart} /><${Recent} />`}`}
     </div>
