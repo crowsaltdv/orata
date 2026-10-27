@@ -273,13 +273,15 @@ export const GUESS = {
 };
 const DEPTH = { easy: [0, 10], medium: [5, 25], hard: [15, 50], expert: [30, 100], impossible: [60, 200] };   // which songs of the list, most popular first
 const guessed = new Map();   // user id → the songs they got lately, so the same one doesn't come back for a while
-/** The search a round falls back on: an artist's songs (in an era), the hits of a genre and/or an era, or none (the top chart) when everything is open. */
+/** The song search a round falls back on: an artist's songs (in an era), the hits of a genre and/or an era, or none (the top chart) when everything is open. */
 function guessQuery({ genre, era, artist }) {
   if (artist) return `${artist}${era ? ` ${era}` : ''} songs`;
-  return genre || era ? `${era ? `${era} ` : ''}${genre ? `${genre} ` : ''}hits` : null;
+  return genre || era ? `${genre ? `${genre} ` : ''}${era ? `${era} ` : ''}hits` : null;
 }
-/** The songs a round draws from, most popular first: an artist's own list of their songs, YouTube Music's playlists of a genre, else a search (or the
- *  top chart when everything is open). */
+/** The songs of the best playlist YouTube Music has for a search (a genre and/or an era keep to their topic there). Kept for half an hour. */
+const playlistSongs = (q) => memo(`ps:${q.toLowerCase()}`, 30 * 60_000, async () => views(await upstream('playlist_songs', { q, limit: 200 })));
+/** The songs a round draws from, most popular first: an artist's own list of their songs, YouTube Music's own playlists of a genre, the best playlist for
+ *  the genre and/or era ("Phonk 2020s"), else a song search (or the top chart when everything is open). */
 async function guessPool(pick, want) {
   if (pick.artist) {
     const a = (await searchArtists(pick.artist).catch(() => []))[0];
@@ -291,6 +293,10 @@ async function guessPool(pick, want) {
     const c = genres.find((x) => x.name.toLowerCase() === g) || genres.find((x) => x.name.toLowerCase().startsWith(g)) || genres.find((x) => x.name.toLowerCase().includes(g));
     const songs = c ? (await chartList(c.key, want).catch(() => null))?.tracks || [] : [];
     if (songs.length) return songs;
+  }
+  if (pick.genre || pick.era) {
+    const songs = await playlistSongs(pick.genre ? `${pick.genre}${pick.era ? ` ${pick.era}` : ''}` : `${pick.era} hits`).catch(() => []);
+    if (songs.length >= 10) return songs;
   }
   const q = guessQuery(pick);
   return (q ? await searchList(q, want) : await chartList('top', want)).tracks;

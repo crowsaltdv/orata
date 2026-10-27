@@ -34,6 +34,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       song('nospaces!!!', 'Bad characters in the id'),
     ]);
   }
+  if (req.op === 'playlist_songs') return reply(req.q === 'Phonk 2020s' ? many('k', 0, 30).map((s, i) => ({ ...s, title: `Phonk track ${i}`, artist: 'Kordhell' })) : []);   // a playlist only for that mix
   if (req.op === 'categories') return reply(CATEGORIES);
   if (req.op === 'category' && req.key === 'trending') return reply(req.page ? { tracks: many('w', 10, 40), more: false } : { tracks: many('w', 0, 20), more: true });   // 20 first, then the trending playlist behind them (10 of them again)
   if (req.op === 'category' && req.key === 'g-hip-hop') {   // four pages of 50 (the last song of a page comes again at the start of the next)

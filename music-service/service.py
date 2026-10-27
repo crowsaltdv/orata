@@ -374,6 +374,31 @@ def op_search(p):
     return with_covers(found)
 
 
+DATE_LIKE = re.compile(r"^[A-Z][a-z]{2} \d{1,2}, \d{4}$")
+
+
+def op_playlist_songs(p):
+    """A genre's or an era's songs: the tracks of the first playlist YouTube Music finds for `q` that has enough of them. A playlist keeps to its
+    topic; a song search for "2020s Phonk hits" mixes in whatever is popular (rap, rock, pop)."""
+    q = str(p.get("q") or "").strip()[:100]
+    if not q:
+        raise Problem("Type something to search for", "bad_request")
+    limit = clamp(p.get("limit"), 10, 200, 100)
+    for pl in (yt.search(q, filter="playlists", limit=6) or [])[:6]:
+        pid = str(pl.get("browseId") or "")
+        pid = pid[2:] if pid.startswith("VL") else pid
+        if not pid:
+            continue
+        try:
+            found = tracks_of(yt.get_playlist(pid, limit=limit).get("tracks") or [], limit)
+        except Exception:  # noqa: BLE001 - a playlist that won't open: try the next one
+            continue
+        found = [t for t in found if not DATE_LIKE.match(t["artist"])]   # (an upload with an upload date where its artist should be: nobody can name that)
+        if len(found) >= 10:
+            return with_covers(found)
+    return []
+
+
 def op_categories(_):
     cats = [{"key": "top", "name": "Top Songs"}, {"key": "trending", "name": "Trending"}]
     try:
@@ -524,7 +549,7 @@ def op_artists(p):
     return cards[:5]
 
 
-OPS = {"search": op_search, "categories": op_categories, "category": op_category, "song": op_song, "artist": op_artist, "artists": op_artists, "album": op_album, "ping": lambda p: "pong"}
+OPS = {"search": op_search, "playlist_songs": op_playlist_songs, "categories": op_categories, "category": op_category, "song": op_song, "artist": op_artist, "artists": op_artists, "album": op_album, "ping": lambda p: "pong"}
 
 
 def handle(line):

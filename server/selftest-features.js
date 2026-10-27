@@ -364,7 +364,9 @@ async function main() {
   ok(helperCalls('artist').length > 0 && guessGot.size === 2 && [...guessGot].every((id) => ['nightdrive1', 'rainsounds2'].includes(id)), 'an artist: their own list of songs, most played first, and the same one doesn’t come back for a while');
   ok(starts.rainsounds2 === 65, 'a song without a heat map plays from about a third of the way in (65 s of 215 s)', starts.rainsounds2);
   r = await api('POST', '/music/guess/round', G.token, { genre: 'Pop' }); ok(r.body.song?.id === 'popsong0001', 'a genre: YouTube Music’s own playlists for it');
-  r = await api('POST', '/music/guess/round', G.token, { genre: 'Rock', era: '1980s', difficulty: 'impossible' }); ok(r.status === 200 && askedFor() === '1980s Rock hits' && !!r.body.song, 'a genre and an era: their hits; Impossible on a short list takes its deepest end');
+  r = await api('POST', '/music/guess/round', G.token, { genre: 'Phonk', era: '2020s', difficulty: 'easy' });
+  ok(r.status === 200 && helperCalls('playlist_songs').slice(-1)[0]?.q === 'Phonk 2020s' && /^Phonk track/.test(r.body.song?.title || '') && r.body.song.artist === 'Kordhell', 'a genre and an era: the songs of the best playlist for them ("Phonk 2020s"), not a song search that drifts off into rap');
+  r = await api('POST', '/music/guess/round', G.token, { genre: 'Rock', era: '1980s', difficulty: 'impossible' }); ok(r.status === 200 && askedFor() === 'Rock 1980s hits' && !!r.body.song, '… no such playlist: a song search for their hits; Impossible on a short list takes its deepest end');
   r = await api('POST', '/music/guess/round', G.token, { genre: 'Polka Metal' }); ok(r.status === 400, 'only the choices on the list');
   r = await api('POST', '/music/guess/round', G.token, { difficulty: 'legendary' }); ok(r.status === 400, '… and the five difficulties');
 
