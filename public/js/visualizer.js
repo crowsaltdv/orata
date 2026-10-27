@@ -10,7 +10,7 @@ import { t } from '/js/i18n.js';
 
 export const canVisualize = (me) => ['orata_dev', 'oratedev'].includes(me?.username);
 export const openVisualizer = () => set({ visualizer: true });
-const DEFAULTS = { style: 'wings', particles: 'bokeh', amount: 60, shake: 'auto', background: 'auto', energy: 'auto', time: true };
+const DEFAULTS = { style: 'wings', particles: 'bokeh', amount: 60, shake: 'auto', background: 'auto', energy: 'auto', time: true, alwaysReal: false };
 const N = 48;   // bands of the spectrum (low to high)
 const HARD = /phonk|montagem|funk|drift|brazil|bass ?boost|trap|drill|rage|hardstyle|dubstep|edm|metal|techno|hyperpop|kordhell|playamane|interworld|moondeity|dvrst|ghostface|sxmpra|mvdnes/i;
 const CALM = /acoustic|piano|lo-?fi|chill|ballad|sleep|ambient|jazz|classical|lullaby|relax|soft|instrumental|calm|study/i;
@@ -67,7 +67,7 @@ function Visualizer() {
   const close = () => set({ visualizer: false });
 
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') close(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
-  useEffect(() => () => stopLive(), []);
+  useEffect(() => { if (opts.alwaysReal) startLive(); return () => stopLive(); }, []);   // (the click that opened it lets Chrome ask)
   function stopLive() { const l = live.current; live.current = null; setLiveOn(false); if (!l) return; l.stream.getTracks().forEach((x) => x.stop()); l.ac.close().catch(() => {}); }
   async function startLive() {
     if (live.current) { stopLive(); return; }
@@ -76,9 +76,9 @@ function Visualizer() {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { suppressLocalAudioPlayback: false }, preferCurrentTab: true, selfBrowserSurface: 'include' });
       if (!stream.getAudioTracks().length) { stream.getTracks().forEach((x) => x.stop()); throw new Error(t('No sound was shared. Pick this tab and leave “Share tab audio” on.')); }
       stream.getVideoTracks().forEach((x) => x.stop());   // only the sound is used
-      const ac = new AudioContext(); const an = ac.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0.55;
+      const ac = new AudioContext(); const an = ac.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0.35; an.minDecibels = -90; an.maxDecibels = -20;   // (quick, and the whole loudness range)
       ac.createMediaStreamSource(stream).connect(an);
-      live.current = { ac, an, data: new Uint8Array(an.frequencyBinCount), stream, avg: 0, last: 0 };
+      live.current = { ac, an, data: new Uint8Array(an.frequencyBinCount), stream, avg: 0, last: 0, gain: 0.5, prev: new Uint8Array(16), flux: 0 };
       stream.getAudioTracks()[0].addEventListener('ended', stopLive);
       setLiveOn(true);
     } catch (e) { if (e?.name !== 'NotAllowedError') toast(e?.message || String(e), 'error', 5000); else toast(t('Sharing the sound was cancelled.'), 'info', 3000); }
@@ -90,7 +90,7 @@ function Visualizer() {
     let W = 0; let H = 0; let dpr = 1;
     const fit = () => { dpr = Math.min(2, window.devicePixelRatio || 1); W = window.innerWidth; H = window.innerHeight; cv.width = W * dpr; cv.height = H * dpr; };
     fit(); window.addEventListener('resize', fit);
-    const bands = new Float32Array(N); const cam = { x: 0, y: 0, rot: 0, kick: 0 }; let parts = []; let sparks = []; let bass = 0; let level = 0.5; let lastPh = 0;
+    const bands = new Float32Array(N); const raw = new Float32Array(N); const cam = { x: 0, y: 0, rot: 0, kick: 0 }; let parts = []; let sparks = []; let bass = 0; let level = 0.5; let lastPh = 0;
     let cover = { img: null, colors: ['#e0303a', '#7c3aed', '#0ea5e9'], grey: true }; let coverFor = null; let blurred = null;
     const prepare = async (tr) => {
       coverFor = tr?.id || null; cover = await loadCover(tr?.artwork); if (coverFor !== (tr?.id || null)) return;
@@ -113,22 +113,30 @@ function Visualizer() {
       if (partKind !== o.particles || partN !== want) { partKind = o.particles; partN = want; parts = seed(o.particles, want); }
       // the sound: the real one (shared tab audio) or one made up from the song's energy
       let beat = false; const l = live.current;
-      if (l) {
-        l.an.getByteFrequencyData(l.data); const d = l.data; const top = Math.floor(d.length * 0.62);
-        for (let i = 0; i < N; i++) { const a = Math.floor(2 * (top / 2) ** (i / N)); const b = Math.max(a + 1, Math.floor(2 * (top / 2) ** ((i + 1) / N))); let s = 0; for (let k = a; k < b; k++) s += d[k]; const v = (s / (b - a)) / 255; bands[i] += ((v ** 1.3) - bands[i]) * (v > bands[i] ? 0.6 : 0.18); }
-        let lo = 0; for (let k = 1; k < 7; k++) lo += d[k]; lo /= 6 * 255;
-        l.avg = l.avg * 0.94 + lo * 0.06; if (lo > l.avg * 1.25 && lo > 0.3 && now - l.last > 190) { beat = true; l.last = now; }
-        bass += (lo - bass) * 0.35; level += ((l.avg * 1.4) - level) * 0.02;
+      if (l) {   // the real sound: each band's peak, the whole spectrum scaled to its recent loudest (quiet and loud songs both fill it), the highs lifted a little
+        l.an.getByteFrequencyData(l.data); const d = l.data; const top = Math.floor(d.length * 0.6); let max = 0;
+        for (let i = 0; i < N; i++) {
+          const a = Math.max(1, Math.floor(1.5 * (top / 1.5) ** (i / N))); const b = Math.max(a + 1, Math.floor(1.5 * (top / 1.5) ** ((i + 1) / N)));
+          let pk = 0; for (let k = a; k < b; k++) if (d[k] > pk) pk = d[k];
+          raw[i] = (pk / 255) * (1 + (i / N) * 0.9); if (raw[i] > max) max = raw[i];
+        }
+        l.gain = Math.max(max, l.gain * 0.996, 0.25);
+        for (let i = 0; i < N; i++) { const v = Math.min(1, (raw[i] / l.gain) ** 1.5); bands[i] += (v - bands[i]) * (v > bands[i] ? 0.8 : 0.35); }
+        // the beat: a sudden jump in the low end (how much the bass bins rose since the last frame) well above its usual
+        let lo = 0; let flux = 0; for (let k = 1; k < 8; k++) { lo += d[k]; flux += Math.max(0, d[k] - l.prev[k]); l.prev[k] = d[k]; } lo /= 7 * 255; flux /= 7 * 255;
+        if (flux > l.flux * 1.8 + 0.025 && lo > 0.25 && now - l.last > 170) { beat = true; l.last = now; }
+        l.flux = l.flux * 0.9 + flux * 0.1; l.avg = l.avg * 0.97 + lo * 0.03;
+        bass += (Math.min(1, lo / Math.max(0.3, l.avg * 1.5)) - bass) * 0.5; level += (Math.min(1, l.avg * 1.5) - level) * 0.02;
       } else {
         const e = guessEnergy(tr, o.energy); level += (e - level) * 0.05;
         const bpm = level > 0.66 ? 140 : level > 0.33 ? 112 : 84; const len = 60 / bpm; const ph = (tt % len) / len;
         if (on && ph < lastPh) beat = true; lastPh = ph;
         const kick = on ? Math.exp(-ph * 7) : 0; const hat = on && level > 0.5 ? Math.exp(-(((tt + len / 2) % len) / len) * 12) : 0;
         for (let i = 0; i < N; i++) {
-          const f = i / N;
-          const body = (0.22 + 0.35 * level) * (0.5 + 0.5 * Math.sin(tt * (1.3 + f * 3.1) + i * 1.7)) * (0.55 + 0.45 * Math.sin(tt * 0.73 + i * 0.37)) * (1 - f * 0.55);
-          const v = on ? Math.min(1, kick * Math.max(0, 1 - f * 2.4) * (0.55 + 0.45 * level) + body * (0.45 + 0.55 * kick) + hat * f * 0.3) : 0;
-          bands[i] += (v - bands[i]) * (v > bands[i] ? 0.5 : 0.12);
+          const f = i / N; const wob = 0.5 + 0.5 * Math.sin(tt * (2.1 + f * 4.7) + i * 1.7) * Math.sin(tt * (0.9 + f * 1.3) + i * 0.61);
+          const body = (0.35 + 0.4 * level) * wob * (1 - f * 0.45);
+          const v = on ? Math.min(1, kick * Math.max(0, 1 - f * 1.8) * (0.7 + 0.3 * level) + body * (0.5 + 0.5 * kick) + hat * f * 0.45) : 0;
+          bands[i] += (v - bands[i]) * (v > bands[i] ? 0.6 : 0.18);
         }
         bass += (kick * (0.4 + 0.6 * level) - bass) * 0.4;
       }
@@ -193,7 +201,7 @@ function Visualizer() {
         const M = 64;
         for (let i = 0; i < M; i++) {
           const a = -Math.PI / 2 + ((i + 0.5) / M) * Math.PI; const v = val(Math.abs(i - (M - 1) / 2) / (M / 2) * N * 0.9);
-          const len = 4 + v * R * 1.15 * (0.35 + 0.65 * Math.cos(a) ** 0.6);
+          const len = 6 + v * R * 1.6 * (0.45 + 0.55 * Math.cos(a) ** 0.6);
           for (const side of [1, -1]) { const ca = Math.cos(a) * side; const sa = Math.sin(a); g.beginPath(); g.moveTo(cx0 + ca * R * 1.04, cy0 + sa * R * 1.04); g.lineTo(cx0 + ca * (R * 1.04 + len), cy0 + sa * (R * 1.04 + len)); g.stroke(); }
         }
       } else if (o.style === 'outline') {   // smooth mirrored shapes that stretch out with the sound, the bass at the top ("horns")
@@ -202,7 +210,7 @@ function Visualizer() {
           const pts = [];
           for (let i = 0; i < K * 2; i++) {   // the right half from the top down, then mirrored for the left
             const j = i < K ? i : K * 2 - 1 - i; const f = j / (K - 1); const v = avg(Math.floor(f * N * 0.9), Math.floor(f * N * 0.9) + 3);
-            const a = -Math.PI / 2 + (i < K ? (j + 0.5) / K : -(j + 0.5) / K) * Math.PI; const r = R * 1.06 + v * R * (1.6 - f * 0.9) * scale;
+            const a = -Math.PI / 2 + (i < K ? (j + 0.5) / K : -(j + 0.5) / K) * Math.PI; const r = R * 1.06 + v * R * (2.1 - f * 1.1) * scale;
             pts.push([cx0 + Math.cos(a) * r, cy0 + Math.sin(a) * r]);
           }
           g.beginPath(); const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; const m0 = mid(pts[pts.length - 1], pts[0]); g.moveTo(m0[0], m0[1]);
@@ -211,11 +219,11 @@ function Visualizer() {
         }
       } else if (o.style === 'bars') {   // bars all the way round, in the cover's colours
         const M = 96; g.lineWidth = Math.max(2, (Math.PI * 2 * R) / M * 0.55); g.lineCap = 'round';
-        for (let i = 0; i < M; i++) { const a = (i / M) * Math.PI * 2 - Math.PI / 2; const v = val((i < M / 2 ? i : M - i) / (M / 2) * N * 0.95); const len = 3 + v * R * 0.95; g.strokeStyle = i % 2 ? c1 : c2; g.beginPath(); g.moveTo(cx0 + Math.cos(a) * R * 1.08, cy0 + Math.sin(a) * R * 1.08); g.lineTo(cx0 + Math.cos(a) * (R * 1.08 + len), cy0 + Math.sin(a) * (R * 1.08 + len)); g.stroke(); }
+        for (let i = 0; i < M; i++) { const a = (i / M) * Math.PI * 2 - Math.PI / 2; const v = val((i < M / 2 ? i : M - i) / (M / 2) * N * 0.95); const len = 4 + v * R * 1.35; g.strokeStyle = i % 2 ? c1 : c2; g.beginPath(); g.moveTo(cx0 + Math.cos(a) * R * 1.08, cy0 + Math.sin(a) * R * 1.08); g.lineTo(cx0 + Math.cos(a) * (R * 1.08 + len), cy0 + Math.sin(a) * (R * 1.08 + len)); g.stroke(); }
       } else if (o.style === 'ring') {   // a wobbling ring, a little looser on every beat
         for (const [k, alpha] of [[0, 0.9], [1, 0.4], [2, 0.2]]) {
           g.beginPath();
-          for (let i = 0; i <= 90; i++) { const a = (i / 90) * Math.PI * 2; const r = R * (1.08 + k * 0.07) + Math.sin(a * 5 + tt * 1.4 + k) * (3 + bass * R * 0.12) + Math.sin(a * 9 - tt * 2.1) * (2 + val(i / 90 * N) * R * 0.08); const x = cx0 + Math.cos(a) * r; const y = cy0 + Math.sin(a) * r; if (i) g.lineTo(x, y); else g.moveTo(x, y); }
+          for (let i = 0; i <= 90; i++) { const a = (i / 90) * Math.PI * 2; const r = R * (1.08 + k * 0.07) + Math.sin(a * 5 + tt * 1.4 + k) * (3 + bass * R * 0.2) + Math.sin(a * 9 - tt * 2.1) * (2 + val(i / 90 * N) * R * 0.18); const x = cx0 + Math.cos(a) * r; const y = cy0 + Math.sin(a) * r; if (i) g.lineTo(x, y); else g.moveTo(x, y); }
           g.closePath(); g.strokeStyle = `rgba(255,255,255,${alpha})`; g.lineWidth = 2; g.stroke();
         }
       }
@@ -226,7 +234,7 @@ function Visualizer() {
       if (cover.img) { const iw = cover.img.naturalWidth; const ih = cover.img.naturalHeight; const s = (rr * 2) / Math.min(iw, ih); g.drawImage(cover.img, cx0 - (iw * s) / 2, cy0 - (ih * s) / 2, iw * s, ih * s); }
       g.restore();
       g.beginPath(); g.arc(cx0, cy0, rr, 0, Math.PI * 2); g.strokeStyle = white; g.lineWidth = Math.max(2, R * 0.03); g.stroke();
-      if (o.time && tr) { const pos = state.music.position || 0; g.font = `800 ${Math.round(R * 0.26)}px "Montserrat", system-ui, sans-serif`; g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,.85)'; g.fillText(clock(pos), cx0, cy0 + R * 1.62 + (o.style === 'outline' ? R * 0.35 : 0)); }
+      if (o.time && tr) { const pos = state.music.position || 0; g.font = `800 ${Math.round(R * 0.26)}px "Montserrat", system-ui, sans-serif`; g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,.85)'; g.fillText(clock(pos), cx0, cy0 + R * (o.style === 'none' ? 1.62 : 2.5)); }
       g.restore();
       raf = requestAnimationFrame(frame);
     };
@@ -253,7 +261,8 @@ function Visualizer() {
       <h4>${t('Shake')}</h4><div class="viz-row">${opt('shake', 'auto', 'Auto')}${opt('shake', 'off', 'Off')}${opt('shake', 'low', 'Low')}${opt('shake', 'medium', 'Medium')}${opt('shake', 'high', 'High')}</div>
       ${liveOn ? html`<p class="viz-note">${t('Following the real sound: the beat and the energy come from the music itself.')}</p>`
         : html`<h4>${t('Energy')}</h4><div class="viz-row">${opt('energy', 'auto', 'Auto')}${opt('energy', 'calm', 'Calm')}${opt('energy', 'medium', 'Medium')}${opt('energy', 'intense', 'Intense')}</div>
-          <p class="viz-note">${t('Auto guesses from the song (phonk hits hard, acoustic and lo-fi stay calm). For the real beat, use the real sound.')}</p>`}
+          <p class="viz-note">${t('Without the real sound, the beat is estimated.')}</p>`}
+      <label class="viz-check"><input type="checkbox" checked=${opts.alwaysReal} onChange=${(e) => put('alwaysReal', e.target.checked)} /> ${t('Use the real sound every time it opens')}</label>
       <label class="viz-check"><input type="checkbox" checked=${opts.time} onChange=${(e) => put('time', e.target.checked)} /> ${t('Show the time under the cover')}</label>
     </aside>` : null}
   </div>`;
