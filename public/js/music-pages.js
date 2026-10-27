@@ -9,7 +9,7 @@ import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
 import { music, Cover, Art, clock, Progress } from '/js/music.js';
 import { chooseAndUploadImage } from '/js/imageutil.js';
-import { canVisualize, openVisualizer } from '/js/visualizer.js';
+import { openVisualizer } from '/js/visualizer.js';
 
 const setMusic = (patch) => set({ music: { ...state.music, ...patch } });
 const fail = (e) => toast(e?.message || t('Something went wrong.'), 'error');
@@ -86,7 +86,7 @@ export async function openSongMenu(e, track, { onRemove, extra = [] } = {}) {
     { label: t('Play next'), icon: 'skip-forward', onClick: () => music.playNext(track) },
     { label: t('Add to queue'), icon: 'list-music', onClick: () => music.addToQueue(track) },
     { label: t('Add to playlist'), icon: 'plus', submenu: playlistItems(lists, track) },
-    canVisualize(state.me) && { label: t('Play in the visualizer'), icon: 'sparkles', onClick: () => { if (state.music.track?.id !== track.id) music.play(track); openVisualizer(); } },
+    { label: t('Play in the visualizer'), icon: 'sparkles', onClick: () => { if (state.music.track?.id !== track.id) music.play(track); openVisualizer(); } },
     ...extra,
     onRemove && { label: t('Remove from this playlist'), icon: 'x', danger: true, onClick: () => onRemove(track) },
     { type: 'sep' },
@@ -235,7 +235,7 @@ export function PlaylistView({ id }) {
         <div class="ar-actions"><${Btn} variant="primary" icon="play" disabled=${!data.tracks.length} onClick=${() => music.playAll(data.tracks)}>${t('Play')}<//>
           <${Btn} icon="shuffle" disabled=${!data.tracks.length} onClick=${() => music.playAll(data.tracks, { shuffle: true })}>${t('Shuffle')}<//>
           <${Btn} icon="send" disabled=${!data.tracks.length} onClick=${() => openModal('forward', { playlist: { id: data.id, name: data.name } })}>${t('Share')}<//>
-          ${canVisualize(state.me) ? html`<${Btn} icon="sparkles" disabled=${!data.tracks.length} onClick=${() => { if (!data.tracks.some((x) => x.id === state.music.track?.id)) music.playAll(data.tracks); openVisualizer(); }}>${t('Visualizer')}<//>` : null}
+          <${Btn} icon="sparkles" disabled=${!data.tracks.length} onClick=${() => { if (!data.tracks.some((x) => x.id === state.music.track?.id)) music.playAll(data.tracks); openVisualizer(); }}>${t('Visualizer')}<//>
           <${Btn} icon="edit" onClick=${rename}>${t('Rename')}<//><${Btn} icon="image" onClick=${picture}>${t('Picture')}<//><${Btn} variant="danger" icon="trash" onClick=${del}>${t('Delete')}<//></div></div>
     </header>
     ${data.tracks.length > 6 ? html`<${FindInList} value=${q} onInput=${setQ} />` : null}

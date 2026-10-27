@@ -1,16 +1,15 @@
 // Orata — the music visualizer: a phonk-style "audio spectrum" screen. The song's cover sits in the middle, its sound is drawn around it (wings, an outline,
 // bars or a ring), particles float about, and the screen shakes on the beat — hard for phonk, gently for calm songs, which also get a more colourful
 // background. YouTube's player keeps its sound to itself, so by default the beat follows the song's energy (guessed from its title and artist, or picked in
-// the settings); "Use the real sound" has Chrome share this tab's audio, and then everything follows the music itself. Settings stay on this device.
-// Only orata_dev and oratedev see it for now.
+// the settings); "Use the real sound" has Chrome share this tab's audio, and then everything follows the music itself, with as little delay as the
+// browser allows. Settings (and how sensitive it is) stay on this device.
 import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
 import { state, set, useSel, toast } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { t } from '/js/i18n.js';
 
-export const canVisualize = (me) => ['orata_dev', 'oratedev'].includes(me?.username);
 export const openVisualizer = () => set({ visualizer: true });
-const DEFAULTS = { style: 'wings', particles: 'bokeh', amount: 60, shake: 'auto', background: 'auto', energy: 'auto', time: true, alwaysReal: false };
+const DEFAULTS = { style: 'wings', particles: 'bokeh', amount: 60, shake: 'auto', background: 'auto', energy: 'auto', time: true, alwaysReal: false, sensitivity: 1 };
 const N = 48;   // bands of the spectrum (low to high)
 const HARD = /phonk|montagem|funk|drift|brazil|bass ?boost|trap|drill|rage|hardstyle|dubstep|edm|metal|techno|hyperpop|kordhell|playamane|interworld|moondeity|dvrst|ghostface|sxmpra|mvdnes/i;
 const CALM = /acoustic|piano|lo-?fi|chill|ballad|sleep|ambient|jazz|classical|lullaby|relax|soft|instrumental|calm|study/i;
@@ -76,7 +75,8 @@ function Visualizer() {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { suppressLocalAudioPlayback: false }, preferCurrentTab: true, selfBrowserSurface: 'include' });
       if (!stream.getAudioTracks().length) { stream.getTracks().forEach((x) => x.stop()); throw new Error(t('No sound was shared. Pick this tab and leave “Share tab audio” on.')); }
       stream.getVideoTracks().forEach((x) => x.stop());   // only the sound is used
-      const ac = new AudioContext(); const an = ac.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0.35; an.minDecibels = -90; an.maxDecibels = -20;   // (quick, and the whole loudness range)
+      // as little delay as possible: a short window (about 21 ms), no smoothing of its own (the bars rise at once and fall a little slower), the whole loudness range
+      const ac = new AudioContext({ latencyHint: 'interactive' }); const an = ac.createAnalyser(); an.fftSize = 1024; an.smoothingTimeConstant = 0; an.minDecibels = -90; an.maxDecibels = -20;
       ac.createMediaStreamSource(stream).connect(an);
       live.current = { ac, an, data: new Uint8Array(an.frequencyBinCount), stream, avg: 0, last: 0, gain: 0.5, prev: new Uint8Array(16), flux: 0 };
       stream.getAudioTracks()[0].addEventListener('ended', stopLive);
@@ -88,7 +88,8 @@ function Visualizer() {
   useEffect(() => {
     const cv = canvas.current; const g = cv.getContext('2d'); let raf = 0; let alive = true;
     let W = 0; let H = 0; let dpr = 1;
-    const fit = () => { dpr = Math.min(2, window.devicePixelRatio || 1); W = window.innerWidth; H = window.innerHeight; cv.width = W * dpr; cv.height = H * dpr; };
+    const fit = () => { dpr = Math.min(1.5, window.devicePixelRatio || 1);   // (sharp enough, and fast every frame)
+      W = window.innerWidth; H = window.innerHeight; cv.width = W * dpr; cv.height = H * dpr; };
     fit(); window.addEventListener('resize', fit);
     const bands = new Float32Array(N); const raw = new Float32Array(N); const cam = { x: 0, y: 0, rot: 0, kick: 0 }; let parts = []; let sparks = []; let bass = 0; let level = 0.5; let lastPh = 0;
     let cover = { img: null, colors: ['#e0303a', '#7c3aed', '#0ea5e9'], grey: true }; let coverFor = null; let blurred = null;
@@ -106,7 +107,7 @@ function Visualizer() {
     const t0 = performance.now();
     const frame = () => {
       if (!alive) return;
-      const { opts: o, playing: on, track: tr, reduce: still } = sim.current;
+      const { opts: o, playing: on, track: tr, reduce: still } = sim.current; const sens = Math.max(0.3, Math.min(3, Number(o.sensitivity) || 1));
       if ((tr?.id || null) !== coverFor) prepare(tr);
       const now = performance.now(); const tt = (now - t0) / 1000;
       const want = o.particles === 'none' ? 0 : Math.round((o.amount / 100) * (o.particles === 'squares' ? 26 : o.particles === 'stars' ? 90 : 140));
@@ -121,12 +122,12 @@ function Visualizer() {
           raw[i] = (pk / 255) * (1 + (i / N) * 0.9); if (raw[i] > max) max = raw[i];
         }
         l.gain = Math.max(max, l.gain * 0.996, 0.25);
-        for (let i = 0; i < N; i++) { const v = Math.min(1, (raw[i] / l.gain) ** 1.5); bands[i] += (v - bands[i]) * (v > bands[i] ? 0.8 : 0.35); }
+        for (let i = 0; i < N; i++) { const v = Math.min(1, (raw[i] / l.gain) ** 1.5 * sens); bands[i] += (v - bands[i]) * (v > bands[i] ? 1 : 0.32); }
         // the beat: a sudden jump in the low end (how much the bass bins rose since the last frame) well above its usual
-        let lo = 0; let flux = 0; for (let k = 1; k < 8; k++) { lo += d[k]; flux += Math.max(0, d[k] - l.prev[k]); l.prev[k] = d[k]; } lo /= 7 * 255; flux /= 7 * 255;
-        if (flux > l.flux * 1.8 + 0.025 && lo > 0.25 && now - l.last > 170) { beat = true; l.last = now; }
+        let lo = 0; let flux = 0; for (let k = 1; k < 4; k++) { lo += d[k]; flux += Math.max(0, d[k] - l.prev[k]); l.prev[k] = d[k]; } lo /= 3 * 255; flux /= 3 * 255;   // (the kick drum: about 45-180 Hz)
+        if (flux > l.flux * (1.8 / Math.sqrt(sens)) + 0.025 / sens && lo > 0.25 / Math.sqrt(sens) && now - l.last > 150) { beat = true; l.last = now; }
         l.flux = l.flux * 0.9 + flux * 0.1; l.avg = l.avg * 0.97 + lo * 0.03;
-        bass += (Math.min(1, lo / Math.max(0.3, l.avg * 1.5)) - bass) * 0.5; level += (Math.min(1, l.avg * 1.5) - level) * 0.02;
+        bass += (Math.min(1, (lo / Math.max(0.3, l.avg * 1.5)) * sens) - bass) * 0.8; level += (Math.min(1, l.avg * 1.5) - level) * 0.02;
       } else {
         const e = guessEnergy(tr, o.energy); level += (e - level) * 0.05;
         const bpm = level > 0.66 ? 140 : level > 0.33 ? 112 : 84; const len = 60 / bpm; const ph = (tt % len) / len;
@@ -136,7 +137,7 @@ function Visualizer() {
           const f = i / N; const wob = 0.5 + 0.5 * Math.sin(tt * (2.1 + f * 4.7) + i * 1.7) * Math.sin(tt * (0.9 + f * 1.3) + i * 0.61);
           const body = (0.35 + 0.4 * level) * wob * (1 - f * 0.45);
           const v = on ? Math.min(1, kick * Math.max(0, 1 - f * 1.8) * (0.7 + 0.3 * level) + body * (0.5 + 0.5 * kick) + hat * f * 0.45) : 0;
-          bands[i] += (v - bands[i]) * (v > bands[i] ? 0.6 : 0.18);
+          const w = Math.min(1, v * sens); bands[i] += (w - bands[i]) * (w > bands[i] ? 0.6 : 0.18);
         }
         bass += (kick * (0.4 + 0.6 * level) - bass) * 0.4;
       }
@@ -215,7 +216,7 @@ function Visualizer() {
           }
           g.beginPath(); const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; const m0 = mid(pts[pts.length - 1], pts[0]); g.moveTo(m0[0], m0[1]);
           for (let i = 0; i < pts.length; i++) { const p = pts[i]; const q = mid(p, pts[(i + 1) % pts.length]); g.quadraticCurveTo(p[0], p[1], q[0], q[1]); }
-          g.closePath(); g.strokeStyle = `rgba(255,255,255,${alpha})`; g.lineWidth = wdt; g.shadowColor = smokeColor; g.shadowBlur = 20; g.stroke(); g.shadowBlur = 0;
+          g.closePath(); g.strokeStyle = `${smokeColor}40`; g.lineWidth = wdt + 8; g.stroke(); g.strokeStyle = `rgba(255,255,255,${alpha})`; g.lineWidth = wdt; g.stroke();
         }
       } else if (o.style === 'bars') {   // bars all the way round, in the cover's colours
         const M = 96; g.lineWidth = Math.max(2, (Math.PI * 2 * R) / M * 0.55); g.lineCap = 'round';
@@ -229,8 +230,9 @@ function Visualizer() {
       }
       // the cover, a little bigger on the bass
       const rr = R * (1 + bass * 0.07);
-      g.save(); g.beginPath(); g.arc(cx0, cy0, rr, 0, Math.PI * 2); g.closePath();
-      g.shadowColor = smokeColor; g.shadowBlur = 30 + bass * 40; g.fillStyle = '#111'; g.fill(); g.shadowBlur = 0; g.clip();
+      const gr = rr * (1.55 + bass * 0.35); const glow = g.createRadialGradient(cx0, cy0, rr * 0.92, cx0, cy0, gr); glow.addColorStop(0, `${smokeColor}aa`); glow.addColorStop(1, `${smokeColor}00`);
+      g.fillStyle = glow; g.beginPath(); g.arc(cx0, cy0, gr, 0, Math.PI * 2); g.fill();
+      g.save(); g.beginPath(); g.arc(cx0, cy0, rr, 0, Math.PI * 2); g.closePath(); g.fillStyle = '#111'; g.fill(); g.clip();
       if (cover.img) { const iw = cover.img.naturalWidth; const ih = cover.img.naturalHeight; const s = (rr * 2) / Math.min(iw, ih); g.drawImage(cover.img, cx0 - (iw * s) / 2, cy0 - (ih * s) / 2, iw * s, ih * s); }
       g.restore();
       g.beginPath(); g.arc(cx0, cy0, rr, 0, Math.PI * 2); g.strokeStyle = white; g.lineWidth = Math.max(2, R * 0.03); g.stroke();
@@ -257,6 +259,7 @@ function Visualizer() {
       <h4>${t('Around the cover')}</h4><div class="viz-row">${opt('style', 'wings', 'Wings')}${opt('style', 'outline', 'Outline')}${opt('style', 'bars', 'Bars')}${opt('style', 'ring', 'Ring')}${opt('style', 'none', 'None')}</div>
       <h4>${t('Particles')}</h4><div class="viz-row">${opt('particles', 'bokeh', 'Bokeh')}${opt('particles', 'sparks', 'Sparks')}${opt('particles', 'stars', 'Stars')}${opt('particles', 'squares', 'Squares')}${opt('particles', 'none', 'None')}</div>
       ${opts.particles !== 'none' ? html`<label class="viz-range"><span>${t('How many')}</span><input type="range" min="10" max="100" value=${opts.amount} onInput=${(e) => put('amount', Number(e.target.value))} /></label>` : null}
+      <h4>${t('Sensitivity')}</h4><label class="viz-range"><input type="range" min="0.3" max="3" step="0.1" value=${opts.sensitivity} onInput=${(e) => put('sensitivity', Number(e.target.value))} /><b class="viz-val">${Number(opts.sensitivity).toFixed(1)}×</b></label>
       <h4>${t('Background')}</h4><div class="viz-row">${opt('background', 'auto', 'Auto')}${opt('background', 'cover', 'Cover')}${opt('background', 'smoke', 'Smoke')}${opt('background', 'colorful', 'Colorful')}</div>
       <h4>${t('Shake')}</h4><div class="viz-row">${opt('shake', 'auto', 'Auto')}${opt('shake', 'off', 'Off')}${opt('shake', 'low', 'Low')}${opt('shake', 'medium', 'Medium')}${opt('shake', 'high', 'High')}</div>
       ${liveOn ? html`<p class="viz-note">${t('Following the real sound: the beat and the energy come from the music itself.')}</p>`

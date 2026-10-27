@@ -11,7 +11,7 @@ import { t } from '/js/i18n.js';
 import { createPlayer } from '/js/youtube-player.js';
 import { ArtistLinks, AlbumLink, ArtistView, AlbumView, PlaylistView, SharedPlaylistView, PlaylistsSection, openAddMenu, openSongMenu, openArtist, back } from '/js/music-pages.js';
 import { GuessView } from '/js/song-guess.js';
-import { canVisualize, openVisualizer } from '/js/visualizer.js';
+import { openVisualizer } from '/js/visualizer.js';
 
 const setMusic = (patch) => set({ music: { ...state.music, ...patch } });
 export const openMusic = () => go('/music');
@@ -248,7 +248,7 @@ export function Cover({ src, playing }) {
 /** What is playing, big, with the controls. Shown above everything else on the page. */
 function Hero() {
   const track = useSel((s) => s.music.track); const playing = useSel((s) => s.music.playing); const volume = useSel((s) => s.music.volume); const muted = useSel((s) => s.music.muted);
-  const show = useSel((s) => s.settings.privacy?.showActivity !== false); const queueOpen = useSel((s) => s.music.showQueue); const me = useSel((s) => s.me);
+  const show = useSel((s) => s.settings.privacy?.showActivity !== false); const queueOpen = useSel((s) => s.music.showQueue);
   if (!track) return html`<section class="mpg-hero empty"><span class="mpg-hero-ico"><${Icon} name="music" size=${34} sw=${1.6} /></span>
     <div><h1>${t('Music')}</h1><p>${t('Search for songs or pick a category below and play them in full. What you play can show on your profile.')}</p></div></section>`;
   const vol = muted ? 0 : volume;
@@ -265,7 +265,7 @@ function Hero() {
           <input type="range" min="0" max="1" step="0.01" value=${vol} style=${{ '--p': `${vol * 100}%` }} aria-label=${t('Volume')} onInput=${(e) => music.volume(Number(e.target.value))} /></span>
         <button type="button" class=${cx('m-addpl', queueOpen && 'on')} onClick=${() => setMusic({ showQueue: !queueOpen })}><${Icon} name="list-music" size=${16} /> ${t('Queue')}</button>
         <button type="button" class="m-addpl" onClick=${(e) => openAddMenu(e, track)}><${Icon} name="plus" size=${16} sw=${2.4} /> ${t('Add to playlist')}</button>
-        ${canVisualize(me) ? html`<button type="button" class="m-addpl" onClick=${openVisualizer}><${Icon} name="sparkles" size=${16} /> ${t('Visualizer')}</button>` : null}
+        <button type="button" class="m-addpl" onClick=${openVisualizer}><${Icon} name="sparkles" size=${16} /> ${t('Visualizer')}</button>
         <label class="m-share" data-tip=${t('Show what you’re listening to on your profile')}><span>${t('Show on my profile')}</span><${Toggle} checked=${show} onChange=${(v) => { setSetting('privacy.showActivity', v); if (v) setTimeout(() => syncListening(true), 50); }} /></label>
       </div>
     </div>

@@ -826,3 +826,4 @@ html.lite #rain, html.lite .wp-image { display: none !important; }
 .viz-range { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: rgb(255 255 255 / .75); } .viz-range input { flex: 1; }
 .viz-note { margin: 8px 0 0; font-size: 12.5px; color: rgb(255 255 255 / .6); line-height: 1.45; }
 .viz-check { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13.5px; }
+.viz-val { flex: none; min-width: 38px; text-align: right; font-size: 13px; color: #fff; font-variant-numeric: tabular-nums; }
