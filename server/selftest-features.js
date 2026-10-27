@@ -46,12 +46,16 @@ function talkToHelper(cmd, args, requests, ms = 20000) {
 }
 
 /* ---------------------------------------------------------------- scratch server */
+// a stand-in for YouTube's video pages (Song guess reads the "Most replayed" heat map there): a spike at the start everyone replays, the real peak at 80 s,
+// and no heat map at all for rainsounds2
+const HEAT = Array.from({ length: 100 }, (_, i) => `{"startMillis":"${i * 2000}","durationMillis":"2000","intensityScoreNormalized":${i === 0 ? 1 : i === 40 ? 0.9 : i === 39 || i === 41 ? 0.7 : 0.2}}`).join(',');
+const ytPages = http.createServer((req, res) => res.end(req.url.includes('rainsounds2') ? '<html>no heat map</html>' : `<html>{"markersList":[${HEAT}]}</html>`)).listen(0, '127.0.0.1');
 let child = null;
 function startServer(extra = {}) {
   child = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
     env: { ...process.env, PORT: String(PORT), ORATE_DATA: data, HOST: '127.0.0.1', DISCORD_BOT_TOKEN: '', SMTP_HOST: '', REQUIRE_EMAIL_VERIFICATION: '', DATABASE_URL: '', KLIPY_API_KEY: '',
       MUSIC: '', MUSIC_HELPER: JSON.stringify([process.execPath, HELPER]), FAKE_MUSIC_LOG: HELPER_LOG,
-      WATCH: '', WATCH_CLIENT, FAKE_WATCH_LOG: WATCH_LOG, ...extra },
+      WATCH: '', WATCH_CLIENT, FAKE_WATCH_LOG: WATCH_LOG, GUESS_PAGE_URL: `http://127.0.0.1:${ytPages.address()?.port}/watch?v=`, ...extra },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
 }
@@ -80,6 +84,7 @@ const register = async (username, email) => {
 };
 
 async function main() {
+  if (!ytPages.listening) await new Promise((r) => ytPages.once("listening", r));
   startServer(); await ready();
   console.log('Orata feature test on port', PORT);
 
@@ -356,10 +361,14 @@ async function main() {
   r = await api('GET', '/music/guess', G.token);
   ok(r.status === 200 && r.body.genres.includes('Pop') && r.body.eras.includes('2010s') && r.body.artists.includes('Taylor Swift') && r.body.difficulties.join() === 'easy,medium,hard,expert,impossible', 'orata_dev gets the genres, eras, artists and difficulties');
   r = await api('POST', '/music/guess/round', G.token, { difficulty: 'easy' }); ok(r.status === 200 && r.body.song?.id === 'overallhit0' && !!r.body.song.title, 'everything left open: a song from the top chart');
+  ok(r.body.start === 80, 'it plays from the most replayed part (YouTube’s heat map), not the start everyone replays', r.body.start);
   const askedFor = () => helperCalls('search').slice(-1)[0]?.q;
   const guessGot = new Set();
-  for (let i = 0; i < 3; i++) { r = await api('POST', '/music/guess/round', G.token, { artist: 'Taylor Swift', era: '2010s', difficulty: 'easy' }); if (r.body.song) guessGot.add(r.body.song.id); }
-  ok(askedFor() === 'Taylor Swift 2010s songs' && guessGot.size === 3 && [...guessGot].every((id) => ['nightdrive1', 'rainsounds2', 'evilartwork'].includes(id)), 'an artist (in an era): their songs, and the same one doesn’t come back for a while');
+  const starts = {};
+  for (let i = 0; i < 2; i++) { r = await api('POST', '/music/guess/round', G.token, { artist: 'Taylor Swift', difficulty: 'easy' }); if (r.body.song) { guessGot.add(r.body.song.id); starts[r.body.song.id] = r.body.start; } }
+  ok(helperCalls('artist').length > 0 && guessGot.size === 2 && [...guessGot].every((id) => ['nightdrive1', 'rainsounds2'].includes(id)), 'an artist: their own list of songs, most played first, and the same one doesn’t come back for a while');
+  ok(starts.rainsounds2 === 65, 'a song without a heat map plays from about a third of the way in (65 s of 215 s)', starts.rainsounds2);
+  r = await api('POST', '/music/guess/round', G.token, { genre: 'Pop' }); ok(r.body.song?.id === 'popsong0001', 'a genre: YouTube Music’s own playlists for it');
   r = await api('POST', '/music/guess/round', G.token, { genre: 'Rock', era: '1980s', difficulty: 'impossible' }); ok(r.status === 200 && askedFor() === '1980s Rock hits' && !!r.body.song, 'a genre and an era: their hits; Impossible on a short list takes its deepest end');
   r = await api('POST', '/music/guess/round', G.token, { genre: 'Polka Metal' }); ok(r.status === 400, 'only the choices on the list');
   r = await api('POST', '/music/guess/round', G.token, { difficulty: 'legendary' }); ok(r.status === 400, '… and the five difficulties');

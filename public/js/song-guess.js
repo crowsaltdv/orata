@@ -1,5 +1,5 @@
 // Orata — Song guess (like Songspot): name a song from a split second of it. Pick a genre, an era and an artist (or leave them open) and a difficulty,
-// play 0.1 s of the song, and each skip (or wrong guess) lets more of it play — 0.5 s, 2 s, 8 s, 15 s — until you name it or give up.
+// play 0.1 s of the song's highlight (the part people replay most), and each skip (or wrong guess) lets more of it play — 0.5 s, 2 s, 8 s, 15 s — until you name it or give up.
 // Only its testers see it while it's new (server/music.js GUESS_TESTERS). The song plays in a player of its own, so the mini player never gives it away.
 import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
 import { useSel } from '/js/store.js';
@@ -57,10 +57,10 @@ export function GuessView() {
   const [at, setAt] = useState(0);
   const [q, setQ] = useState(''); const [found, setFound] = useState([]); const [chosen, setChosen] = useState(null); const [open, setOpen] = useState(false);
   const [score, setScore] = useState(() => ls('guessScore', { played: 0, won: 0, streak: 0 }));
-  const player = useRef(null); const loadedId = useRef(null); const want = useRef(null); const timer = useRef(0); const frame = useRef(0); const asked = useRef(0);
+  const player = useRef(null); const loadedId = useRef(null); const startAt = useRef(0); const want = useRef(null); const timer = useRef(0); const frame = useRef(0); const asked = useRef(0);
   const playingMusic = useSel((s) => s.music.playing);
 
-  const stopClip = () => { clearTimeout(timer.current); cancelAnimationFrame(frame.current); want.current = null; if (player.current) { player.current.pause(); player.current.seek(0); } setStatus('ready'); setAt(0); };
+  const stopClip = () => { clearTimeout(timer.current); cancelAnimationFrame(frame.current); want.current = null; if (player.current) { player.current.pause(); player.current.seek(startAt.current); } setStatus('ready'); setAt(0); };
   const startClip = () => {   // the player says it is playing: let it run for this try's length
     const len = want.current; if (len == null) return; want.current = null;
     const t0 = performance.now(); setStatus('playing');
@@ -74,7 +74,7 @@ export function GuessView() {
   const newRound = async () => {
     stopClip(); setRound(null); setQ(''); setChosen(null); setFound([]); setErr(null);
     const mine = ++asked.current;
-    try { const r = await api.post('/music/guess/round', pick); if (mine === asked.current) setRound({ song: r.song, stage: 0, tries: [], done: null }); } catch (e) { if (mine === asked.current) setErr(errMsg(e)); }
+    try { const r = await api.post('/music/guess/round', pick); if (mine === asked.current) { startAt.current = r.start || 0; setRound({ song: r.song, stage: 0, tries: [], done: null }); } } catch (e) { if (mine === asked.current) setErr(errMsg(e)); }
   };
   useEffect(() => { ls('guessPick', null, pick); if (opts) newRound(); }, [opts, pick.genre, pick.era, pick.artist, pick.difficulty]);
 
@@ -84,7 +84,7 @@ export function GuessView() {
     if (playingMusic) (await import('/js/music.js')).music.pause();
     const p = player.current ||= createPlayer({ onState: (c) => { if (c === 1) startClip(); }, onError: () => { setStatus('ready'); setErr(t('That song can’t play here. Skip to the next one.')); } }, { title: 'Song guess' });
     want.current = round.done ? 30 : STAGES[round.stage]; setStatus('loading');   // (once it's over, the song plays for 30 s)
-    if (loadedId.current !== round.song.id) { loadedId.current = round.song.id; p.load(round.song.id, 0); } else { p.seek(0); p.play(); }
+    if (loadedId.current !== round.song.id) { loadedId.current = round.song.id; p.load(round.song.id, startAt.current); } else { p.seek(startAt.current); p.play(); }   // (from the highlight)
   };
   const finish = (won, tries) => {
     stopClip(); setRound((r) => ({ ...r, tries, done: won ? 'won' : 'lost' }));

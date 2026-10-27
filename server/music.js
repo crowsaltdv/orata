@@ -272,13 +272,51 @@ export const GUESS = {
   artists: ['Taylor Swift', 'Michael Jackson', 'Bad Bunny', 'Katy Perry', 'Drake', 'The Weeknd', 'Billie Eilish', 'Ed Sheeran', 'Ariana Grande', 'Queen', 'Eminem', 'Rihanna', 'Bruno Mars', 'Olivia Rodrigo', 'Dua Lipa', 'Coldplay', 'Adele', 'Harry Styles', 'Kendrick Lamar', 'BTS'],
   difficulties: ['easy', 'medium', 'hard', 'expert', 'impossible'],
 };
-const DEPTH = { easy: [0, 15], medium: [10, 40], hard: [30, 80], expert: [60, 140], impossible: [100, 200] };   // which songs of the list, most popular first
+const DEPTH = { easy: [0, 10], medium: [5, 25], hard: [15, 50], expert: [30, 100], impossible: [60, 200] };   // which songs of the list, most popular first
 const guessed = new Map();   // user id → the songs they got lately, so the same one doesn't come back for a while
-/** The search a round draws from: an artist's songs (in an era), the hits of a genre and/or an era, or the top songs chart when everything is open. */
+/** The search a round falls back on: an artist's songs (in an era), the hits of a genre and/or an era, or none (the top chart) when everything is open. */
 function guessQuery({ genre, era, artist }) {
   if (artist) return `${artist}${era ? ` ${era}` : ''} songs`;
   return genre || era ? `${era ? `${era} ` : ''}${genre ? `${genre} ` : ''}hits` : null;
 }
+/** The songs a round draws from, most popular first: an artist's own list of their songs, YouTube Music's playlists of a genre, else a search (or the
+ *  top chart when everything is open). */
+async function guessPool(pick, want) {
+  if (pick.artist) {
+    const a = (await searchArtists(pick.artist).catch(() => []))[0];
+    const songs = a ? (await artist(a.id).catch(() => null))?.songs || [] : [];
+    if (songs.length) return songs;
+  }
+  if (pick.genre && !pick.era) {
+    const g = pick.genre.toLowerCase(); const genres = (await categories().catch(() => [])).filter((c) => c.group === 'genre');
+    const c = genres.find((x) => x.name.toLowerCase() === g) || genres.find((x) => x.name.toLowerCase().startsWith(g)) || genres.find((x) => x.name.toLowerCase().includes(g));
+    const songs = c ? (await chartList(c.key, want).catch(() => null))?.tracks || [] : [];
+    if (songs.length) return songs;
+  }
+  const q = guessQuery(pick);
+  return (q ? await searchList(q, want) : await chartList('top', want)).tracks;
+}
+/** Where the part of a song people replay most starts, from YouTube's "Most replayed" heat map in the page of its video (`html`): the busiest stretch,
+ *  leaving out the first 8 % (everyone replays the start) and the last 15 s. Seconds, or null when the page has no heat map. */
+export function heatmapHighlight(html) {
+  const m = [...String(html).matchAll(/\{"startMillis":"(\d+)","durationMillis":"(\d+)","intensityScoreNormalized":([\d.e-]+)\}/g)].map((x) => ({ s: Number(x[1]) / 1000, v: Number(x[3]) }));
+  if (m.length < 10) return null;
+  const total = m[m.length - 1].s + (m[1].s - m[0].s); let best = null;
+  for (let i = 1; i < m.length - 1; i++) {
+    if (m[i].s < total * 0.08 || m[i].s > total - 15) continue;
+    const v = m[i - 1].v + m[i].v + m[i + 1].v; if (!best || v > best.v) best = { s: m[i].s, v };
+  }
+  return best ? Math.round(best.s) : null;
+}
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+/** The second a round plays from: the song's most replayed part, or about a third of the way in when YouTube has no heat map for it. Kept for a day.
+ *  (GUESS_PAGE_URL: where video pages come from instead of YouTube, for the tests.) */
+const highlightOf = (t) => memo(`hl:${t.id}`, 24 * 3600_000, async () => {
+  let at = null;
+  try { const r = await fetch(`${ENV.GUESS_PAGE_URL || 'https://www.youtube.com/watch?hl=en&v='}${t.id}`, { headers: { 'user-agent': UA, 'accept-language': 'en-US,en;q=0.9' }, signal: AbortSignal.timeout(6000) }); if (r.ok) at = heatmapHighlight(await r.text()); } catch { /* no heat map then */ }
+  const secs = Math.floor((t.duration || 0) / 1000);
+  return at ?? (secs >= 60 ? Math.min(secs - 30, Math.max(15, Math.round(secs * 0.3))) : 0);
+});
 
 export function mountMusic(r, { h, limit, getChannel }) {
   r.get('/music/search', limit('musicq', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
@@ -298,15 +336,14 @@ export function mountMusic(r, { h, limit, getChannel }) {
     const choice = (list, v) => { if (v == null || v === '') return null; if (!list.includes(v)) throw bad('Pick from the list'); return v; };
     const pick = { genre: choice(GUESS.genres, b.genre), era: choice(GUESS.eras, b.era), artist: choice(GUESS.artists, b.artist) };
     const [from, to] = DEPTH[choice(GUESS.difficulties, b.difficulty) || 'easy'];
-    const q = guessQuery(pick);
-    const pool = (q ? await searchList(q, to) : await chartList('top', to)).tracks.filter((t) => !t.duration || t.duration >= 30_000);   // (not too short to guess)
+    const pool = (await guessPool(pick, to)).filter((t) => !t.duration || t.duration >= 30_000);   // (not too short to guess)
     let part = pool.slice(from, to); if (part.length < 5) part = pool.slice(-Math.min(pool.length, to - from));   // a short list: its deepest end
     const recent = guessed.get(req.user.id) || []; const fresh = part.filter((t) => !recent.includes(t.id));
     const choices = fresh.length ? fresh : part;
     if (!choices.length) throw new ApiError(404, 'No songs found for that mix. Try other choices.', 'guess_empty');
     const t = choices[Math.floor(Math.random() * choices.length)];
     guessed.set(req.user.id, [t.id, ...recent].slice(0, 40));
-    res.json({ song: { id: t.id, title: t.title, artist: t.artist, artists: t.artists, artwork: t.artwork, duration: t.duration } });
+    res.json({ song: { id: t.id, title: t.title, artist: t.artist, artists: t.artists, artwork: t.artwork, duration: t.duration }, start: await highlightOf(t) });
   }));
   r.get('/music/charts/:key', limit('musicchart', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
     needEnabled();
