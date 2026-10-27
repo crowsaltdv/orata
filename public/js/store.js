@@ -184,6 +184,7 @@ export function parseRoute(path) {
   if ((m = p.match(/^\/channels\/(\d+)$/))) return { view: 'channel', serverId: m[1], channelId: null };
   if ((m = p.match(/^\/invite\/([\w-]+)$/))) return { view: 'invite', serverId: '@me', channelId: null, param: m[1] };
   if ((m = p.match(/^\/music\/(artist|album|playlist|shared)\/([\w-]+)$/))) return { view: 'music', serverId: '@me', channelId: null, musicView: m[1], musicId: m[2] };   // an artist's, an album's or one of your playlists' page
+  if (p === '/music/guess') return { view: 'music', serverId: '@me', channelId: null, musicView: 'guess', musicId: 'play' };   // Song guess (song-guess.js)
   if (p === '/music') return { view: 'music', serverId: '@me', channelId: null, musicView: null, musicId: null };
   if (p === '/watch' || p === '/results') {   // videos (watch.js): /watch is the home page, /watch?v=<id> a video, /watch?q=<words> (or YouTube's /results?search_query=) a search
     const q = new URLSearchParams(path.split('?')[1] || ''); const v = q.get('v') || ''; const words = (q.get('q') || q.get('search_query') || '').trim().slice(0, 100);
@@ -203,7 +204,7 @@ export function routePath(r) {
   switch (r.view) {
     case 'dm': return `/channels/@me/${r.channelId}`;
     case 'friends': return '/channels/@me';
-    case 'music': return r.musicView && r.musicId ? `/music/${r.musicView}/${r.musicId}` : '/music';
+    case 'music': return r.musicView === 'guess' ? '/music/guess' : r.musicView && r.musicId ? `/music/${r.musicView}/${r.musicId}` : '/music';
     case 'watch': return r.watchView === 'video' && r.watchId ? `/watch?v=${r.watchId}` : r.watchView === 'search' && r.watchQuery ? `/watch?q=${encodeURIComponent(r.watchQuery)}` : r.watchView === 'channel' && r.watchId ? `/watch/channel/${r.watchId}` : '/watch';
     case 'staff': return '/staff';
     case 'themes': return r.themesView === 'library' ? '/themes/library' : r.themesView === 'review' ? '/themes/review' : '/themes';

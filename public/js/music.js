@@ -10,6 +10,7 @@ import { api } from '/js/api.js';
 import { t } from '/js/i18n.js';
 import { createPlayer } from '/js/youtube-player.js';
 import { ArtistLinks, AlbumLink, ArtistView, AlbumView, PlaylistView, SharedPlaylistView, PlaylistsSection, openAddMenu, openSongMenu, openArtist, back } from '/js/music-pages.js';
+import { GuessView, canGuess } from '/js/song-guess.js';
 
 const setMusic = (patch) => set({ music: { ...state.music, ...patch } });
 export const openMusic = () => go('/music');
@@ -379,8 +380,9 @@ export function MusicPage() {
   useEffect(() => { if (ok !== false) { music.loadGenres(); music.openChart(state.music.category || 'top'); } }, [ok]);
   useEffect(() => { if (scroller.current) scroller.current.scrollTop = 0; }, [view, vid]);
   const typing = (v) => { setQ(v); clearTimeout(timer.current); timer.current = setTimeout(() => music.search(v), 450); };
-  const searching = !!query.trim(); const sub = ok !== false && !!view && !!vid;
-  const page = view === 'artist' ? html`<${ArtistView} key=${vid} id=${vid} />` : view === 'album' ? html`<${AlbumView} key=${vid} id=${vid} />` : view === 'shared' ? html`<${SharedPlaylistView} key=${vid} id=${vid} />` : html`<${PlaylistView} key=${vid} id=${vid} />`;
+  const me = useSel((s) => s.me);
+  const searching = !!query.trim(); const sub = ok !== false && !!view && !!vid && (view !== 'guess' || canGuess(me));   // (Song guess: only its testers)
+  const page = view === 'guess' && canGuess(me) ? html`<${GuessView} />` : view === 'artist' ? html`<${ArtistView} key=${vid} id=${vid} />` : view === 'album' ? html`<${AlbumView} key=${vid} id=${vid} />` : view === 'shared' ? html`<${SharedPlaylistView} key=${vid} id=${vid} />` : html`<${PlaylistView} key=${vid} id=${vid} />`;
   return html`<main class="main panel music-page view-anim">
     <header class="m-header">
       <button type="button" class="mobile-only icon-btn" onClick=${() => set({ mobileNav: true })} aria-label=${t('Menu')}><${Icon} name="menu" size=${22} /></button>
@@ -393,6 +395,7 @@ export function MusicPage() {
         <div class="mpg-top"><div class="mpg-search"><div class="input-wrap"><${Icon} name="search" size=${18} /><input class="input" placeholder=${t('Search songs and artists…')} value=${q} onInput=${(e) => typing(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter') { clearTimeout(timer.current); music.search(q); } }} />
           ${q ? html`<button type="button" class="mpg-clear" aria-label=${t('Clear')} onClick=${() => { setQ(''); clearTimeout(timer.current); music.search(''); }}><${Icon} name="x" size=${16} /></button>` : null}</div></div><${LayoutSwitch} /></div>
         <${Hero} />
+        ${canGuess(me) ? html`<button type="button" class="gs-entry" onClick=${() => go('/music/guess')}><${Icon} name="music" size=${22} /><span><b>${t('Song guess')}</b><small>${t('Name the song from a split second of it. Only you can see this for now.')}</small></span><${Icon} name="arrow-right" size=${18} /></button>` : null}
         ${queueOpen ? html`<${QueuePanel} />` : null}
         ${searching ? html`<${SearchResults} />` : html`<${PlaylistsSection} /><${Categories} /><${Chart} /><${Recent} />`}`}
     </div>

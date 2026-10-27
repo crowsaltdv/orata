@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { ENV, ROOT, db, save, emitTo, relatedUserIds, publicUser, selfUser, ApiError, bad, notFound, newId } from './core.js';
+import { ENV, ROOT, db, save, emitTo, relatedUserIds, publicUser, selfUser, ApiError, bad, notFound, forbidden, newId } from './core.js';
 
 const COUNTRY = (String(ENV.MUSIC_COUNTRY || 'US').trim().toUpperCase().match(/^[A-Z]{2}$/) || ['US'])[0];
 const PER_MIN = Math.max(1, Number(ENV.MUSIC_API_PER_MIN) || 40);
@@ -262,6 +262,24 @@ export function setListening(u, value) {
 }
 
 /* ------------------------------------------------------------ routes */
+/* ------------------------------------------------------------ Song guess (like Songspot): name a song from a split second of it
+ * Only its testers see it while it's new. A round is a random song for the genre, era and artist picked (any of them may be left open), from the part
+ * of the list the difficulty asks for: searches and charts come most popular first, so Easy takes the top of the list and Impossible goes deep. */
+export const GUESS_TESTERS = new Set(['orata_dev']);
+export const GUESS = {
+  genres: ['Pop', 'Rock', 'Hip-Hop', 'R&B', 'Teen Pop', 'Vocal', 'Country', 'Latin', 'Electronic', 'K-Pop', 'Indie', 'Alternative', 'Metal', 'Reggaeton', 'Jazz'],
+  eras: ['1960s', '1970s', '1980s', '1990s', '2000s', '2010s', '2020s', 'Classic'],
+  artists: ['Taylor Swift', 'Michael Jackson', 'Bad Bunny', 'Katy Perry', 'Drake', 'The Weeknd', 'Billie Eilish', 'Ed Sheeran', 'Ariana Grande', 'Queen', 'Eminem', 'Rihanna', 'Bruno Mars', 'Olivia Rodrigo', 'Dua Lipa', 'Coldplay', 'Adele', 'Harry Styles', 'Kendrick Lamar', 'BTS'],
+  difficulties: ['easy', 'medium', 'hard', 'expert', 'impossible'],
+};
+const DEPTH = { easy: [0, 15], medium: [10, 40], hard: [30, 80], expert: [60, 140], impossible: [100, 200] };   // which songs of the list, most popular first
+const guessed = new Map();   // user id → the songs they got lately, so the same one doesn't come back for a while
+/** The search a round draws from: an artist's songs (in an era), the hits of a genre and/or an era, or the top songs chart when everything is open. */
+function guessQuery({ genre, era, artist }) {
+  if (artist) return `${artist}${era ? ` ${era}` : ''} songs`;
+  return genre || era ? `${era ? `${era} ` : ''}${genre ? `${genre} ` : ''}hits` : null;
+}
+
 export function mountMusic(r, { h, limit, getChannel }) {
   r.get('/music/search', limit('musicq', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
     needEnabled();
@@ -272,6 +290,24 @@ export function mountMusic(r, { h, limit, getChannel }) {
     res.json({ ...page, artists });
   }));
   r.get('/music/charts', h(async (req, res) => { needEnabled(); res.json({ genres: await categories() }); }));
+  const tester = (req) => { if (!GUESS_TESTERS.has(req.user.username)) throw forbidden('Song guess isn’t open yet'); needEnabled(); };
+  r.get('/music/guess', h(async (req, res) => { tester(req); res.json(GUESS); }));
+  r.post('/music/guess/round', limit('musicguess', 60, 60_000, (req) => req.user.id), h(async (req, res) => {
+    tester(req);
+    const b = req.body || {};
+    const choice = (list, v) => { if (v == null || v === '') return null; if (!list.includes(v)) throw bad('Pick from the list'); return v; };
+    const pick = { genre: choice(GUESS.genres, b.genre), era: choice(GUESS.eras, b.era), artist: choice(GUESS.artists, b.artist) };
+    const [from, to] = DEPTH[choice(GUESS.difficulties, b.difficulty) || 'easy'];
+    const q = guessQuery(pick);
+    const pool = (q ? await searchList(q, to) : await chartList('top', to)).tracks.filter((t) => !t.duration || t.duration >= 30_000);   // (not too short to guess)
+    let part = pool.slice(from, to); if (part.length < 5) part = pool.slice(-Math.min(pool.length, to - from));   // a short list: its deepest end
+    const recent = guessed.get(req.user.id) || []; const fresh = part.filter((t) => !recent.includes(t.id));
+    const choices = fresh.length ? fresh : part;
+    if (!choices.length) throw new ApiError(404, 'No songs found for that mix. Try other choices.', 'guess_empty');
+    const t = choices[Math.floor(Math.random() * choices.length)];
+    guessed.set(req.user.id, [t.id, ...recent].slice(0, 40));
+    res.json({ song: { id: t.id, title: t.title, artist: t.artist, artists: t.artists, artwork: t.artwork, duration: t.duration } });
+  }));
   r.get('/music/charts/:key', limit('musicchart', 40, 60_000, (req) => req.user.id), h(async (req, res) => {
     needEnabled();
     const key = String(req.params.key);

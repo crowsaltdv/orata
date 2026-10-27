@@ -346,6 +346,24 @@ async function main() {
   ok(!!gone, 'closing the last tab clears the status (the music stopped with it)');
   w2.ws.close();
 
+  console.log('\nSong guess (only its testers for now)');
+  const G = await register('guesser', 'g@feat.dev');
+  r = await api('GET', '/music/guess', G.token); ok(r.status === 403, 'nobody but its testers can open Song guess');
+  r = await api('POST', '/music/guess/round', G.token, {}); ok(r.status === 403, '… or get a song to guess');
+  await stopServer();
+  { const f = path.join(data, 'db.json'); const j = JSON.parse(fs.readFileSync(f, 'utf8')); j.users[G.user.id].username = 'orata_dev'; fs.writeFileSync(f, JSON.stringify(j)); }
+  startServer(); await ready();
+  r = await api('GET', '/music/guess', G.token);
+  ok(r.status === 200 && r.body.genres.includes('Pop') && r.body.eras.includes('2010s') && r.body.artists.includes('Taylor Swift') && r.body.difficulties.join() === 'easy,medium,hard,expert,impossible', 'orata_dev gets the genres, eras, artists and difficulties');
+  r = await api('POST', '/music/guess/round', G.token, { difficulty: 'easy' }); ok(r.status === 200 && r.body.song?.id === 'overallhit0' && !!r.body.song.title, 'everything left open: a song from the top chart');
+  const askedFor = () => helperCalls('search').slice(-1)[0]?.q;
+  const guessGot = new Set();
+  for (let i = 0; i < 3; i++) { r = await api('POST', '/music/guess/round', G.token, { artist: 'Taylor Swift', era: '2010s', difficulty: 'easy' }); if (r.body.song) guessGot.add(r.body.song.id); }
+  ok(askedFor() === 'Taylor Swift 2010s songs' && guessGot.size === 3 && [...guessGot].every((id) => ['nightdrive1', 'rainsounds2', 'evilartwork'].includes(id)), 'an artist (in an era): their songs, and the same one doesn’t come back for a while');
+  r = await api('POST', '/music/guess/round', G.token, { genre: 'Rock', era: '1980s', difficulty: 'impossible' }); ok(r.status === 200 && askedFor() === '1980s Rock hits' && !!r.body.song, 'a genre and an era: their hits; Impossible on a short list takes its deepest end');
+  r = await api('POST', '/music/guess/round', G.token, { genre: 'Polka Metal' }); ok(r.status === 400, 'only the choices on the list');
+  r = await api('POST', '/music/guess/round', G.token, { difficulty: 'legendary' }); ok(r.status === 400, '… and the five difficulties');
+
   console.log('\nRequest budget');
   await stopServer(); startServer({ MUSIC_API_PER_MIN: '4' }); await ready();
   const before = helperCalls().length;
