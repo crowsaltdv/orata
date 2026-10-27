@@ -18,9 +18,6 @@ import { mirrorDesktop } from './desktop.js';
 import compression from 'compression';
 
 const app = express();
-/** Google AdSense: the publisher id (ads.txt, the script in the page and public/js/ads.js all use it). ADSENSE_CLIENT=off turns ads off. */
-const ADS = ENV.ADSENSE_CLIENT === 'off' ? null : (ENV.ADSENSE_CLIENT || 'ca-pub-1196646207665869');
-const AD_HOSTS = ADS ? ' https://*.googlesyndication.com https://*.doubleclick.net https://*.google.com https://*.adtrafficquality.google https://www.googletagservices.com https://*.gstatic.com' : '';
 app.disable('x-powered-by');
 if (ENV.TRUST_PROXY) app.set('trust proxy', true);
 app.use(compression({ threshold: 1024 }));   // scripts, styles, pages and API answers go out gzipped (a fraction of the bytes, which is what a host bills for); pictures, video and downloads are skipped, being compressed already
@@ -32,13 +29,13 @@ app.use((req, res, next) => {
     'Permissions-Policy': 'camera=(self), microphone=(self), display-capture=(self), geolocation=()',
     'Content-Security-Policy': [
       "default-src 'self'",
-      `script-src 'self'${AD_HOSTS}`,
+      "script-src 'self'",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src * data: blob:",
       "media-src * data: blob:",
-      `connect-src 'self' ws: wss: blob: data:${AD_HOSTS}`,
-      `frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com${AD_HOSTS}`,   // 'self': the about:blank cloak opens Orata in a frame (and the ads' frames)
+      "connect-src 'self' ws: wss: blob: data:",
+      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com",   // 'self': the about:blank cloak opens Orata in a frame
       "worker-src 'self' blob:",
       "object-src 'none'", "base-uri 'self'", "form-action 'self'",
     ].join('; '),
@@ -48,8 +45,6 @@ app.use((req, res, next) => {
 
 app.use('/api', createApi());
 app.get(['/download', '/download/:version'], ...desktopDownload);   // orata.fun/download — the desktop app's installer, whatever it is stored as
-// which ad networks may sell ads on this site (AdSense checks it)
-app.get('/ads.txt', (req, res) => { if (!ADS) return res.status(404).end(); res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(`google.com, ${ADS.replace('ca-', '')}, DIRECT, f08c47fec0942fa0\n`); });
 
 // Uploaded files: only well-known media renders inline; everything else downloads. CSP sandbox keeps stray HTML inert.
 const INLINE = /\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm|mov|m4v|mp3|ogg|oga|wav|m4a|flac|opus|pdf|txt|woff2?|ttf|otf)$/i;   // (fonts: as fonts, for uploaded ones in Settings → Fonts and themes)
@@ -103,7 +98,7 @@ const INDEX_HTML = (() => {
     for (const m of src.matchAll(/^\s*import\s+(?:[^'"]*?from\s+)?['"](\/(?:js|vendor)\/[^'"]+)['"]/gm)) walk(m[1]);
   };
   walk('/js/boot.js');
-  return fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8').replace('</head>', `  <meta name="orata-build" content="${BUILD}" />\n${ADS ? `  <meta name="google-adsense-account" content="${ADS}" />\n  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADS}" crossorigin="anonymous"></script>\n` : ''}${[...seen].map((f) => `  <link rel="modulepreload" href="${f}" />`).join('\n')}\n</head>`);
+  return fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8').replace('</head>', `  <meta name="orata-build" content="${BUILD}" />\n${[...seen].map((f) => `  <link rel="modulepreload" href="${f}" />`).join('\n')}\n</head>`);
 })();
 // SPA fallback (client-side routes: /channels/…, /invite/…, /login …)
 app.get('*', (req, res, next) => {

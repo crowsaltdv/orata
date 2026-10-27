@@ -42,6 +42,7 @@ export const party = {
   grant: (userId, on) => gateway.send('party_grant', { userId, on }),
   react: (emoji) => gateway.send('party_react', { emoji }),
   ended: (key) => gateway.send('party_ended', { key }),
+  unplayable: (key) => gateway.send('party_unplayable', { key }),
   /** play, pause, seek ({ pos }) or rate ({ rate }) for the video that is playing. It shows on this screen at once; the server then tells everybody (and sets this screen straight if it said no). */
   control(action, extra = {}) {
     const p = state.party; const key = p?.current?.key; if (!key) return;
@@ -121,7 +122,11 @@ function usePartyPlayer(box, ctl, vol, muted, setUi) {
     const pl = createPlayer({
       onState(st) { c.st = st; const cur = state.party?.current; if (st === 0 && cur && cur.key === c.key && c.endedFor !== cur.key) { c.endedFor = cur.key; party.ended(cur.key); } },
       onTime(tm, _d, info) { c.t = tm; c.tAt = nowMs(); if (typeof info?.playbackRate === 'number') c.rate = info.playbackRate; },
-      onError(code) { setUi((u) => ({ ...u, error: code })); },
+      onError(code) {
+        setUi((u) => ({ ...u, error: code }));
+        const key = c.key;   // the video can't be shown here (removed, age-restricted, embedding off): ask the server to move on, which it does when we may skip or when YouTube agrees
+        if ((code === 100 || code === 101 || code === 150) && key && c.reported !== key) { c.reported = key; setTimeout(() => { if (state.party?.current?.key === key) party.unplayable(key); }, 900); }
+      },
     }, { parent: box.current, title: t('Watch Together') });
     ctl.current = { pl, c };
     const tick = (now = false) => {   // now: somebody just pressed something, so no waiting (the checks every half second only fix drift)
@@ -158,6 +163,10 @@ function usePartyPlayer(box, ctl, vol, muted, setUi) {
 }
 
 /* ------------------------------------------------------------------ the tile */
+/** What the player's error code means for a person (100: gone or private; 101 and 150: not allowed on other websites, which includes age-restricted videos). */
+const errorText = (code) => (code === 100 ? [t('This video isn’t available'), t('It was removed or made private.')]
+  : code === 101 || code === 150 ? [t('This video can’t be played here'), t('It’s age-restricted, or its owner doesn’t allow other websites to show it. Skipping it…')]
+    : [t('The video couldn’t be played'), t('Something went wrong with the player.')]);
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const EMOJI = ['👍', '😂', '😮', '❤️', '🔥', '👏', '😢'];
 function noteFor(p) {
@@ -174,6 +183,7 @@ function noteFor(p) {
     case 'rate': return `${who} ${t('set the speed to')} ${l.arg}×`;
     case 'skip': return `${who} ${t('skipped to the next video')}`;
     case 'next': return p.current ? `${t('Up next')}: “${p.current.title}”` : t('That was the last video in the queue');
+    case 'blocked': return `“${l.arg}” ${t('can’t be played here, so it was skipped')}`;
     case 'grant': return `${who} ${t('let')} ${nameOf(l.arg)} ${t('control the video')}`;
     case 'revoke': return `${who} ${t('took video controls from')} ${nameOf(l.arg)}`;
     default: return null;
@@ -229,7 +239,7 @@ export function PartyTile({ chId }) {
       ${!cur ? html`<div class="party-empty"><${Icon} name="film" size=${46} sw=${1.4} /><b>${t('Watching together')}</b>
         <p>${ctrl ? t('Nothing is playing. Add a video and everyone in the call watches it with you.') : `${hostName} ${t('hasn’t picked a video yet.')}`}</p>
         ${ctrl ? html`<button type="button" class="btn btn-primary" onClick=${() => { set({ partyPanel: true }); setPanelTab('add'); }}><${Icon} name="plus" size=${16} /> ${t('Add a video')}</button>` : null}</div>` : null}
-      ${cur && ui.error ? html`<div class="party-empty over"><${Icon} name="alert-circle" size=${40} sw=${1.4} /><b>${t('This video can’t be played here')}</b><p>${t('Its owner doesn’t allow it to be shown on other websites.')}</p>
+      ${cur && ui.error ? html`<div class="party-empty over"><${Icon} name="alert-circle" size=${40} sw=${1.4} /><b>${errorText(ui.error)[0]}</b><p>${errorText(ui.error)[1]}</p>
         ${ctrl ? html`<button type="button" class="btn btn-primary" onClick=${party.skip}>${t('Skip it')}</button>` : null}</div>` : null}
       ${cur && ui.blocked && !ui.error ? html`<button type="button" class="party-join" onClick=${resume}><${Icon} name="play" size=${22} fill=${true} sw=${1} /> ${t('Click to join the video')}</button>` : null}
       ${cur && !p.playing && idle ? html`<div class="party-paused" aria-hidden="true"><${Icon} name="pause" size=${34} fill=${true} sw=${1} /></div>` : null}
@@ -338,9 +348,9 @@ export function PartyLine() {
   return html`<button type="button" class="vc-watch" onClick=${focusCall} data-tip=${t('Back to the video')} data-tip-pos="top"><${Icon} name="film" size=${14} /><span>${p.current ? p.current.title : t('Watching together')}</span></button>`;
 }
 /** On a video's page in Watch, while you are in a call: start watching it together, or add it to the queue. */
-export function PartyPills({ id }) {
+export function PartyPills({ id, blocked }) {
   const conn = useSel((s) => s.voice.conn); const p = useSel((s) => s.party);
-  if (!conn || conn.stage || conn.status === 'connecting') return null;
+  if (blocked || !conn || conn.stage || conn.status === 'connecting') return null;
   const active = p && p.channelId === conn.channelId;
   if (active && !canControl(p)) return null;
   if (!active) return html`<button type="button" class="wv-pill" onClick=${() => { party.start(id); set({ partyPanel: false }); focusCall(); }}><${Icon} name="users" size=${18} /> ${t('Watch together')}</button>`;

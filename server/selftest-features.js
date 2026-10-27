@@ -410,6 +410,13 @@ async function main() {
   const rel = r.body.related;
   ok(rel.length === 3 && rel.every(isId) && !rel.some((x) => x.id === V) && rel[0].title === 'Related one' && rel[0].channel.name === 'Related Channel' && rel[0].channel.id === 'UCtestchannel00000000001' && rel[0].duration === '12:34' && rel[0].views === '55K views' && rel[0].published === '3 weeks ago' && rel[2].live === true,
     'related videos are read from YouTube\'s new layout too — not the video itself or playlists, and a LIVE badge marks a stream', JSON.stringify(rel.map((x) => x.title)));
+  ok(vd.blocked === null, 'a normal video isn’t marked');
+  r = await api('GET', '/watch/search?q=agecheck', A3); ok(r.body.videos.some((v) => v.id === 'agerestrict'), 'a video nobody has opened yet still shows in a list (nothing is known about it)');
+  r = await api('GET', '/watch/videos/agerestrict', A3); ok(r.status === 200 && r.body.video.blocked === 'age', 'an age-restricted video is marked (YouTube asks people to sign in to confirm their age, which can’t happen inside Orata)');
+  r = await api('GET', '/watch/videos/embedoffxxx', A3); ok(r.body.video.blocked === 'embed', 'a video whose owner switched embedding off is marked');
+  r = await api('GET', '/watch/videos/botcheckxxx', A3); ok(r.body.video.blocked === null, 'a "confirm you’re not a bot" sign-in isn’t blamed on the video');
+  r = await api('GET', '/watch/videos/bogusunplay', A3); ok(r.body.video.blocked === null, '… and neither is the "unavailable" YouTube says about plenty of normal videos (only a clear answer blocks anything)');
+  r = await api('GET', '/watch/search?q=agecheck%20two', A3); ok(!r.body.videos.some((v) => v.id === 'agerestrict') && r.body.videos.length > 10, 'once a video is known not to play here it is left out of lists');
   const infoCalls = wcalls('info').length; await api('GET', `/watch/videos/${V}`, A3); ok(wcalls('info').length === infoCalls, 'a video that was just looked at comes from the cache');
   r = await api('GET', '/watch/videos/short', A3); ok(r.status === 400, 'something that isn\'t a video id is refused without asking YouTube');
   r = await api('GET', '/watch/videos/gone0000000', A3); ok(r.status === 404 && /isn’t available/.test(r.body.error), 'a deleted or private video says it isn\'t available');
@@ -475,6 +482,8 @@ async function main() {
   ok(await until(() => party(pa).queue.length === 2 && errors(pb).length === 2), 'the host adds videos to the queue (a missing or invalid one is refused)');
   ok(party(pa).queue.map((x) => x.id).join() === [vid(2), vid(3)].join() && party(pa).current.id === vid(1), '… in the order they were asked for, behind the video that is playing');
 
+  put(pb, 'party_add', { videoId: 'agerestrict' }); put(pb, 'party_add', { videoId: 'embedoffxxx' });
+  ok(await until(() => errors(pb).some((m) => /age-restricted/.test(m)) && errors(pb).some((m) => /owner/.test(m))) && party(pa).queue.length === 2, 'a video that can’t be played here (age-restricted, embedding off) is refused when somebody tries to add it');
   put(pb, 'party_grant', { userId: A.user.id, on: true });
   ok(await until(() => party(pc).controllers.includes(A.user.id)) && party(pa).hostId === B.user.id, 'the host gives somebody the right to control the video');
   put(pb, 'party_grant', { userId: B.user.id, on: true }); put(pb, 'party_grant', { userId: D.user.id, on: true }); await sleep(300);
@@ -533,6 +542,14 @@ async function main() {
   for (let n = 0; n < 52; n++) put(pb, 'party_add', { videoId: vid(1000 + n) });
   ok(await until(() => party(pb).queue.length === 50, 6000) && await until(() => errors(pb).some((m) => /queue is full/.test(m)), 3000), 'the queue holds 50 videos and says so when it is full');
 
+  { const key = party(pb).current.key;
+    put(pc, 'party_unplayable', { key }); await sleep(500);
+    ok(party(pb).current.key === key, 'somebody who can’t skip can’t make a working video skip by claiming it won’t play');
+    const title = party(pb).current.title; const left = party(pb).queue.length;
+    put(pb, 'party_unplayable', { key });
+    ok(await until(() => party(pb).current.key !== key && party(pb).last.act === 'blocked' && party(pb).last.by === null && party(pb).last.arg === title && party(pb).queue.length === left - 1), 'when the host’s player says a video can’t be shown, the party moves on to the next one (and says why)');
+    const rev = party(pb).rev; put(pb, 'party_unplayable', { key }); await sleep(400);
+    ok(party(pb).rev === rev, '… once: the same report again changes nothing'); }
   put(pb, 'voice_leave');
   ok(await until(() => party(pc) === null), 'when the host leaves the call, the watch party ends for everybody');
   const jb = await joinCall(pb); ok(jb.party === null, '… and there is nothing to join afterwards');

@@ -22,6 +22,7 @@ const salt = (q) => ([...q].reduce((a, c) => a + c.charCodeAt(0) * 7, 0) % 997) 
 function searchPage(q, f, p) {
   const results = [];
   for (let i = 0; i < 10; i++) { const n = p * 9 + i + 1; results.push(video(salt(q) + n, `${q} result ${n}${f.features ? ' (live)' : ''}`, f.features ? { is_live: true, short_view_count: text('8.1K watching'), duration: { seconds: 0 } } : {})); }
+  if (p === 0 && q.startsWith('agecheck')) results.splice(3, 0, video(777, 'An age-restricted one', { id: 'agerestrict' }));
   if (p === 0) results.push({ type: 'Shelf' }, { type: 'ReelShelf' }, video(900, ''), video(901, 'Broken id', { id: 'short' }), video(902, 'Stranger avatar', { author: author(CHAN, 'Stranger', 'https://evil.example/pixel.png') }));
   return { results, has_continuation: p < 2, getContinuation: async () => { log({ op: 'continue', q, page: p + 1 }); return searchPage(q, f, p + 1); } };
 }
@@ -46,7 +47,13 @@ class Innertube {
     log({ op: 'info', id });
     if (id === 'gone0000000') throw new Error('This video is unavailable');
     if (id === 'boom0000000') throw new Error('network exploded');
+    const playability_status = id === 'agerestrict' ? { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm your age', embeddable: false }
+      : id === 'embedoffxxx' ? { status: 'OK', embeddable: false }
+        : id === 'botcheckxxx' ? { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm you’re not a bot', embeddable: false }
+          : id === 'bogusunplay' ? { status: 'UNPLAYABLE', reason: 'Video unavailable', embeddable: false }   // (what YouTube says about plenty of normal videos to a server)
+            : { status: 'OK', embeddable: true };
     return {
+      playability_status,
       basic_info: { title: `Video ${id}`, channel_id: CHAN, author: 'Test Channel', view_count: 1234567, like_count: 4321, duration: 213, is_live: false, short_description: 'short' },
       primary_info: { published: text('Oct 25, 2009'), relative_date: text('17 years ago'), view_count: { view_count: text('1,234,567 views') } },
       secondary_info: { owner: { author: author(CHAN, 'Test Channel'), subscriber_count: text('4.55M subscribers') }, description: text('line one\n\n\n\nline two https://example.com/page') },

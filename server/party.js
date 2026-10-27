@@ -84,6 +84,14 @@ export async function partyOp(conn, op, d = {}) {
     if (cur && cur.key === String(d.key) && p.playing && (!cur.seconds || posOf(p) >= cur.seconds * 0.9)) { next(p); emit(p, { by: null, act: 'next' }); }
     return undefined;
   }
+  if (op === 'party_unplayable') {   // a browser's player says it can't show the video now playing (age-restricted, embedding switched off, removed ...): move on instead of leaving everybody looking at an error
+    const cur = p.current; if (!cur || cur.key !== String(d.key)) return undefined;
+    if (!can(p, uid)) {   // somebody who couldn't skip it themselves: only on YouTube's own word
+      let why = null; try { why = (await videoMeta(cur.id)).blocked; } catch { /* can't tell */ }
+      if (!why || parties.get(channelId) !== p || p.current?.key !== cur.key) return undefined;
+    }
+    next(p); emit(p, { by: null, act: 'blocked', arg: cur.title }); return undefined;
+  }
   if (op === 'party_stop') { if (uid !== p.hostId) return no('Only the host can end this.'); end(p); return undefined; }
   if (op === 'party_grant') {
     if (uid !== p.hostId) return no('Only the host can choose who controls the video.');
@@ -101,6 +109,7 @@ export async function partyOp(conn, op, d = {}) {
         let meta;
         try { meta = await videoMeta(String(d.videoId || '')); } catch (e) { return no(e?.status === 400 ? 'That isn’t a video.' : 'That video isn’t available right now.'); }
         if (parties.get(channelId) !== p || !can(p, uid) || !voice.get(channelId)?.has(uid)) return undefined;   // things changed while we looked it up
+        if (meta.blocked) return no(meta.blocked === 'age' ? 'That video is age-restricted, so it can’t be played here.' : 'That video’s owner doesn’t allow it to be played on other websites.');
         if (p.current && p.queue.length >= MAX_QUEUE && d.now !== true) return no(`The queue is full (${MAX_QUEUE} videos).`);
         const item = entry(meta, uid);
         if (d.now === true || !p.current) { setCurrent(p, item); emit(p, { by, act: 'now', arg: item.title }); } else { p.queue.push(item); p.queueRev++; emit(p, { by, act: 'add', arg: item.title }); }

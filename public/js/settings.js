@@ -22,7 +22,6 @@ import { resendVerification } from '/js/verify.js';
 import { playSound } from '/js/sound.js';
 import { DEFAULT_SETTINGS } from '/js/defaults.js';
 import { DesktopPage } from '/js/desktop.js';
-import { Ad } from '/js/ads.js';
 
 /* ------------------------------------------------------------------ account */
 MODALS['account-edit'] = function AccountEdit({ id, field }) {
@@ -257,7 +256,7 @@ export function SettingsHost() {
     </nav>
     <section class="settings-body panel">
       <header class="sb-title"><h2 key=${shown}>${t(label)}</h2><button type="button" class="settings-close" onClick=${closeSettings} aria-label="Close settings"><span><${Icon} name="x" size=${20} /></span><small>ESC</small></button></header>
-      <div class="settings-scroll" ref=${body}><div class="s-row"><div class="s-wrap" key=${shown}><${Page} /></div><${Ad} spot="settings" /></div></div>
+      <div class="settings-scroll" ref=${body}><div class="s-wrap" key=${shown}><${Page} /></div></div>
     </section>
   </div>`;
 }

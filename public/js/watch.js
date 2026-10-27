@@ -191,7 +191,8 @@ function VideoPage({ id }) {
   const share = async () => { await copyText(`${location.origin}/watch?v=${id}`); toast(t('Link copied'), 'success', 1600); };
   return html`<div class="wv">
     <div class="wv-main">
-      <div class="wv-player"><iframe key=${id} title=${v?.title || t('Video player')} src=${`https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&playsinline=1`} allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+      <div class="wv-player">${v?.blocked ? html`<div class="wv-blocked"><${Icon} name="alert-circle" size=${42} sw=${1.4} /><b>${v.blocked === 'age' ? t('This video is age-restricted') : t('This video can’t be played here')}</b>
+        <p>${v.blocked === 'age' ? t('YouTube only plays age-restricted videos to people signed in on YouTube itself, so it can’t be shown inside Orata.') : t('Its owner doesn’t allow other websites to show it.')}</p></div>` : html`<iframe key=${id} title=${v?.title || t('Video player')} src=${`https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&playsinline=1`} allow="autoplay; encrypted-media; picture-in-picture; fullscreen; clipboard-write" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`}</div>
       ${err ? html`<div class="wt-empty"><${Icon} name="alert-circle" size=${30} /><p>${err}</p><button type="button" class="link-btn" onClick=${openWatch}>${t('Go to Watch')}</button></div>`
         : !v ? html`<div class="wt-empty"><${Spinner} /></div>` : html`
         <h1 class="wv-title">${v.title}</h1>
@@ -200,7 +201,7 @@ function VideoPage({ id }) {
             <div class="wt-text"><${ChannelName} c=${v.channel} />${v.channel.subscribers ? html`<small>${v.channel.subscribers}</small>` : null}</div></div>
           <div class="wv-actions">
             ${v.likes !== null ? html`<span class="wv-pill" data-tip=${t('Likes')}><${Icon} name="thumbs-up" size=${18} /> ${compact(v.likes)}</span>` : null}
-            <${PartyPills} id=${id} /><button type="button" class="wv-pill btn-like" onClick=${share}><${Icon} name="link" size=${18} /> ${t('Share')}</button></div></div>
+            <${PartyPills} id=${id} blocked=${!!v.blocked} /><button type="button" class="wv-pill btn-like" onClick=${share}><${Icon} name="link" size=${18} /> ${t('Share')}</button></div></div>
         <div class=${cx('wv-desc', full && 'open')} onClick=${(e) => { if (!full && e.target.tagName !== 'A') setFull(true); }}>
           <b>${[v.live ? v.viewsText : v.views !== null ? `${new Intl.NumberFormat().format(v.views)} ${t('views')}` : '', v.published || v.ago].filter(Boolean).join(' • ')}</b>
           ${v.description ? html`<p><${Linked} text=${v.description} /></p>` : null}

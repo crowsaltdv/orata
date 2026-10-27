@@ -138,7 +138,7 @@ export function attachGateway(server) {
           const err = setSpeaker(ch, target, on); if (err) send(conn, 'error', { message: err });
           break;
         }
-        case 'party_start': case 'party_stop': case 'party_add': case 'party_remove': case 'party_move': case 'party_play_now': case 'party_skip': case 'party_control': case 'party_grant': case 'party_ended': case 'party_react':
+        case 'party_start': case 'party_stop': case 'party_add': case 'party_remove': case 'party_move': case 'party_play_now': case 'party_skip': case 'party_control': case 'party_grant': case 'party_ended': case 'party_unplayable': case 'party_react':
           partyOp(conn, op, d).catch((e) => console.error('[party]', op, e));   // watching together in a call (party.js)
           break;
         case 'voice_signal': {

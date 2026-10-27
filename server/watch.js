@@ -85,9 +85,19 @@ function card(n) {
   if (/watching/i.test(views)) live = true;
   return { id: String(id), title, channel, views, published, duration: live ? '' : duration, seconds: live ? 0 : clockSeconds(duration), live, thumbnail: thumb(id) };
 }
-const known = new Map();   // id → card: every video Orata has shown, so "watch this together" can name a video without asking YouTube again
-const remember = (c) => { known.delete(c.id); known.set(c.id, c); if (known.size > 6000) known.delete(known.keys().next().value); return c; };
-const cardsOf = (nodes) => (Array.isArray(nodes) ? nodes : []).map(card).filter(Boolean).map(remember);
+/**
+ * Videos that can't play inside Orata, learned whenever one is opened or queued: YouTube only plays an age-restricted video to someone signed in on YouTube itself ("age"),
+ * and some owners switch embedding off ("embed"). They are left out of lists from then on.
+ */
+const blockedIds = new Set();
+/** Why a video can't be shown here, from YouTube's own word about it: 'age', 'embed', or null (which includes "can't tell": an unclear answer never blocks anything). */
+function blockedWhy(ps) {
+  if (!ps || typeof ps !== 'object') return null;
+  if (ps.status === 'LOGIN_REQUIRED' && /\bage\b|inappropriate/i.test(String(ps.reason || ''))) return 'age';   // ("Sign in to confirm your age"; other sign-in reasons are not about the video)
+  if (ps.status === 'OK' && ps.embeddable === false) return 'embed';
+  return null;
+}
+const cardsOf = (nodes) => (Array.isArray(nodes) ? nodes : []).map(card).filter((c) => c && !blockedIds.has(c.id));
 const channelCard = (n) => {
   if (!n || n.type !== 'Channel') return null;
   const id = String(n.id ?? n.author?.id ?? ''); if (!CHANNEL_ID.test(id)) return null;
@@ -151,13 +161,12 @@ const searchChannels = (q) => memo(`sc:${q.toLowerCase()}`, 10 * 60_000, async (
 const suggest = (q) => memo(`sg:${q.toLowerCase()}`, 10 * 60_000, async () => (await upstream((yt) => yt.getSearchSuggestions(q))).map((s) => str(s, 100)).filter(Boolean).slice(0, 10));
 
 /* ------------------------------------------------------------ a video, its comments, a channel */
-/** What the watch parties need to know about a video: its title, channel, length and picture, from what Orata already showed or else from YouTube. Throws when it isn't there. */
+/** What the watch parties need to know about a video: its title, channel, length and picture, and `blocked` (why it can't play here, if it can't), from YouTube. Throws when it isn't there. */
 export async function videoMeta(id) {
   needEnabled();
   if (!VIDEO_ID.test(String(id))) throw bad('That isn’t a video');
-  const hit = known.get(id); if (hit) return hit;
   const { video: v } = await video(id);
-  return remember({ id, title: v.title, channel: v.channel, views: v.viewsText || '', published: v.published, duration: '', seconds: v.live ? 0 : v.duration, live: v.live, thumbnail: v.thumbnail });
+  return { id, title: v.title, channel: v.channel, views: v.viewsText || '', published: v.published, duration: '', seconds: v.live ? 0 : v.duration, live: v.live, thumbnail: v.thumbnail, blocked: v.blocked };
 }
 async function video(id) {
   return memo(`v:${id}`, 10 * 60_000, async () => {
@@ -165,9 +174,11 @@ async function video(id) {
     const b = info.basic_info || {}; const p = info.primary_info || {}; const owner = info.secondary_info?.owner;
     const title = str(b.title ?? p.title); if (!title) throw new ApiError(404, 'That video isn’t available.', 'watch_unavailable');
     const channelId = String(b.channel_id || owner?.author?.id || '');
+    const blocked = blockedWhy(info.playability_status);
+    if (blocked) { blockedIds.add(id); if (blockedIds.size > 3000) blockedIds.delete(blockedIds.values().next().value); }
     return {
       video: {
-        id, title, description: block(info.secondary_info?.description ?? b.short_description, 6000),
+        id, title, blocked, description: block(info.secondary_info?.description ?? b.short_description, 6000),
         views: Number.isFinite(Number(b.view_count)) ? Number(b.view_count) : null, viewsText: str(p.view_count?.view_count, 60),
         likes: Number.isFinite(Number(b.like_count)) ? Number(b.like_count) : null,
         published: str(p.published, 40), ago: str(p.relative_date, 40), duration: Math.max(0, Math.round(Number(b.duration) || 0)), live: b.is_live === true,
