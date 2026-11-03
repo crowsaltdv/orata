@@ -18,7 +18,7 @@ import { giveRole } from './orbit-plus.js';
 import { mountStaff, accountBlock, noteNewAccount } from './staff.js';
 import { formatDuration } from '../public/js/orbit-commands.js';
 import { postMessage, sanitizeMedia, sanitizeAttachments, clampInt, messageEdited, messagesDeleted, memberJoined, memberLeft, messageReacted } from './messages.js';
-import { startDiscord, discordOn, noteSite } from './discord.js';
+import { startDiscord, discordOn, noteSite, accountCode, accountView, setAccountShown, unlinkAccount } from './discord.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 import { hasProfanity, censor, cleanBlockedWords } from './profanity.js';   // the same checker the browser uses
 import { verificationMode, isGated, issueVerification, consumeVerification, resendWait, maskEmail, baseUrl } from './verify.js';
@@ -467,6 +467,16 @@ export function createApi() {
     if (emailChanged) { issueVerification(u, req); if (isGated(u)) setTimeout(() => closeConns(u.id, 4011, 'email changed'), 50); }   // gated tabs reconnect onto the verify screen
   }));
 
+  /* ---- link your Discord account to your Orata account (Settings → Connections; server/discord.js): a one-time code to type in Discord, whether it is linked, show / hide it, unlink */
+  const discordLimit = limit('discordacct', 12, 600_000, (req) => req.user.id);
+  r.get('/me/discord', h(async (req, res) => { res.json({ on: discordOn, account: accountView(req.user) }); }));
+  r.post('/me/discord/code', discordLimit, h(async (req, res) => { res.json(accountCode(req.user.id)); }));
+  r.patch('/me/discord', discordLimit, h(async (req, res) => {
+    if (typeof req.body?.show !== 'boolean') throw bad('Say whether to show your Discord account');
+    setAccountShown(req.user, req.body.show); res.json({ account: accountView(req.user) });
+  }));
+  r.delete('/me/discord', discordLimit, h(async (req, res) => { unlinkAccount(req.user); res.json({ ok: true }); }));
+
   r.patch('/me/settings', h(async (req, res) => {
     const u = req.user; const patch = req.body || {};
     const next = { ...(u.settings || {}), ...patch };
@@ -504,7 +514,7 @@ export function createApi() {
     await endUserSessions(u.id);
     byUsername.delete(u.username); byEmail.delete(u.email);
     dropUserThemes(u.id);
-    Object.assign(u, { deleted: true, username: 'deleted_' + u.id.slice(-8), displayName: 'Deleted User', email: null, hash: null, salt: null, avatar: null, banner: null, bio: '', customStatus: null, rel: {}, settings: {}, themes: [] });
+    Object.assign(u, { deleted: true, username: 'deleted_' + u.id.slice(-8), displayName: 'Deleted User', email: null, hash: null, salt: null, avatar: null, banner: null, bio: '', customStatus: null, rel: {}, settings: {}, themes: [], discord: null });   // (a linked Discord account goes with the account: it can be linked to another one)
     emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) });
     for (const set of [...(conns.get(u.id) || [])]) set.ws.close(4001, 'deleted');
     save(); res.json({ ok: true });

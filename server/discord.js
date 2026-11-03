@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import WebSocket from 'ws';
 import sharp from 'sharp';
-import { db, save, ENV, UPLOAD_DIR, newId, emitTo, audienceOf, messageView, storeUpload, restoreUpload, removeUpload, audit, bad, can, serverView, serverAudience, sanitizeOverwrites } from './core.js';
+import { db, save, ENV, UPLOAD_DIR, newId, emitTo, audienceOf, messageView, storeUpload, restoreUpload, removeUpload, audit, bad, can, serverView, serverAudience, sanitizeOverwrites, relatedUserIds, publicUser, selfUser, discordOf } from './core.js';
 import { hooks, postMessage } from './messages.js';
 
 const TOKEN = (ENV.DISCORD_BOT_TOKEN || '').trim();
@@ -127,7 +127,10 @@ const COMMANDS = [
   { name: 'orata-link', description: 'Link this channel with an Orata channel', options: [{ type: 3, name: 'code', description: 'The code Orbit gives you when you type /link in the Orata channel', required: true }] },
   { name: 'orata-unlink', description: 'Stop mirroring this channel with Orata' },
   { name: 'transfer', description: 'Move roles, channels and emoji from this server into Orata', options: [{ type: 3, name: 'code', description: 'The code Orbit gives you when you type /transfer in the Orata server', required: true }] },
-].map((c) => ({ ...c, type: 1, default_member_permissions: String(MANAGE_GUILD), contexts: [0] }));   // only people who can manage the server see them, only in servers
+].map((c) => ({ ...c, type: 1, default_member_permissions: String(MANAGE_GUILD), contexts: [0] }))   // only people who can manage the server see them, only in servers
+  // /orata-account is for everyone, in a server or in a DM with the bot: it links the Discord account that types it to an Orata account (see "linking an account" below)
+  .concat([{ name: 'orata-account', description: 'Link your Discord account to your Orata account', type: 1, default_member_permissions: null, contexts: [0, 1],
+    options: [{ type: 3, name: 'code', description: 'The code Orata shows in Settings → Connections', required: true }] }]);
 async function registerCommands() {
   const have = await rest('GET', `/applications/${bot.appId}/commands`);
   const same = have.length === COMMANDS.length && COMMANDS.every((c) => have.some((x) => x.name === c.name && x.description === c.description && x.default_member_permissions === c.default_member_permissions
@@ -198,6 +201,7 @@ export async function unlinkChannel(chId, { why = '', fromOrata = false, actor =
 
 /** /orata-link and /orata-unlink, typed in Discord (and /transfer with its form, further down). */
 async function onCommand(i) {
+  if (i.type === 2 && i.data?.name === 'orata-account') return accountCommand(i);
   if (i.type === 2 && i.data?.name === 'transfer') return moveForm(i);
   if (i.type === 5 && String(i.data?.custom_id || '').startsWith('transfer:')) return moveSubmit(i);
   if (i.type !== 2 || !['orata-link', 'orata-unlink'].includes(i.data?.name)) return;
@@ -235,6 +239,58 @@ async function onCommand(i) {
   save();
   await reply(`🔗 Linked with **#${ch.name}** in **${s.name}** on Orata.`);
   postMessage(ch, orbitOf(s), { content: `🔗 **#${ch.name}** on Orata and **#${there}** on Discord${g?.name ? ` (${g.name})` : ''} are now linked. Messages show up on both sides.` });   // goes to Discord too
+}
+
+/* ---------------------------------------------------------------- linking an account
+ * Settings → Connections → Link Discord gives a one-time code (10 minutes). Typed as /orata-account code:… in Discord (in a server the bot is in, or in a DM with it),
+ * it links the Discord account that typed it: Discord itself tells the bot who typed a command, so no password or login of either account is handed over. A Discord
+ * account links to one Orata account at a time. `user.discord` = { id, username, name, avatar, show, at }: it shows on the Orata profile, and next to that person's
+ * messages that come from a linked Discord channel, unless they switch that off (`show`). */
+const accountCodes = new Map();   // one-time codes: code -> { userId, at }
+const ACCOUNT_TTL = 10 * 60_000;
+const SNOWFLAKE = /^\d{15,22}$/; const AVATAR_HASH = /^(a_)?[0-9a-f]{32}$/;
+const accountAvatar = (id, hash) => (AVATAR_HASH.test(String(hash)) ? `https://cdn.discordapp.com/avatars/${id}/${hash}.${hash.startsWith('a_') ? 'gif' : 'png'}?size=128` : `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(id) >> 22n) % 6n)}.png`);
+/** The Orata account a Discord account is linked to and lets others see, or null. */
+const accountOwner = (discordId) => Object.values(db.users).find((u) => u.discord?.id === discordId && u.discord.show !== false && !u.deleted && !u.terminated) || null;
+/** Tells the person's other devices, and everyone who can see them, that their link changed. */
+const announce = (u) => { emitTo(relatedUserIds(u.id), 'user_update', { user: publicUser(u) }); emitTo([u.id], 'self_update', { user: selfUser(u) }); };
+
+/** Settings → Connections → Link Discord: a one-time code for /orata-account (replacing any earlier one). */
+export function accountCode(userId) {
+  if (!TOKEN) throw bad('Linking a Discord account isn’t set up on this Orata server yet: it needs the Discord bot (DISCORD_BOT_TOKEN, README → “Discord bridge”).');
+  if (bot.error) throw bad(`The Discord bot can’t log in right now: ${bot.error}.`);
+  for (const [k, v] of accountCodes) if (v.userId === userId || Date.now() - v.at > ACCOUNT_TTL) accountCodes.delete(k);
+  const raw = Array.from(crypto.randomBytes(8), (b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
+  accountCodes.set(raw, { userId, at: Date.now() });
+  const code = `${raw.slice(0, 4)}-${raw.slice(4)}`;
+  return { code, command: `/orata-account code:${code}`, expiresIn: ACCOUNT_TTL / 1000, invite: inviteUrl() || null, warning: offline() };
+}
+/** The Discord account a person linked, as they see it (null when none). */
+export const accountView = (u) => discordOf(u, true) || null;
+export function setAccountShown(u, show) {
+  if (!u.discord) throw bad('You haven’t linked a Discord account.');
+  u.discord.show = !!show; save(); announce(u);
+}
+/** Unlinks the Discord account (false when none was linked). */
+export function unlinkAccount(u) {
+  if (!u.discord) return false;
+  delete u.discord; save(); announce(u);
+  return true;
+}
+/** /orata-account code:… typed in Discord. Answers at once and only to whoever typed it. */
+async function accountCommand(i) {
+  bot.lastCommand = { at: Date.now(), name: i.data.name };
+  const say = (content) => rest('POST', `/interactions/${i.id}/${i.token}/callback`, { type: 4, data: { content, flags: 64, allowed_mentions: { parse: [] } } });
+  const du = i.member?.user || i.user;   // (in a server it is the member's user; in a DM with the bot, the user)
+  if (!SNOWFLAKE.test(String(du?.id))) return say('Discord didn’t tell me who you are. Try again in a moment.');
+  const code = String(i.data.options?.find((o) => o.name === 'code')?.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const c = accountCodes.get(code); const u = c && Date.now() - c.at <= ACCOUNT_TTL ? db.users[c.userId] : null;
+  if (!u || u.deleted || u.terminated) return say('That code isn’t valid or has run out. In Orata, open **Settings → Connections** and press **Link Discord** for a new one.');
+  if (Object.values(db.users).some((x) => x.id !== u.id && x.discord?.id === du.id)) return say('This Discord account is already linked to another Orata account. Unlink it there first (Settings → Connections).');
+  accountCodes.delete(code);
+  u.discord = { id: du.id, username: String(du.username || '').slice(0, 40), name: String(du.global_name || du.username || '').slice(0, 40), avatar: accountAvatar(du.id, du.avatar), show: u.discord?.show !== false, at: Date.now() };
+  save(); announce(u);
+  return say(`✅ Linked! **${u.discord.name}** on Discord is now linked to **${u.displayName}** (@${u.username}) on Orata. You can unlink it any time in Orata under Settings → Connections.`);
 }
 
 /* ---------------------------------------------------------------- moving a Discord server into Orata
@@ -547,7 +603,8 @@ async function mirrorIn(chId, l, d) {
   if (links()[chId] !== l) return;   // unlinked while the files were downloading
   if (!content.trim() && !attachments.length && !gif && !sticker) return save();   // polls aren't mirrored
   const ref = d.message_reference?.message_id && pairByDiscord(l, d.message_reference.message_id);
-  const msg = postMessage(ch, orbit, { content: content.trim().slice(0, 4000), attachments, gif, sticker, replyTo: ref?.o || null, bridge: { id: d.author.id, name: nameOf(d), avatar: avatarOf(d, l.guildId) } });
+  const linked = accountOwner(d.author.id);   // someone who linked their Discord account (and lets it show): their Orata account is named too
+  const msg = postMessage(ch, orbit, { content: content.trim().slice(0, 4000), attachments, gif, sticker, replyTo: ref?.o || null, bridge: { id: d.author.id, name: nameOf(d), avatar: avatarOf(d, l.guildId), ...(linked ? { orata: { username: linked.username, displayName: linked.displayName } } : {}) } });
   remember(l, { o: msg.id, d: [d.id], in: true });
 }
 function fromDiscordCreate(d) {

@@ -456,6 +456,9 @@ export function visibleListening(u) {
 }
 /** The server tag a person wears next to their name (one server they are in that has a tag; see PUT /servers/:id/tag), or null. */
 const wornTag = (u) => { const s = u?.tagServer && db.servers[u.tagServer]; return s?.tag && s.members[u.id] ? { text: s.tag.text, icon: s.tag.icon, color: s.tag.color, serverId: s.id, server: s.name } : null; };
+/** The Discord account a person linked (Settings → Connections, server/discord.js): what others may see of it, which is nothing when they hid it; `self` also gets whether it is shown. */
+export const discordOf = (u, self = false) => (u?.discord && (self || u.discord.show !== false)
+  ? { username: u.discord.username, name: u.discord.name, avatar: u.discord.avatar, ...(self ? { show: u.discord.show !== false, at: u.discord.at } : {}) } : undefined);
 export function publicUser(u) {
   if (!u) return null;
   return {
@@ -464,10 +467,11 @@ export function publicUser(u) {
     bio: u.bio || '', pronouns: u.pronouns || '', profile: u.profile ? sanitizeProfileStyle(u.profile) : null, avatarBg: u.avatarBg || null, createdAt: u.createdAt,   // (re-checked on the way out so styles saved by older versions, e.g. frames, simply disappear)
     bot: !!u.bot, status: effectiveStatus(u), customStatus: u.customStatus || null, listening: visibleListening(u),
     badges: (u.badges || []).map((id) => db.badges?.[id]).filter(Boolean), tag: wornTag(u), terminated: u.terminated ? true : undefined,   // whole badges (see badges.js), so a profile can show them without the catalog
+    discord: discordOf(u),
   };
 }
 export function selfUser(u) {
-  return { ...publicUser(u), tagServer: u.tagServer || null, email: u.email, status: u.status || 'online', settings: u.settings || {}, dob: u.dob || null, emailVerified: u.emailVerified !== false };
+  return { ...publicUser(u), discord: discordOf(u, true) || null, tagServer: u.tagServer || null, email: u.email, status: u.status || 'online', settings: u.settings || {}, dob: u.dob || null, emailVerified: u.emailVerified !== false };
 }
 
 export function serverView(server, userId) {

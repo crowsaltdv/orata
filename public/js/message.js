@@ -312,10 +312,12 @@ export const Message = memo(function Message({ m, head, chId, editing, replyingT
 }, (a, b) => shallowEq(a, b));
 
 const discordUser = (b) => ({ id: 'discord-' + b.id, displayName: b.name, avatar: b.avatar });
-/** Clicking a Discord sender: who they are (they have no Orata account, so no profile). */
+/** Clicking a Discord sender: who they are (no profile of their own here; when they linked their Discord account to an Orata one and let it show, the popover names that account). */
 POPOVERS['discord-user'] = function DiscordUser({ b }) {
   return html`<div class="pop-card discord-pop"><${Avatar} user=${discordUser(b)} size=${64} />
-    <div><div class="dp-name">${b.name}<span class="bot-tag discord-tag">DISCORD</span></div><p>${t('Writes in a Discord channel linked with this one. Orbit brings their messages here, and yours to them.')}</p></div></div>`;
+    <div><div class="dp-name">${b.name}<span class="bot-tag discord-tag">DISCORD</span></div>
+      ${b.orata ? html`<p class="dp-orata"><${Icon} name="link" size=${13} /> ${t('Also on Orata as')} <b>${b.orata.displayName}</b> <small>@${b.orata.username}</small></p>` : null}
+      <p>${t('Writes in a Discord channel linked with this one. Orbit brings their messages here, and yours to them.')}</p></div></div>`;
 };
 
 export const dmTitle = dmName;

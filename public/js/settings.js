@@ -18,6 +18,7 @@ import { CloakPage } from '/js/cloak.js';
 import { ThemePage, WallpaperPage, EffectsPage, FontsPage, ChatPage, SToggle, SSlider } from '/js/settings-appearance.js';
 import { VoicePage } from '/js/settings-voice.js';
 import { LayoutPage } from '/js/settings-layout.js';
+import { ConnectionsPage } from '/js/settings-connections.js';
 import { fullLayout } from '/js/layout-data.js';
 import { LANGUAGES, t } from '/js/i18n.js';
 import { resendVerification } from '/js/verify.js';
@@ -234,12 +235,12 @@ const legalPage = (path) => function LegalPage() {
   </div>`;
 };
 const NAV = [
-  { group: 'User Settings', items: [['desktop', 'download', 'Desktop App'], ['account', 'user', 'My Account'], ['profile', 'smile', 'Profile']] },
+  { group: 'User Settings', items: [['desktop', 'download', 'Desktop App'], ['account', 'user', 'My Account'], ['profile', 'smile', 'Profile'], ['connections', 'link', 'Connections']] },
   { group: 'Appearance', items: [['appearance', 'palette', 'Theme'], ['layout', 'grid', 'Layout'], ['wallpaper', 'image', 'Wallpaper'], ['effects', 'cloud-rain', 'Rain & Glass'], ['fonts', 'type', 'Fonts'], ['chat', 'message', 'Chat']] },
   { group: 'App Settings', items: [['access', 'eye', 'Accessibility'], ['voice', 'mic', 'Voice & Video'], ['notifications', 'bell', 'Notifications'], ['language', 'globe', 'Language & Time'], ['keybinds', 'keyboard', 'Keybinds'], ['privacy', 'shield', 'Privacy & Safety'], ['cloak', 'monitor', 'Cloak'], ['advanced', 'sliders', 'Advanced']] },
   { group: 'Policies', items: [['terms', 'file-text', 'Terms of Service'], ['privacy-policy', 'lock', 'Privacy Policy'], ['guidelines', 'heart', 'Community Guidelines']] },
 ];
-const PAGES = { desktop: DesktopPage, account: AccountPage, profile: ProfilePage, appearance: ThemePage, layout: LayoutPage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, cloak: CloakPage, advanced: AdvancedPage, terms: legalPage('/terms'), 'privacy-policy': legalPage('/privacy'), guidelines: legalPage('/guidelines') };
+const PAGES = { desktop: DesktopPage, account: AccountPage, profile: ProfilePage, connections: ConnectionsPage, appearance: ThemePage, layout: LayoutPage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, cloak: CloakPage, advanced: AdvancedPage, terms: legalPage('/terms'), 'privacy-policy': legalPage('/privacy'), guidelines: legalPage('/guidelines') };
 
 export function SettingsHost() {
   const page = useSel((s) => s.settingsPage);

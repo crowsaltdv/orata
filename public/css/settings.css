@@ -160,3 +160,15 @@
 .lay-btns .icon-btn:disabled { opacity: .35; pointer-events: none; }
 .lay-note { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; font-size: 13px; color: var(--text-3); } .lay-note .icon { flex: none; margin-top: 2px; }
 @media (max-width: 640px) { .lay-screen { height: 240px; } .lay-stage { padding: 30px 26px; } }
+
+/* ------------------------------------------------ Settings → Connections (settings-connections.js), and a Discord connection on a profile card */
+.conn-card { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 14px; background: var(--input-bg); flex-wrap: wrap; }
+.conn-av, .conn-ic { width: 48px; height: 48px; border-radius: 50%; flex: none; object-fit: cover; background: rgb(var(--surface-rgb) / .12); }
+.conn-ic { display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.conn-text { flex: 1; min-width: 160px; display: flex; flex-direction: column; line-height: 1.3; } .conn-text b { font-size: 15px; } .conn-text small { color: var(--text-3); font-size: 13px; }
+.conn-code { margin-top: 12px; padding: 14px; border-radius: 14px; border: 1px solid rgb(var(--accent-rgb) / .45); background: var(--accent-soft); display: flex; flex-direction: column; gap: 8px; }
+.conn-code p { margin: 0; font-size: 14px; } .conn-code small { color: var(--text-2); font-size: 12.5px; } .conn-code a { color: var(--link); } .conn-warn { color: #f5a524 !important; }
+.conn-cmd { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .conn-cmd code { flex: 1; min-width: 220px; padding: 10px 12px; border-radius: 10px; background: rgb(0 0 0 / .28); font-size: 15px; font-weight: 700; letter-spacing: .02em; user-select: all; }
+.pc-conn { display: flex; align-items: center; gap: 10px; } .pc-conn-av { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: none; background: rgb(var(--surface-rgb) / .12); }
+.pc-conn-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; } .pc-conn-text b { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pc-conn-text small { color: var(--text-3); font-size: 12px; }
+.dp-orata { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 2px 0 6px !important; color: var(--text-2); } .dp-orata small { color: var(--text-3); }

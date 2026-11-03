@@ -113,6 +113,8 @@ async function main() {
   ok(identify?.token === 'fake-token' && identify.intents === (1 | 512 | 32768), 'logs in to Discord with the token, asking for messages and their text');
   const put = await until(() => calls.find((c) => c.method === 'PUT' && c.path === '/api/applications/900/commands'));
   ok(put?.body.some((c) => c.name === 'orata-link' && c.default_member_permissions === '32') && put.body.some((c) => c.name === 'orata-unlink'), 'sets up /orata-link and /orata-unlink, shown only to people who can manage the server');
+  const acct = put?.body.find((c) => c.name === 'orata-account');
+  ok(acct && acct.default_member_permissions === null && JSON.stringify(acct.contexts) === '[0,1]' && acct.options[0].name === 'code', 'sets up /orata-account for everyone, in servers and in DMs with the bot');
   ok((await api('GET', '/config')).body.discord === true, 'Orata says Discord linking is on');
 
   console.log('\nLinking');
@@ -160,6 +162,42 @@ async function main() {
   await sleep(500);
   ok(!(await msgs()).some((m) => m.content === 'beep' || m.content === 'echo'), 'bots, and the bridge’s own copies, are not mirrored back');
   ok(!hookPosts().some((c) => said(c).content?.includes('hi')), '… and a Discord message isn’t sent back to Discord');
+
+  console.log('\nLinking a Discord account');
+  r = await api('POST', '/me/discord/code', null); ok(r.status === 401, 'only a signed-in person can ask for a code');
+  r = await api('GET', '/me/discord', A.token); ok(r.status === 200 && r.body.on === true && r.body.account === null, 'nobody is linked at first');
+  r = await api('PATCH', '/me/discord', B.token, { show: false }); ok(r.status === 400, 'there is nothing to hide before linking');
+  r = await api('POST', '/me/discord/code', A.token); const acode = r.body.code;
+  ok(r.status === 200 && /^[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(acode) && r.body.command === `/orata-account code:${acode}` && r.body.expiresIn === 600 && r.body.invite.includes('client_id=900'), 'Settings → Connections gives a one-time code, the command to type, and the link to add the bot');
+  r = await api('POST', '/me/discord/code', A.token); const acode2 = r.body.code; ok(acode2 !== acode, 'a new code replaces the old one');
+  const CLEO = '1111111111111111111'; const clio = { member: { permissions: '0', user: { id: CLEO, username: 'cleo', global_name: 'Cleo', avatar: 'f'.repeat(32) } } };   // no Manage Server needed
+  const typeCode = (who, c) => { calls.length = 0; dispatch('INTERACTION_CREATE', interaction({ ...who, data: { name: 'orata-account', options: [{ name: 'code', value: c }] } })); return until(() => answers()[0]); };
+  let a1 = await typeCode(clio, acode); ok(a1?.content.includes('isn’t valid') && a1.flags === 64, 'the old code no longer works (and it is told only to whoever typed it)');
+  a1 = await typeCode(clio, acode2.toLowerCase());
+  ok(a1?.content.includes('Linked!') && a1.content.includes('Cleo') && a1.content.includes('@alice') && a1.flags === 64, 'the right code links the Discord account that typed it, whatever its Discord permissions');
+  r = await api('GET', '/me/discord', A.token);
+  ok(r.body.account?.username === 'cleo' && r.body.account.name === 'Cleo' && r.body.account.show === true && r.body.account.avatar === `https://cdn.discordapp.com/avatars/${CLEO}/${'f'.repeat(32)}.png?size=128` && !('id' in r.body.account), 'Orata knows the Discord name and picture (the account’s data carries no Discord id)');
+  r = await api('GET', `/users/${A.user.id}`, B.token); ok(r.body.user?.discord?.username === 'cleo' && !('show' in r.body.user.discord), 'it shows on their profile for everyone else');
+  a1 = await typeCode(clio, acode2); ok(a1?.content.includes('isn’t valid'), 'a code works once');
+  r = await api('POST', '/me/discord/code', B.token); a1 = await typeCode(clio, r.body.code);
+  ok(a1?.content.includes('already linked to another Orata account') && (await api('GET', '/me/discord', B.token)).body.account === null, 'a Discord account links to one Orata account only');
+  a1 = await typeCode(clio, 'ZZZZ-ZZZZ'); ok(a1?.content.includes('isn’t valid'), 'a wrong code is refused');
+  r = await api('POST', '/me/discord/code', B.token);
+  a1 = await typeCode({ member: undefined, guild_id: undefined, channel: { id: 'dm1', type: 1 }, user: { id: '3333333333333333333', username: 'bee', global_name: 'Bee' } }, r.body.code);
+  ok(a1?.content.includes('Linked!') && (await api('GET', '/me/discord', B.token)).body.account?.username === 'bee', 'it works in a DM with the bot too (Discord sends the user there, not a member)');
+  ok(/cdn\.discordapp\.com\/embed\/avatars\/\d\.png/.test((await api('GET', '/me/discord', B.token)).body.account.avatar), '… with Discord’s default picture when they have none');
+  dispatch('MESSAGE_CREATE', { id: snow(), channel_id: '2001', guild_id: '4001', type: 0, content: 'from a linked account', author: { id: CLEO, username: 'cleo', global_name: 'Cleo' }, member: { nick: null } });
+  let lm = await until(async () => (await msgs()).find((m) => m.content === 'from a linked account'));
+  ok(lm?.bridge.name === 'Cleo' && lm.bridge.orata?.username === 'alice' && lm.bridge.orata.displayName === 'Alice' && !m1.bridge.orata, 'a Discord message from a linked account names their Orata account too (one from anyone else doesn’t)');
+  r = await api('PATCH', '/me/discord', A.token, { show: 'yes' }); ok(r.status === 400, 'showing or hiding needs a yes or no');
+  r = await api('PATCH', '/me/discord', A.token, { show: false }); ok(r.status === 200 && r.body.account.show === false, 'they can hide it');
+  r = await api('GET', `/users/${A.user.id}`, B.token); ok(!r.body.user.discord, '… and it is gone from their profile for others');
+  dispatch('MESSAGE_CREATE', { id: snow(), channel_id: '2001', guild_id: '4001', type: 0, content: 'hidden link', author: { id: CLEO, username: 'cleo', global_name: 'Cleo' }, member: { nick: null } });
+  lm = await until(async () => (await msgs()).find((m) => m.content === 'hidden link')); ok(lm && !lm.bridge.orata, '… and from their Discord messages');
+  ok((await api('GET', '/me/discord', A.token)).body.account.show === false, '(they still see it themselves, as hidden)');
+  r = await api('DELETE', '/me/discord', A.token); ok(r.status === 200 && (await api('GET', '/me/discord', A.token)).body.account === null, 'unlinking takes it away');
+  r = await api('POST', '/me/discord/code', B.token); a1 = await typeCode(clio, r.body.code);
+  ok(a1?.content.includes('Linked!') && (await api('GET', '/me/discord', B.token)).body.account?.username === 'cleo', 'a Discord account that was unlinked can be linked to another Orata account');
 
   console.log('\nOrata → Discord');
   r = await api('POST', `/channels/${text.id}/messages`, A.token, { content: `hey <@${B.user.id}> @everyone` }, { 'x-forwarded-proto': 'https' });   // like behind Render's proxy, without TRUST_PROXY
