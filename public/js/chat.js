@@ -22,13 +22,21 @@ function togglePanel(name) {
   const cur = state.panel === name || (name === 'members' && state.panel === 'profile');
   const next = cur ? null : name; set({ panel: next }); if (name === 'members' || name === 'profile') updateLocal({ panel: next });
 }
+/** Is there a right-hand panel (members, profile, pins, search; on Friends, Active Now) to show right now? The screen's grid (app.js) leaves its column out when there isn't. */
+export function rightPanelOn(s) {
+  if (s.width <= 1100) return false;   // (the panel is hidden on narrow windows)
+  const view = s.route.view;
+  if (view === 'friends') return true;
+  if (view === 'music' || view === 'watch' || view === 'staff' || view === 'themes') return false;
+  const ch = getChannel(s.route.channelId); const p = effectivePanel(view, ch, s.panel);
+  return !(!p || (view !== 'dm' && view !== 'channel') || !ch || ch.type === 'forum' || ((ch.type === 'voice' || ch.type === 'stage') && p === 'members'));
+}
 export function RightPanel() {
   const view = useSel((s) => s.route.view); const chId = useSel((s) => s.route.channelId); const ch = useSel((s) => getChannel(s.route.channelId));
   const panel = useSel((s) => s.panel);
-  const width = useSel((s) => s.width);
+  const on = useSel(rightPanelOn);
   const p = effectivePanel(view, ch, panel);
-  if (!p || (view !== 'dm' && view !== 'channel') || !ch || ch.type === 'forum' || (ch.type === 'voice' || ch.type === 'stage') && p === 'members') return null;
-  if (width < 1100) return null;
+  if (!on || !p) return null;
   return html`<aside class=${cx('right panel right-enter', p === 'profile' && 'wide')} key=${p + chId}>
     ${p === 'members' ? html`<${MembersPanel} chId=${chId} />` : p === 'profile' ? html`<${DmProfilePanel} chId=${chId} />` : p === 'pins' ? html`<${PinsPanel} chId=${chId} />` : html`<${SearchPanel} chId=${chId} />`}
   </aside>`;

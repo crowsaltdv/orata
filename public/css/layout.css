@@ -13,7 +13,11 @@
 
 /* ------------------------------------------------ server rail */
 .rail { width: 74px; flex: none; display: flex; flex-direction: column; align-items: center; padding: 12px 0 10px; gap: 8px; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; border-radius: var(--radius-lg); }
-.rail::-webkit-scrollbar { display: none; }
+/* The rail is also a .panel, and ui.css (loaded after this file) gives every .panel `overflow: hidden`, which is why a long list of servers never scrolled: this is the same
+ * weight, so it says it again after that. It scrolls smoothly (also for the keyboard and when a server is scrolled into view), without a scrollbar, and the page behind doesn't move at its ends. */
+.rail.panel { overflow-y: auto; overflow-x: hidden; scrollbar-width: none; -ms-overflow-style: none; scroll-behavior: smooth; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.rail::-webkit-scrollbar, .rail.panel::-webkit-scrollbar { display: none; width: 0; height: 0; }
+@media (prefers-reduced-motion: reduce) { .rail.panel { scroll-behavior: auto; } }
 .rail-item { position: relative; width: 100%; display: flex; justify-content: center; flex: none; }
 .rail-btn {
   --s: 48px; width: var(--s); height: var(--s); border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; overflow: visible;
@@ -45,6 +49,35 @@
 .rail-folder { position: relative; width: 100%; display: flex; flex-direction: column; align-items: center; flex: none; }
 .rail-item.entering { animation: rail-in var(--t-med) var(--ease-spring) both; }
 @keyframes rail-in { from { opacity: 0; transform: scale(.3) translateY(-20px); } to { opacity: 1; transform: none; } }
+
+/* ------------------------------------------------ the screen as a grid, and the server bar on any edge (Settings → Layout; layout-data.js, app.js)
+ * Every piece sits in the grid area named after it, so pieces fit next to each other and never cover one another. */
+.shell.grid { display: grid; }
+.shell.grid > .rail { grid-area: rail; width: auto; }
+.shell.grid > .sidebar { grid-area: sidebar; width: auto; }
+.shell.grid > .userbar { grid-area: userbar; }
+.shell.grid > .right { grid-area: panel; }
+.shell.grid > .main { grid-area: main; min-height: 0; }
+.shell.grid > .rail, .shell.grid > .sidebar, .shell.grid > .userbar { z-index: 2; }
+.shell.grid[data-ub="alone"] > .userbar { align-self: end; }   /* a profile bar with no column to sit under makes a column of its own, at the bottom of it */
+/* the server bar along the top or the bottom: the same buttons in a row (the one on the left or right is the column above) */
+.rail.h { height: 74px; flex-direction: row; padding: 0 12px; }
+.rail.h.panel { overflow-x: auto; overflow-y: hidden; }
+.rail.h .rail-item { width: auto; height: 100%; align-items: center; }
+.rail.h .rail-sep { width: 2px; height: 32px; margin: 0 2px; }
+.rail.h .rail-folder { flex-direction: row; width: auto; height: 100%; align-items: center; }
+.rail.h .rail-folder.open { width: auto; height: 62px; margin: 0; padding: 0 6px 0 2px; }
+.rail.h .folder-body { flex-direction: row; width: auto; padding: 0 0 0 6px; }
+.rail.h .folder-body .rail-item { width: auto; height: auto; }
+/* the marker of the unread, hovered and open server sits on the edge of the screen the bar is on */
+.rail.dock-right .rail-pill { left: auto; right: 0; border-radius: 6px 0 0 6px; }
+.rail.h .rail-pill { left: 50%; top: 0; width: 8px; height: 5px; border-radius: 0 0 6px 6px; transform: translateX(-50%) scaleX(0); transition: width var(--t-med) var(--ease-spring), transform var(--t-med) var(--ease-spring), opacity var(--t-med); }
+.rail.h.dock-bottom .rail-pill { top: auto; bottom: 0; border-radius: 6px 6px 0 0; }
+.rail.h .rail-item.unread .rail-pill { opacity: 1; transform: translateX(-50%) scaleX(1); width: 8px; height: 5px; }
+.rail.h .rail-item:hover .rail-pill { opacity: 1; transform: translateX(-50%) scaleX(1); width: 22px; height: 5px; }
+.rail.h .rail-item.active .rail-pill { opacity: 1; transform: translateX(-50%) scaleX(1); width: 38px; height: 5px; background: var(--accent-grad); }
+.rail.h .rail-item.drop-before::before, .rail.h .rail-item.drop-after::after, .rail.h .rail-folder.drop-before::before, .rail.h .rail-folder.drop-after::after { top: 14px; bottom: 14px; left: auto; right: auto; width: 3px; height: auto; }
+.rail.h .rail-item.drop-before::before, .rail.h .rail-folder.drop-before::before { left: -5px; } .rail.h .rail-item.drop-after::after, .rail.h .rail-folder.drop-after::after { right: -5px; top: 14px; bottom: 14px; }
 
 /* ------------------------------------------------ sidebar */
 .sidebar { width: var(--sidebar-w, 248px); flex: none; display: flex; flex-direction: column; min-height: 0; border-radius: var(--radius-lg); }
@@ -133,7 +166,9 @@ body.dnd-active, body.dnd-active * { cursor: grabbing !important; user-select: n
 .vc-user .live { padding: 1px 6px; border-radius: 5px; background: #e5314f; color: #fff; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
 
 /* ------------------------------------------------ user bar + voice panel */
-.userbar { flex: none; display: flex; flex-direction: column; border-radius: var(--radius-lg); }
+.userbar { flex: none; display: flex; flex-direction: column; border-radius: var(--radius-lg); container: userbar / inline-size; }
+/* in a narrow column (a layout that puts the profile bar under the channel list only) the name would be squeezed to a letter: the buttons go on a row of their own */
+@container userbar (max-width: 300px) { .userbar .ub-row { flex-wrap: wrap; } .userbar .ub-user { flex: 1 1 100%; } .userbar .ub-icons { flex: 1 1 100%; justify-content: space-around; } }
 .vc-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 10px; border-bottom: 1px solid var(--border); animation: slide-down var(--t-med) var(--ease) both; background: linear-gradient(180deg, rgb(59 165 93 / .12), transparent); }
 .vc-panel .vc-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .vc-status { display: flex; flex-direction: column; min-width: 0; }

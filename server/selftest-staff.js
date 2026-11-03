@@ -199,6 +199,32 @@ async function main() {
   await api('DELETE', `/staff/servers/${S.id}/ghost`, Y.token);
   r = await api('GET', `/channels/${text.id}/messages`, Y.token); ok(r.status === 404, 'leaving ghost mode closes the server again');
 
+  console.log('\nTerminating servers');
+  const junk = (await api('POST', '/servers', B.token, { name: 'Fake Giveaways' })).body; const junkText = junk.channels.find((c) => c.type === 'text');
+  const junkCode = (await api('POST', `/servers/${junk.id}/invites`, B.token, { maxUses: 0 })).body.code;
+  await api('POST', `/invites/${junkCode}/join`, E.token);
+  await api('POST', `/channels/${junkText.id}/messages`, B.token, { content: 'win a prize, just click' });
+  await api('POST', '/reports', E.token, { serverId: junk.id, reason: 'scam', note: 'fake giveaways' });
+  const inReady = async (who, id) => (await api('GET', '/ready', who.token)).body.servers.some((s) => s.id === id);
+  r = await api('GET', '/staff/servers', Y.token);
+  ok(r.body.find((s) => s.id === junk.id)?.protected === false && r.body.find((s) => s.id === S.id)?.protected === true, 'the staff list says which servers can’t be terminated (a founder’s)');
+  r = await api('POST', `/staff/servers/${junk.id}/terminate`, B.token, { reason: 'my own' }); ok(r.status === 403 && await inReady(B, junk.id), 'only staff terminate servers (not even its owner, who has Delete Server)');
+  r = await api('POST', `/staff/servers/${junk.id}/terminate`, Y.token, { reason: '   ' }); ok(r.status === 400 && await inReady(B, junk.id), 'staff have to say why');
+  r = await api('POST', `/staff/servers/${S.id}/terminate`, Y.token, { reason: 'no' }); ok(r.status === 403 && await inReady(A, S.id), 'a founder’s server can’t be terminated');
+  const zoeHq = (await api('POST', '/servers', Z.token, { name: 'Zoe HQ' })).body;
+  r = await api('POST', `/staff/servers/${zoeHq.id}/terminate`, Y.token, { reason: 'no' }); ok(r.status === 403 && await inReady(Z, zoeHq.id), 'nor can another staff member’s, by staff…');
+  r = await api('POST', `/staff/servers/${zoeHq.id}/terminate`, A.token, { reason: 'closing it' }); ok(r.status === 200 && !await inReady(Z, zoeHq.id), '… but a founder can');
+  r = await api('POST', `/staff/servers/${junk.id}/ghost`, Y.token); ok(r.status === 200, '(staff are reading the server)');
+  r = await api('POST', `/staff/servers/${junk.id}/terminate`, Y.token, { reason: 'fake giveaways' }); ok(r.status === 200 && r.body.ok === true, 'staff can terminate a server');
+  ok(!await inReady(B, junk.id) && !await inReady(E, junk.id), '… and its owner and members lose it');
+  r = await api('GET', `/channels/${junkText.id}/messages`, E.token); ok(r.status === 404, '… with its channels and messages');
+  r = await api('GET', `/channels/${junkText.id}/messages`, Y.token); ok(r.status === 404, '… even for the staff who were reading it');
+  r = await api('POST', `/invites/${junkCode}/join`, D.token); ok(r.status === 404, '… and its invites');
+  r = await api('GET', '/staff/servers', Y.token); ok(!r.body.some((s) => s.id === junk.id), '… and it is off the staff list');
+  r = await api('GET', '/staff/flags?status=all', Y.token); ok(r.body.flags.find((f) => f.kind === 'server' && f.serverId === junk.id)?.status === 'done', 'the reports about it are closed');
+  r = await api('GET', '/staff/log', Y.token); ok(r.body.log.some((e) => e.action === 'terminate_server' && e.by === Y.user.id && e.target === B.user.id && e.serverName === 'Fake Giveaways' && e.reason === 'fake giveaways' && e.members === 2), 'it goes in the staff log, with the name, the reason and how many were in it');
+  r = await api('POST', `/staff/servers/${junk.id}/terminate`, Y.token, { reason: 'again' }); ok(r.status === 404, 'a server that is gone can’t be terminated again');
+
   console.log('\nDMs, and agreeing to the rules');
   const flaggedDm = (await api('POST', '/dms', B.token, { recipientId: E.user.id })).body;
   await api('POST', `/channels/${flaggedDm.id}/messages`, B.token, { content: 'hey erin' });

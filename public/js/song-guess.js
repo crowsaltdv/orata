@@ -57,33 +57,46 @@ export function GuessView() {
   const [q, setQ] = useState(''); const [found, setFound] = useState([]); const [chosen, setChosen] = useState(null); const [open, setOpen] = useState(false);
   const [score, setScore] = useState(() => ls('guessScore', { played: 0, won: 0, streak: 0 }));
   const player = useRef(null); const loadedId = useRef(null); const startAt = useRef(0); const want = useRef(null); const timer = useRef(0); const frame = useRef(0); const asked = useRef(0);
+  const preparing = useRef(false); const watchdog = useRef(0);   // preparing: the round's song is loading muted, to be paused at its highlight
   const playingMusic = useSel((s) => s.music.playing);
 
-  const stopClip = () => { clearTimeout(timer.current); cancelAnimationFrame(frame.current); want.current = null; if (player.current) { player.current.pause(); player.current.seek(startAt.current); } setStatus('ready'); setAt(0); };
+  const stopClip = () => { clearTimeout(timer.current); clearTimeout(watchdog.current); cancelAnimationFrame(frame.current); want.current = null; if (player.current) { player.current.pause(); player.current.seek(startAt.current); } setStatus('ready'); setAt(0); };
   const startClip = () => {   // the player says it is playing: let it run for this try's length
-    const len = want.current; if (len == null) return; want.current = null;
+    const len = want.current; if (len == null) return; want.current = null; clearTimeout(watchdog.current);
     const t0 = performance.now(); setStatus('playing');
     const tick = () => { setAt((performance.now() - t0) / 1000); frame.current = requestAnimationFrame(tick); }; tick();
     timer.current = setTimeout(stopClip, len * 1000);
   };
-  useEffect(() => () => { clearTimeout(timer.current); cancelAnimationFrame(frame.current); player.current?.destroy(); }, []);
+  const getPlayer = () => player.current ||= createPlayer({
+    onState(c) {
+      if (c !== 1) return;
+      if (want.current != null) { preparing.current = false; startClip(); }
+      else if (preparing.current) { preparing.current = false; player.current.pause(); player.current.seek(startAt.current); }   // loaded and buffered at the highlight: Play only has to press play
+    },
+    onError() { preparing.current = false; stopClip(); setErr(t('That song can’t play here. Skip to the next one.')); },
+  }, { title: 'Song guess', insist: true });   // insist: Play works the first time even when the browser ignores the player's autoplay
+  useEffect(() => { getPlayer().warm(); return () => { clearTimeout(timer.current); clearTimeout(watchdog.current); cancelAnimationFrame(frame.current); player.current?.destroy(); }; }, []);   // (the player loads while the round is being picked)
   useEffect(() => { if (playingMusic && status !== 'ready') stopClip(); }, [playingMusic]);   // the mini player started: this one stops
 
   useEffect(() => { api.get('/music/guess').then(setOpts, (e) => setErr(errMsg(e))); }, []);
+  /** Loads the round's song without a sound (muted; it is paused as soon as it plays), so the first press of Play has nothing left to wait for. */
+  const prepare = (song) => { const p = getPlayer(); preparing.current = true; loadedId.current = song.id; p.mute(); p.load(song.id, startAt.current); };
   const newRound = async () => {
-    stopClip(); setRound(null); setQ(''); setChosen(null); setFound([]); setErr(null);
+    stopClip(); preparing.current = false; setRound(null); setQ(''); setChosen(null); setFound([]); setErr(null);
     const mine = ++asked.current;
-    try { const r = await api.post('/music/guess/round', pick); if (mine === asked.current) { startAt.current = r.start || 0; setRound({ song: r.song, stage: 0, tries: [], done: null }); } } catch (e) { if (mine === asked.current) setErr(errMsg(e)); }
+    try { const r = await api.post('/music/guess/round', pick); if (mine === asked.current) { startAt.current = r.start || 0; setRound({ song: r.song, stage: 0, tries: [], done: null }); prepare(r.song); } } catch (e) { if (mine === asked.current) setErr(errMsg(e)); }
   };
   useEffect(() => { ls('guessPick', null, pick); if (opts) newRound(); }, [opts, pick.genre, pick.era, pick.artist, pick.difficulty]);
 
-  const play = async () => {
+  const play = () => {   // (nothing is awaited before the player is told: it has to happen in the click)
     if (!round) return;
     if (status !== 'ready') { stopClip(); return; }
-    if (playingMusic) (await import('/js/music.js')).music.pause();
-    const p = player.current ||= createPlayer({ onState: (c) => { if (c === 1) startClip(); }, onError: () => { setStatus('ready'); setErr(t('That song can’t play here. Skip to the next one.')); } }, { title: 'Song guess' });
-    want.current = round.done ? 30 : STAGES[round.stage]; setStatus('loading');   // (once it's over, the song plays for 30 s)
+    if (playingMusic) import('/js/music.js').then((m) => m.music.pause());
+    const p = getPlayer();
+    want.current = round.done ? 30 : STAGES[round.stage]; setStatus('loading'); p.unmute();   // (once it's over, the song plays for 30 s)
     if (loadedId.current !== round.song.id) { loadedId.current = round.song.id; p.load(round.song.id, startAt.current); } else { p.seek(startAt.current); p.play(); }   // (from the highlight)
+    clearTimeout(watchdog.current);
+    watchdog.current = setTimeout(() => { if (want.current != null) { stopClip(); setErr(t('The player didn’t respond. Check your connection or ad blocker.')); } }, 12_000);
   };
   const finish = (won, tries) => {
     stopClip(); setRound((r) => ({ ...r, tries, done: won ? 'won' : 'lost' }));

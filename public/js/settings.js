@@ -17,6 +17,8 @@ import { ServerTag } from '/js/server-tag.js';
 import { CloakPage } from '/js/cloak.js';
 import { ThemePage, WallpaperPage, EffectsPage, FontsPage, ChatPage, SToggle, SSlider } from '/js/settings-appearance.js';
 import { VoicePage } from '/js/settings-voice.js';
+import { LayoutPage } from '/js/settings-layout.js';
+import { fullLayout } from '/js/layout-data.js';
 import { LANGUAGES, t } from '/js/i18n.js';
 import { resendVerification } from '/js/verify.js';
 import { playSound } from '/js/sound.js';
@@ -195,11 +197,11 @@ function PrivacyPage() {
 }
 MODALS['theme-io'] = function ThemeIO({ id, mode }) {
   const [txt, setTxt] = useState(() => (mode === 'export' ? JSON.stringify(exportTheme(), null, 2) : '')); const [err, setErr] = useState(null);
-  const apply = () => { try { const j = JSON.parse(txt); const out = {}; for (const k of ['theme', 'bg', 'rain', 'glass', 'fonts', 'motion', 'chat']) if (j[k] && typeof j[k] === 'object') out[k] = j[k]; if (!Object.keys(out).length) throw new Error('No theme data found'); updateSettings(out); toast('Theme imported', 'success'); closeModal(id); } catch (e) { setErr(e.message); } };
+  const apply = () => { try { const j = JSON.parse(txt); const out = {}; for (const k of ['theme', 'bg', 'rain', 'glass', 'layout', 'fonts', 'motion', 'chat']) if (j[k] && typeof j[k] === 'object') out[k] = j[k]; if (!Object.keys(out).length) throw new Error('No theme data found'); if (out.layout) out.layout = fullLayout(out.layout); updateSettings(out); toast('Theme imported', 'success'); closeModal(id); } catch (e) { setErr(e.message); } };
   return html`<${Modal} title=${mode === 'export' ? 'Export theme' : 'Import theme'} subtitle=${mode === 'export' ? 'Copy this JSON to share your look with a friend.' : 'Paste a theme JSON exported from Orata.'} width=${560} onClose=${() => closeModal(id)} footer=${mode === 'export' ? html`<${Btn} variant="primary" icon="copy" onClick=${async () => { await copyText(txt); toast('Copied', 'success', 1400); }}>Copy<//>` : html`<${Btn} variant="ghost" onClick=${() => closeModal(id)}>Cancel<//><${Btn} variant="primary" onClick=${apply}>Import<//>`}>
     <textarea class="textarea code-area" rows="12" spellcheck="false" readonly=${mode === 'export'} value=${txt} onInput=${(e) => { setTxt(e.target.value); setErr(null); }} placeholder='{ "theme": { … } }'></textarea>${err ? html`<div class="auth-error">${err}</div>` : null}<//>`;
 };
-export function exportTheme() { const s = state.settings; return { app: 'Orata', version: 1, theme: s.theme, bg: { ...s.bg, library: [] }, rain: s.rain, glass: s.glass, fonts: s.fonts, motion: s.motion, chat: s.chat }; }
+export function exportTheme() { const s = state.settings; return { app: 'Orata', version: 1, theme: s.theme, bg: { ...s.bg, library: [] }, rain: s.rain, glass: s.glass, layout: s.layout, fonts: s.fonts, motion: s.motion, chat: s.chat }; }
 function AdvancedPage() {
   const conn = useSel((s) => s.connection); const [pref, setPref] = useState(preferredMode());
   return html`<div class="s-page">
@@ -233,11 +235,11 @@ const legalPage = (path) => function LegalPage() {
 };
 const NAV = [
   { group: 'User Settings', items: [['desktop', 'download', 'Desktop App'], ['account', 'user', 'My Account'], ['profile', 'smile', 'Profile']] },
-  { group: 'Appearance', items: [['appearance', 'palette', 'Theme'], ['wallpaper', 'image', 'Wallpaper'], ['effects', 'cloud-rain', 'Rain & Glass'], ['fonts', 'type', 'Fonts'], ['chat', 'message', 'Chat']] },
+  { group: 'Appearance', items: [['appearance', 'palette', 'Theme'], ['layout', 'grid', 'Layout'], ['wallpaper', 'image', 'Wallpaper'], ['effects', 'cloud-rain', 'Rain & Glass'], ['fonts', 'type', 'Fonts'], ['chat', 'message', 'Chat']] },
   { group: 'App Settings', items: [['access', 'eye', 'Accessibility'], ['voice', 'mic', 'Voice & Video'], ['notifications', 'bell', 'Notifications'], ['language', 'globe', 'Language & Time'], ['keybinds', 'keyboard', 'Keybinds'], ['privacy', 'shield', 'Privacy & Safety'], ['cloak', 'monitor', 'Cloak'], ['advanced', 'sliders', 'Advanced']] },
   { group: 'Policies', items: [['terms', 'file-text', 'Terms of Service'], ['privacy-policy', 'lock', 'Privacy Policy'], ['guidelines', 'heart', 'Community Guidelines']] },
 ];
-const PAGES = { desktop: DesktopPage, account: AccountPage, profile: ProfilePage, appearance: ThemePage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, cloak: CloakPage, advanced: AdvancedPage, terms: legalPage('/terms'), 'privacy-policy': legalPage('/privacy'), guidelines: legalPage('/guidelines') };
+const PAGES = { desktop: DesktopPage, account: AccountPage, profile: ProfilePage, appearance: ThemePage, layout: LayoutPage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, cloak: CloakPage, advanced: AdvancedPage, terms: legalPage('/terms'), 'privacy-policy': legalPage('/privacy'), guidelines: legalPage('/guidelines') };
 
 export function SettingsHost() {
   const page = useSel((s) => s.settingsPage);

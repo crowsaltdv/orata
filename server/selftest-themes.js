@@ -148,6 +148,15 @@ async function main() {
   r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Messy', data: { theme: { accent: 'red', radius: 9999, mode: 'neon' }, bg: { zoom: 'big', dim: 5 }, nope: { a: 1 } } });
   ok(r.status === 200 && r.body.data.theme.accent === '#64748b' && r.body.data.theme.radius === 36 && r.body.data.theme.mode === 'dark' && r.body.data.bg.dim === 0.9 && r.body.data.bg.zoom === 1 && !r.body.data.nope, 'a theme is checked: bad values are dropped, numbers clamped, and a saved theme is always complete (the rest are Orata’s defaults)');
   await api('DELETE', `/themes/library/${r.body.id}`, N.token);
+  ok(!('layout' in d), 'a theme saved before layouts existed has none (putting it on leaves your layout as it is)');
+  const bottomBar = { rail: 'bottom', sidebar: 'right', userbar: 'right', panel: 'left', order: ['panel', 'rail', 'sidebar', 'userbar'] };
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Bar at the bottom', data: siteLook({ layout: bottomBar }) });
+  ok(r.status === 200 && JSON.stringify(r.body.data.layout) === JSON.stringify(bottomBar), 'a theme keeps the screen layout: the edge the server bar, channel list, profile bar and members panel sit on, and their order', JSON.stringify(r.body.data?.layout));
+  r = (await api('GET', '/themes/library', N.token)).body.themes.find((x) => x.name === 'Bar at the bottom'); ok(JSON.stringify(r?.data.layout) === JSON.stringify(bottomBar), '… in the library too, for other devices');
+  await api('DELETE', `/themes/library/${r?.id}`, N.token);
+  r = await api('POST', '/themes/library', N.token, { kind: 'site', name: 'Bad layout', data: siteLook({ layout: { rail: 'diagonal', sidebar: 'top', userbar: 'right', order: ['userbar', 'userbar', 'bogus', 'rail'] } }) });
+  ok(r.status === 200 && JSON.stringify(r.body.data.layout) === JSON.stringify({ userbar: 'right', order: ['userbar', 'rail', 'sidebar', 'panel'] }), 'a layout is checked: an edge a piece can’t sit on is dropped, and the order lists every piece once', JSON.stringify(r.body.data?.layout));
+  await api('DELETE', `/themes/library/${r.body.id}`, N.token);
   r = await api('POST', '/themes/library', N.token, { kind: 'site', data: {} }); ok(r.status === 400, 'an empty theme can’t be saved');
   r = await api('POST', '/themes/library', N.token, { kind: 'banana', data: siteLook() }); ok(r.status === 400, 'a theme is a profile theme or a site theme');
   r = await api('POST', '/themes/library', N.token, { kind: 'profile', name: 'Aurora Card', data: profileLook() }); const P1 = r.body;

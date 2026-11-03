@@ -1,5 +1,5 @@
 // Orata — server rail (left-most column): Discovery, music, home, servers and server folders.
-import { html, useState, useMemo, cx, memo } from '/js/lib.js';
+import { html, useState, useMemo, useEffect, useRef, cx, memo } from '/js/lib.js';
 import { state, useSel, go, goChannel, openModal, closeModal, openContext, updateSettings, serverUnread, unreadInfo, hasPerm, toast, shallowArrEq } from '/js/store.js';
 import { Icon, Logo } from '/js/icons.js';
 import { ServerIcon, Modal, Btn, Field, TextInput, MODALS, ColorSwatch } from '/js/ui.js';
@@ -9,6 +9,12 @@ import { confirmDialog } from '/js/ui.js';
 import { copyText } from '/js/lib.js';
 import { t } from '/js/i18n.js';
 import { openMusic } from '/js/music.js';
+import { fullLayout, TIP_SIDE, PHONE_MAX } from '/js/layout-data.js';
+
+/** The edge the server bar sits on (settings.layout, Settings → Layout): left, top, right or bottom. A phone keeps it as the left column of its drawer. */
+const railDock = (s) => (s.width > PHONE_MAX ? fullLayout(s.settings.layout).rail : 'left');
+/** Which side a tooltip of the server bar opens on: away from the edge it sits on. */
+const railTip = (s) => TIP_SIDE[railDock(s)];
 
 /* ------------------------------------------------------------------ layout: servers and folders in one ordered list */
 /**
@@ -145,14 +151,14 @@ MODALS['edit-folder'] = function EditFolder({ id, folderId }) {
 
 /* ------------------------------------------------------------------ items */
 const ServerButton = memo(function ServerButton({ id, folderId, active, unread, mentions, dnd }) {
-  const server = useSel((s) => s.servers[id]);
+  const server = useSel((s) => s.servers[id]); const tip = useSel(railTip);
   if (!server) return null;
   const over = dnd.over && dnd.over.kind === 'server' && dnd.over.id === id ? dnd.over.zone : null;
   return html`<div class=${cx('rail-item', active && 'active', unread && !active && 'unread', dnd.drag?.kind === 'server' && dnd.drag.id === id && 'dragging', over && `drop-${over}`)} draggable="true"
     onDragStart=${(e) => dnd.start(e, { kind: 'server', id, folderId })} onDragOver=${(e) => dnd.hover(e, { kind: 'server', id, folderId })} onDrop=${(e) => dnd.drop(e, { kind: 'server', id, folderId })} onDragEnd=${dnd.end}
     onContextMenu=${(e) => openContext(e, serverMenu(server))}>
     <span class="rail-pill"></span>
-    <button type="button" class="rail-btn glass glass-rail" data-tip=${server.name} data-tip-pos="right" aria-label=${server.name} onClick=${() => goChannel(id, null)}>
+    <button type="button" class="rail-btn glass glass-rail" data-tip=${server.name} data-tip-pos=${tip} aria-label=${server.name} onClick=${() => goChannel(id, null)}>
       <${ServerIcon} server=${server} size=${48} />
       ${mentions ? html`<span class="rail-badge">${mentions > 99 ? '99+' : mentions}</span>` : null}
     </button>
@@ -163,7 +169,7 @@ function FolderItem({ folder, info, route, dnd }) {
   const mentions = folder.servers.reduce((n, id) => n + (info[id]?.mentions || 0), 0);
   const unread = folder.servers.some((id) => info[id]?.unread);
   const holdsActive = folder.servers.includes(route);
-  const servers = useSel((s) => s.servers);
+  const servers = useSel((s) => s.servers); const tip = useSel(railTip);
   const over = dnd.over && dnd.over.kind === 'folder' && dnd.over.id === folder.id ? dnd.over.zone : null;
   const toggle = () => updateSettings({ serverFolders: (state.settings.serverFolders || []).map((f) => (f.id === folder.id ? { ...f, open: !folder.open } : f)) });
   const label = folder.name || folder.servers.map((id) => servers[id]?.name).filter(Boolean).join(', ');
@@ -179,7 +185,7 @@ function FolderItem({ folder, info, route, dnd }) {
       onDragStart=${(e) => dnd.start(e, { kind: 'folder', id: folder.id })} onDragOver=${(e) => dnd.hover(e, { kind: 'folder', id: folder.id })} onDrop=${(e) => dnd.drop(e, { kind: 'folder', id: folder.id })} onDragEnd=${dnd.end}
       onContextMenu=${(e) => openContext(e, menu)}>
       <span class="rail-pill"></span>
-      <button type="button" class="rail-btn folder glass glass-rail" data-tip=${label || t('Folder')} data-tip-pos="right" aria-label=${label || t('Folder')} aria-expanded=${folder.open} onClick=${toggle}>
+      <button type="button" class="rail-btn folder glass glass-rail" data-tip=${label || t('Folder')} data-tip-pos=${tip} aria-label=${label || t('Folder')} aria-expanded=${folder.open} onClick=${toggle}>
         ${folder.open ? html`<${Icon} name="folder" size=${26} sw=${2} />` : html`<span class="fold-grid">${folder.servers.slice(0, 4).map((id) => html`<span class="fold-mini" key=${id}><${ServerIcon} server=${servers[id]} size=${18} /></span>`)}</span>`}
         ${!folder.open && mentions ? html`<span class="rail-badge">${mentions > 99 ? '99+' : mentions}</span>` : null}
       </button>
@@ -196,6 +202,12 @@ export function ServerRail() {
   const view = useSel((s) => s.route.view);
   const musicOpen = view === 'music'; const playing = useSel((s) => s.music.playing);
   const themesOpen = view === 'themes';
+  const dock = useSel(railDock); const horizontal = dock === 'top' || dock === 'bottom'; const tip = TIP_SIDE[dock]; const bar = useRef(null);
+  useEffect(() => {   // lying along the top or bottom, the wheel scrolls it sideways (a mouse wheel in smooth steps, a trackpad as it comes)
+    const el = bar.current; if (!el || !horizontal) return undefined;
+    const wheel = (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && el.scrollWidth > el.clientWidth) { e.preventDefault(); el.scrollBy({ left: e.deltaY, behavior: Math.abs(e.deltaY) >= 50 ? 'smooth' : 'instant' }); } };
+    el.addEventListener('wheel', wheel, { passive: false }); return () => el.removeEventListener('wheel', wheel);
+  }, [horizontal]);
   const staff = useSel((s) => !!s.me?.founder || !!s.me?.badges?.some((b) => b.id === 'staff' || b.id === 'dev'));   // the Staff page (staff.js) for Orata staff
   const layout = useMemo(() => railLayout(servers, order, folders), [servers, order, folders]);
   const badges = useSel((s) => Object.keys(s.servers).map((id) => { const u = serverUnread(id); return `${id}:${u.unread ? 1 : 0}:${u.mentions}`; }).join('|'));
@@ -205,7 +217,7 @@ export function ServerRail() {
 
   // drag & drop: the middle of a server lets you drop on it (→ folder), the top / bottom edge reorders
   const zoneFor = (e, target) => {
-    const r = e.currentTarget.getBoundingClientRect(); const y = (e.clientY - r.top) / Math.max(1, r.height);
+    const r = e.currentTarget.getBoundingClientRect(); const y = horizontal ? (e.clientX - r.left) / Math.max(1, r.width) : (e.clientY - r.top) / Math.max(1, r.height);   // (along the bar, whichever way it lies)
     const canMerge = drag?.kind === 'server' && !(target.kind === 'server' && target.folderId);
     if (canMerge && y > 0.27 && y < 0.73) return 'merge';
     return y < 0.5 ? 'before' : 'after';
@@ -227,27 +239,27 @@ export function ServerRail() {
     },
     end() { setDrag(null); setOver(null); },
   };
-  return html`<nav class="rail panel" aria-label="Servers">
+  return html`<nav class=${cx('rail panel', horizontal && 'h', `dock-${dock}`)} ref=${bar} aria-label="Servers">
     <div class=${cx('rail-item', themesOpen && 'active')}>
       <span class="rail-pill"></span>
-      <button type="button" class="rail-btn themes glass glass-rail" data-tip=${t('Discovery')} data-tip-pos="right" aria-label=${t('Discovery')} aria-pressed=${themesOpen} onClick=${() => go('/themes')}><${Icon} name="globe-grid" size=${24} /></button>
+      <button type="button" class="rail-btn themes glass glass-rail" data-tip=${t('Discovery')} data-tip-pos=${tip} aria-label=${t('Discovery')} aria-pressed=${themesOpen} onClick=${() => go('/themes')}><${Icon} name="globe-grid" size=${24} /></button>
     </div>
     <div class=${cx('rail-item', musicOpen && 'active')}>
       <span class="rail-pill"></span>
-      <button type="button" class=${cx('rail-btn music glass glass-rail', playing && 'playing')} data-tip=${t('Music')} data-tip-pos="right" aria-label=${t('Music')} aria-pressed=${musicOpen} onClick=${openMusic}>
+      <button type="button" class=${cx('rail-btn music glass glass-rail', playing && 'playing')} data-tip=${t('Music')} data-tip-pos=${tip} aria-label=${t('Music')} aria-pressed=${musicOpen} onClick=${openMusic}>
         ${playing ? html`<span class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>` : html`<${Icon} name="music" size=${24} />`}</button>
     </div>
+    ${staff ? html`<div class=${cx('rail-item', view === 'staff' && 'active')}><span class="rail-pill"></span><button type="button" class=${cx('rail-btn staff glass glass-rail', view === 'staff' && 'active')} data-tip=${t('Staff tools')} data-tip-pos=${tip} aria-label=${t('Staff tools')} aria-pressed=${view === 'staff'} onClick=${() => go({ view: 'staff', serverId: '@me', channelId: null })}><${Icon} name="shield" size=${22} sw=${2.2} /></button></div>` : null}
     <div class="rail-item ${route === '@me' && ['friends', 'dm'].includes(view) ? 'active' : ''}">
       <span class="rail-pill"></span>
-      <button type="button" class="rail-btn home glass glass-rail" data-tip=${t('Direct Messages')} data-tip-pos="right" aria-label="Home" onClick=${() => go(state.route.view === 'dm' ? '/channels/@me' : (state.settings.lastChannel['@me'] ? `/channels/@me/${state.settings.lastChannel['@me']}` : '/channels/@me'))}><${Logo} size=${30} bg="var(--text)" />
+      <button type="button" class="rail-btn home glass glass-rail" data-tip=${t('Direct Messages')} data-tip-pos=${tip} aria-label="Home" onClick=${() => go(state.route.view === 'dm' ? '/channels/@me' : (state.settings.lastChannel['@me'] ? `/channels/@me/${state.settings.lastChannel['@me']}` : '/channels/@me'))}><${Logo} size=${30} bg="var(--text)" />
         ${dmBadge ? html`<span class="rail-badge">${dmBadge > 99 ? '99+' : dmBadge}</span>` : null}</button>
     </div>
     <div class="rail-sep"></div>
     ${layout.map((it) => (it.kind === 'folder'
       ? html`<${FolderItem} key=${it.id} folder=${it} info=${info} route=${route} dnd=${dnd} />`
       : html`<${ServerButton} key=${it.id} id=${it.id} active=${route === it.id} unread=${info[it.id]?.unread} mentions=${info[it.id]?.mentions || 0} dnd=${dnd} />`))}
-    <div class="rail-item"><button type="button" class="rail-btn add glass glass-rail" data-tip=${t('Add a Server')} data-tip-pos="right" aria-label="Add a server" onClick=${() => openModal('add-server')}><${Icon} name="plus" size=${24} sw=${2.4} /></button></div>
-    ${staff ? html`<div class=${cx('rail-item', view === 'staff' && 'active')}><button type="button" class=${cx('rail-btn staff glass glass-rail', view === 'staff' && 'active')} data-tip=${t('Staff tools')} data-tip-pos="right" aria-label=${t('Staff tools')} onClick=${() => go({ view: 'staff', serverId: '@me', channelId: null })}><${Icon} name="shield" size=${22} sw=${2.2} /></button></div>` : null}
+    <div class="rail-item"><button type="button" class="rail-btn add glass glass-rail" data-tip=${t('Add a Server')} data-tip-pos=${tip} aria-label="Add a server" onClick=${() => openModal('add-server')}><${Icon} name="plus" size=${24} sw=${2.4} /></button></div>
   </nav>`;
 }
 void openSettings; void unreadInfo; void ColorSwatch;

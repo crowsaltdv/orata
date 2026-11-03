@@ -1,5 +1,5 @@
 // Orata — application root: shell layout, routing, hotkeys, document title.
-import { html, useEffect, useState, cx, ls, lsRemove } from '/js/lib.js';
+import { html, useEffect, useState, useMemo, useRef, cx, ls, lsRemove } from '/js/lib.js';
 import { state, set, useSel, go, openModal, closeModal, unreadInfo, getChannel, dmName } from '/js/store.js';
 import { AuthScreen, Splash } from '/js/auth.js';
 import { DesktopPrompt } from '/js/desktop.js';
@@ -11,7 +11,9 @@ import { ServerRail } from '/js/rail.js';
 import { DmSidebar, ChannelSidebar } from '/js/sidebar.js';
 import { UserBar } from '/js/userbar.js';
 import { FriendsView, ActiveNow } from '/js/friends.js';
-import { ChatView, RightPanel } from '/js/chat.js';
+import { ChatView, RightPanel, rightPanelOn } from '/js/chat.js';
+import { gridPlan, PHONE_MAX } from '/js/layout-data.js';
+import { useFlip } from '/js/flip.js';
 import { QuickSwitcher, Lightbox } from '/js/overlays.js';
 import { VoiceChannelView } from '/js/voiceview.js';
 import { StageChannelView } from '/js/stageview.js';
@@ -46,9 +48,17 @@ function MainView() {
   }
 }
 
+/** Which piece of the screen a child of the shell is (for sliding it into place when the layout changes). */
+const blockOf = (el) => ['rail', 'sidebar', 'userbar', 'right', 'main'].find((c) => el.classList?.contains(c));
+
 function Shell() {
   const serverId = useSel((s) => s.route.serverId); const view = useSel((s) => s.route.view);
   const nav = useSel((s) => s.mobileNav);
+  // On a computer the screen is a grid laid out from settings.layout (Settings → Layout, layout-data.js); a phone keeps its drawer.
+  const grid = useSel((s) => s.width > PHONE_MAX); const layout = useSel((s) => s.settings.layout); const panelOn = useSel(rightPanelOn);
+  const plan = useMemo(() => gridPlan(layout, { panel: panelOn }), [layout, panelOn]);
+  const shell = useRef(null);
+  useFlip(shell, grid ? `${plan.areas}|${plan.columns}|${plan.rows}` : '', { off: !grid, idOf: blockOf });
   const behind = useSel((s) => !!s.settingsPage || !!s.serverSettings);
   const totalUnread = useSel((s) => {
     let n = 0; for (const id of Object.keys(s.reads)) n += s.reads[id].mentions || 0; return n;
@@ -78,6 +88,15 @@ function Shell() {
     };
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
   }, []);
+  if (grid) {
+    return html`<div class="shell grid" ref=${shell} data-behind=${behind ? '1' : '0'} data-ub=${plan.alone ? 'alone' : ''} style=${{ gridTemplateColumns: plan.columns, gridTemplateRows: plan.rows, gridTemplateAreas: plan.areas }}>
+      <${ServerRail} />
+      ${serverId === '@me' ? html`<${DmSidebar} />` : html`<${ChannelSidebar} key=${serverId} />`}
+      <${UserBar} />
+      <${MainView} />
+      ${panelOn ? (view === 'friends' ? html`<${ActiveNow} />` : html`<${RightPanel} />`) : null}
+    </div>`;
+  }
   return html`<div class="shell" data-nav=${nav ? 'open' : 'closed'} data-behind=${behind ? '1' : '0'}>
     ${nav ? html`<div class="nav-scrim" onClick=${() => set({ mobileNav: false })}></div>` : null}
     <div class="left-col">

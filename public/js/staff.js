@@ -1,4 +1,4 @@
-// Orata — the Staff page (/staff, the shield under the + in the server rail) for holders of the staff or dev badge, and the "Report to Orata
+// Orata — the Staff page (/staff, the shield between Music and the Orata logo in the server rail) for holders of the staff or dev badge, and the "Report to Orata
 // staff" window everyone has. The server (server/staff.js) decides who may do what; this only shows it.
 import { html, useState, useEffect, relTime, formatFull, cx } from '/js/lib.js';
 import { state, set, useSel, openModal, closeModal, addUsers, rebuildIndex, go, goChannel, toast } from '/js/store.js';
@@ -73,14 +73,14 @@ function StateChip({ u }) { const [label, c] = STATE[u.state] || STATE.active; r
 
 const HOURS = [[1, '1 hour'], [6, '6 hours'], [24, '1 day'], [72, '3 days'], [168, '1 week'], [720, '30 days']];
 /** Asks why (and, for a lock, how long). Resolves { reason, hours } or null. */
-MODALS['staff-action'] = function StaffAction({ id, title, body, confirmLabel, lock, resolve }) {
+MODALS['staff-action'] = function StaffAction({ id, title, body, confirmLabel, lock, reasonLabel, resolve }) {
   const [reason, setReason] = useState(''); const [hours, setHours] = useState(24);
   const done = (v) => { closeModal(id); resolve(v); };
   return html`<${Modal} title=${title} width=${440} onClose=${() => done(null)}
     footer=${html`<${Btn} variant="ghost" onClick=${() => done(null)}>${t('Cancel')}<//><${Btn} variant="danger" disabled=${!reason.trim()} onClick=${() => done({ reason: reason.trim(), hours })}>${confirmLabel}<//>`}>
     <p class="confirm-body">${body}</p>
     ${lock ? html`<${Field} label=${t('How long')}><${Dropdown} value=${hours} options=${HOURS.map(([value, label]) => ({ value, label: t(label) }))} onChange=${setHours} /><//>` : null}
-    <${Field} label=${t('Reason (they see it)')}><textarea class="textarea" rows="3" maxlength="300" value=${reason} onInput=${(e) => setReason(e.target.value)} autofocus></textarea><//>
+    <${Field} label=${reasonLabel || t('Reason (they see it)')}><textarea class="textarea" rows="3" maxlength="300" value=${reason} onInput=${(e) => setReason(e.target.value)} autofocus></textarea><//>
   <//>`;
 };
 /** Lock / unlock / terminate / unterminate (asking why for the first two). Resolves with the updated row. */
@@ -139,14 +139,25 @@ export function leaveGhost(serverId) {
   const servers = { ...state.servers }; delete servers[serverId]; set({ servers }); rebuildIndex(); go({ view: 'staff', serverId: '@me', channelId: null });
 }
 
+/** Terminates a server: asks why, then deletes it for good (the server writes it in the staff log). Resolves true when it is gone. */
+async function terminateServer(s) {
+  const a = await new Promise((resolve) => openModal('staff-action', { title: `${t('Terminate')} ${s.name}`, confirmLabel: t('Terminate server'), reasonLabel: t('Reason (goes in the staff log)'), resolve,
+    body: `${t('The server is deleted for good: its channels, messages and invites go, and its')} ${s.members} ${s.members === 1 ? t('member loses it') : t('members lose it')}. ${t('This can’t be undone.')}` }));
+  if (!a || !await act(api.post(`/staff/servers/${s.id}/terminate`, { reason: a.reason }), { success: `${s.name} ${t('was terminated')}` })) return false;
+  if (state.servers[s.id]?.ghost) leaveGhost(s.id);   // staff reading it right now are let out
+  return true;
+}
+
 function Servers() {
   const [q, setQ] = useState(''); const [list, setList] = useState(null);
   useEffect(() => { const id = setTimeout(() => api.get(`/staff/servers?q=${encodeURIComponent(q)}`).then(setList, () => setList([])), 250); return () => clearTimeout(id); }, [q]);
+  const terminate = async (s) => { if (await terminateServer(s)) setList((l) => l.filter((x) => x.id !== s.id)); };
   const row = (s) => html`<div class="mem-row staff-row" key=${s.id}><${ServerIcon} server=${s} size=${36} />
     <div class="mem-name"><b>${s.name}${s.tag ? html`<${ServerTag} tag=${s.tag} />` : null}</b><small>${s.members} ${t('members')} · ${t('owner')} @${s.owner?.username || '?'} · ${t('made')} ${relTime(s.createdAt)}${s.joinMode === 'apply' ? ` · ${t('apply to join')}` : ''}</small>
       ${s.score ? html`<span class="staff-why">${[s.reports && [`${s.reports} ${s.reports === 1 ? t('report') : t('reports')}`, 'report'], s.flagged && [`${s.flagged} ${s.flagged === 1 ? t('flagged message') : t('flagged messages')}`], s.terminated && [`${s.terminated} ${s.terminated === 1 ? t('terminated member') : t('terminated members')}`, 'report'], s.scamName && [t('Scam-looking name')]]
         .filter(Boolean).map(([w, c]) => html`<span class=${cx('flag-kind', c)} key=${w}>${w}</span>`)}</span>` : null}</div>
-    <span class="staff-acts">${s.canGhost ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(s.id)}>${t('Ghost in')}<//>` : null}</span></div>`;
+    <span class="staff-acts">${s.canGhost ? html`<${Btn} size="sm" icon="eye" onClick=${() => ghostIn(s.id)}>${t('Ghost in')}<//>` : null}
+      ${s.protected ? null : html`<${Btn} size="sm" variant="danger" icon="ban" onClick=${() => terminate(s)}>${t('Terminate')}<//>`}</span></div>`;
   const fishy = (list || []).filter((s) => s.canGhost); const rest = (list || []).filter((s) => !s.canGhost);
   return html`<div class="staff-bar"><div class="input-wrap staff-search"><${Icon} name="search" size=${18} class="in-icon" /><input class="input" placeholder=${t('Search servers by name or ID…')} value=${q} onInput=${(e) => setQ(e.target.value)} /></div></div>
     <p class="text-muted">${t('You can only ghost into a server that was reported, has flagged messages or a scam-looking name. Nobody there sees you, you can’t post or react, and it goes in the staff log.')}</p>
@@ -213,7 +224,7 @@ function Flags() {
           <${Btn} size="sm" icon="lock" onClick=${() => userAct(f.userId, 'lock')}>${t('Lock account')}<//>
           <${Btn} size="sm" variant="danger" icon="ban" onClick=${() => userAct(f.userId, 'terminate')}>${t('Terminate')}<//>
           <${Btn} size="sm" variant="ghost" onClick=${() => handle(f, 'dismiss')}>${t('Dismiss')}<//>`
-          : html`<small class="text-muted">${f.status === 'done' ? t('Message deleted') : t('Dismissed')}${f.handledBy && users[f.handledBy] ? ` ${t('by')} ${users[f.handledBy].displayName}` : ''}</small><${Btn} size="sm" variant="ghost" onClick=${() => handle(f, 'reopen')}>${t('Reopen')}<//>`}</div>
+          : html`<small class="text-muted">${f.status === 'done' ? (f.kind === 'server' ? t('Server terminated') : t('Message deleted')) : t('Dismissed')}${f.handledBy && users[f.handledBy] ? ` ${t('by')} ${users[f.handledBy].displayName}` : ''}</small><${Btn} size="sm" variant="ghost" onClick=${() => handle(f, 'reopen')}>${t('Reopen')}<//>`}</div>
       </div>`; })}</div>`}`;
 }
 
@@ -263,14 +274,14 @@ function BulkBadges() {
   </div>`;
 }
 
-const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into', view_dm: 'read a flagged DM of', unhide_flag: 'said a report wasn’t a joke, about', unpublish_theme: 'removed a theme from Discovery by', approve_theme: 'put a theme on Discovery by', reject_theme: 'turned away a theme by', bulk_badge_give: 'gave a badge in bulk:', bulk_badge_take: 'took a badge away in bulk:' };
+const ACTION = { terminate: 'terminated', unterminate: 'undid the termination of', terminate_server: 'terminated the server', lock: 'locked', unlock: 'unlocked', delete_message: 'deleted a flagged message by', dismiss_flag: 'dismissed a flag about', ghost: 'ghosted into', view_dm: 'read a flagged DM of', unhide_flag: 'said a report wasn’t a joke, about', unpublish_theme: 'removed a theme from Discovery by', approve_theme: 'put a theme on Discovery by', reject_theme: 'turned away a theme by', bulk_badge_give: 'gave a badge in bulk:', bulk_badge_take: 'took a badge away in bulk:' };
 function Log() {
   const [d, setD] = useState(null);
   useEffect(() => { api.get('/staff/log').then((r) => { addUsers(r.users); setD(r); }, () => setD({ log: [] })); }, []);
   const users = useSel((s) => s.users);
   if (!d) return html`<div class="pk-center"><${Spinner} /></div>`;
   if (!d.log.length) return html`<${Empty} icon="list" title=${t('No staff actions yet')} />`;
-  return html`<div class="al-list">${d.log.map((e) => html`<div class="al-row" key=${e.id}><span class=${cx('al-ic', ['terminate', 'lock', 'delete_message'].includes(e.action) && 'bad')}><${Icon} name=${e.action.includes('lock') ? 'lock' : e.action.includes('terminate') ? 'ban' : e.action === 'ghost' ? 'eye' : e.action === 'view_dm' ? 'message' : e.action.startsWith('bulk_badge') ? 'award' : 'flag'} size=${16} /></span>
-    <div class="al-text"><div><b>${users[e.by]?.displayName || '?'}</b> ${t(ACTION[e.action] || e.action)} <b>${e.action === 'ghost' ? e.serverName : e.action.startsWith('bulk_badge') ? `${e.badge} · ${e.count} ${t('people')}` : users[e.target]?.displayName || '?'}</b>${e.hours ? ` ${t('for')} ${HOURS.find(([h]) => h === e.hours)?.[1] || `${e.hours}h`}` : ''}</div>${e.reason ? html`<small>${t('Reason')}: ${e.reason}</small>` : null}</div>
+  return html`<div class="al-list">${d.log.map((e) => html`<div class="al-row" key=${e.id}><span class=${cx('al-ic', ['terminate', 'terminate_server', 'lock', 'delete_message'].includes(e.action) && 'bad')}><${Icon} name=${e.action.includes('lock') ? 'lock' : e.action.includes('terminate') ? 'ban' : e.action === 'ghost' ? 'eye' : e.action === 'view_dm' ? 'message' : e.action.startsWith('bulk_badge') ? 'award' : 'flag'} size=${16} /></span>
+    <div class="al-text"><div><b>${users[e.by]?.displayName || '?'}</b> ${t(ACTION[e.action] || e.action)} <b>${e.action === 'ghost' || e.action === 'terminate_server' ? e.serverName : e.action.startsWith('bulk_badge') ? `${e.badge} · ${e.count} ${t('people')}` : users[e.target]?.displayName || '?'}</b>${e.hours ? ` ${t('for')} ${HOURS.find(([h]) => h === e.hours)?.[1] || `${e.hours}h`}` : ''}</div>${e.reason ? html`<small>${t('Reason')}: ${e.reason}</small>` : null}</div>
     <time title=${formatFull(e.at)}>${relTime(e.at)}</time></div>`)}</div>`;
 }

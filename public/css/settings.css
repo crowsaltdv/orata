@@ -127,3 +127,36 @@
 @media (max-width: 900px) { .roles-page { grid-template-columns: 1fr; } .so-top { flex-direction: column; } }
 
 .note-chip.ok { background: rgb(59 165 93 / .16); color: #8be0ad; }
+
+/* ------------------------------------------------ Settings → Layout (settings-layout.js): a picture of the screen to drag pieces around in */
+.lay-stage { position: relative; padding: 32px; border-radius: 18px; background: rgb(var(--surface-rgb) / .05); border: 1px solid var(--border); }
+.lay-screen { position: relative; display: grid; gap: 6px; height: 310px; }
+.lay-blk { position: relative; display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; min-height: 0; padding: 4px; border-radius: 10px; overflow: hidden; user-select: none; text-align: center; cursor: grab;
+  font-size: 12px; font-weight: 700; color: var(--text); background: rgb(var(--surface-rgb) / .14); border: 1.5px solid var(--border); transition: background .15s, border-color .15s, box-shadow .15s, opacity .15s; }
+.lay-blk:hover { border-color: rgb(var(--accent-rgb) / .6); }
+.lay-blk.v { flex-direction: column; } .lay-blk.v .lay-name { writing-mode: horizontal-tb; }
+.lay-blk.b-rail.v .lay-name { display: none; }   /* a narrow column: the icon only (the name is its tooltip) */
+.lay-blk.b-main { cursor: default; flex-direction: column; color: var(--text-2); background: rgb(var(--surface-rgb) / .06); }
+.lay-blk.b-main:hover { border-color: var(--border); }
+.lay-blk.b-rail { background: rgb(var(--accent-rgb) / .22); } .lay-blk.b-userbar { background: rgb(59 165 93 / .2); } .lay-blk.b-panel { background: rgb(236 72 153 / .18); }
+.lay-blk.dragging { opacity: .35; }
+.lay-blk.hot { border-color: rgb(var(--accent-rgb)); background: rgb(var(--accent-rgb) / .3); }
+.lay-blk.no { border-color: #ef4444; cursor: not-allowed; }
+.lay-blk.before::before, .lay-blk.after::after { content: ""; position: absolute; top: 3px; bottom: 3px; width: 4px; border-radius: 3px; background: var(--accent-grad); box-shadow: 0 0 10px rgb(var(--accent-rgb) / .8); }
+.lay-blk.before::before { left: 2px; } .lay-blk.after::after { right: 2px; }
+.lay-edge { position: absolute; display: flex; align-items: center; justify-content: center; gap: 4px; border-radius: 9px; border: 1.5px dashed transparent; color: var(--text-3);
+  font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: 0; pointer-events: none; transition: opacity .15s, background .15s, border-color .15s, color .15s; }
+.lay-stage.dragging .lay-edge { opacity: 1; pointer-events: auto; }
+.lay-edge.ok { border-color: rgb(var(--accent-rgb) / .55); color: var(--text-2); } .lay-edge.no { opacity: .3; }
+.lay-edge.hot { border-style: solid; border-color: rgb(var(--accent-rgb)); background: rgb(var(--accent-rgb) / .28); color: var(--text); }
+.lay-edge.top { left: 32px; right: 32px; top: 4px; height: 24px; } .lay-edge.bottom { left: 32px; right: 32px; bottom: 4px; height: 24px; }
+.lay-edge.left { top: 32px; bottom: 32px; left: 4px; width: 24px; flex-direction: column; } .lay-edge.right { top: 32px; bottom: 32px; right: 4px; width: 24px; flex-direction: column; }
+.lay-edge.left span, .lay-edge.right span { display: none; }
+.lay-rows { display: flex; flex-direction: column; gap: 8px; }
+.lay-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 14px; background: var(--input-bg); flex-wrap: wrap; }
+.lay-ic { width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: rgb(var(--surface-rgb) / .1); flex: none; }
+.lay-title { flex: 1; min-width: 150px; } .lay-title b { font-size: 14.5px; }
+.lay-btns { display: inline-flex; gap: 2px; }
+.lay-btns .icon-btn:disabled { opacity: .35; pointer-events: none; }
+.lay-note { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; font-size: 13px; color: var(--text-3); } .lay-note .icon { flex: none; margin-top: 2px; }
+@media (max-width: 640px) { .lay-screen { height: 240px; } .lay-stage { padding: 30px 26px; } }

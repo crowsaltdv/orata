@@ -1,4 +1,4 @@
-// Orata — tools for Orata's own staff (the Staff page under the + in the server rail), for holders of the staff or dev badge (only the two
+// Orata — tools for Orata's own staff (the Staff page, the shield between Music and the Orata logo in the server rail), for holders of the staff or dev badge (only the two
 // founders hand those out, badges.js). Numbers about the whole of Orata; finding accounts; locking one for a while or terminating it for good
 // (both undoable); and flags: messages and accounts Orata itself finds suspicious (spam bursts, mass pings, invite spam, scam links, many
 // accounts on one browser, a day-old account messaging lots of people) plus what people report to staff. Server rules (NSFW channels and the
@@ -6,7 +6,8 @@
 // staff log); Orata checks DMs for scam links, and for the "messaging lots of people" check only who and how many are counted, never what.
 // Every staff action goes in the staff log.
 // Servers: every server, fishy ones first (reported, flagged messages, terminated members, a scam-looking name), and "ghosting" into a reported or
-// flagged one to read it without joining (core.js ghosts: read only and invisible; each time goes in the staff log). DMs: every DM and group DM
+// flagged one to read it without joining (core.js ghosts: read only and invisible; each time goes in the staff log), and terminating one: deleting it
+// for good, with a reason, except a founder's. DMs: every DM and group DM
 // with a flagged or reported message, to read around that message.
 import { db, save, newId, emitTo, audienceOf, effectiveStatus, publicUser, messageView, deviceHashesOf, canView, closeConns, serverView, ghosts, bad, forbidden, notFound } from './core.js';
 import { hooks, messagesDeleted } from './messages.js';
@@ -100,7 +101,7 @@ hooks.onMessage.push((ch, m) => {
   if (SCAM.test(m.content || '')) flagMessage(m, ch, 'scam', 'looks like a scam or IP-grabber link');
 });
 
-export function mountStaff(r, { h, limit, removeMember }) {
+export function mountStaff(r, { h, limit, removeMember, deleteServer }) {
   // anyone: report a message, an account or a server to Orata staff
   r.post('/reports', limit('report', 10, 600_000, (req) => req.user.id), h(async (req, res) => {
     const b = req.body || {}; const reason = Object.hasOwn(REASONS, String(b.reason)) ? String(b.reason) : null; if (!reason) throw bad('Pick which guideline it breaks');
@@ -210,15 +211,35 @@ export function mountStaff(r, { h, limit, removeMember }) {
     const scamName = SCAM.test(`${s.name} ${s.description || ''}`);
     return { reports, flagged, terminated, scamName, canGhost: reports + flagged > 0 || scamName, score: reports * 3 + flagged + terminated * 2 + (scamName ? 3 : 0) };
   };
+  /** Can `who` terminate `s`? Not a founder's server, and another staff member's only for a founder (the same as for their accounts). Says why not, or null. */
+  const noTerminate = (s, who) => {
+    const owner = db.users[s.ownerId];
+    if (owner && isFounder(owner)) return 'The founders’ servers can’t be terminated';
+    if (owner && isStaff(owner) && !isFounder(who)) return 'Only oratedev and Orate_dev can terminate a staff member’s server';
+    return null;
+  };
   /** Every server (or those matching ?q), fishiest first. */
   r.get('/staff/servers', h(async (req, res) => {
     staff(req); const q = String(req.query.q || '').trim().toLowerCase();
     const open = (db.flags || []).filter((f) => f.status === 'open' && !f.hidden && f.serverId);
     const list = Object.values(db.servers).filter((s) => !q || s.id === q || s.name.toLowerCase().includes(q)).map((s) => ({
       id: s.id, name: s.name, icon: s.icon || null, tag: s.tag || null, joinMode: s.joinMode || 'invite', createdAt: s.createdAt,
-      members: Object.keys(s.members).filter((id) => !db.users[id]?.bot).length, owner: publicUser(db.users[s.ownerId]), ...fishy(s, open),
+      members: Object.keys(s.members).filter((id) => !db.users[id]?.bot).length, owner: publicUser(db.users[s.ownerId]), protected: !!noTerminate(s, req.user), ...fishy(s, open),
     }));
     res.json(list.sort((a, b) => b.score - a.score || b.members - a.members).slice(0, 100));
+  }));
+  /** Terminates a server: it is deleted for good (its channels, messages and invites, and everyone in it loses it), the same as when its owner deletes it. Staff say why,
+   *  it goes in the staff log with the server's name, staff ghosting in it are let out, and the open flags and reports about it are closed. */
+  r.post('/staff/servers/:id/terminate', h(async (req, res) => {
+    staff(req); const s = db.servers[String(req.params.id)]; if (!s) throw notFound('Unknown server');
+    const reason = String(req.body?.reason || '').trim().slice(0, 300); if (!reason) throw bad('Say why');
+    const no = noTerminate(s, req.user); if (no) throw forbidden(no);
+    const members = Object.keys(s.members).filter((id) => !db.users[id]?.bot).length;
+    for (const [uid, g] of ghosts) if (g.serverId === s.id) ghosts.delete(uid);
+    for (const f of db.flags || []) if (f.status === 'open' && f.serverId === s.id) Object.assign(f, { status: 'done', handledBy: req.user.id, handledAt: Date.now() });
+    log(req.user.id, 'terminate_server', s.ownerId, reason, { server: s.id, serverName: s.name, members });
+    deleteServer(s);   // (the same as the owner's Delete Server; it saves)
+    res.json({ ok: true });
   }));
   r.post('/staff/servers/:id/ghost', h(async (req, res) => {
     staff(req); const s = db.servers[String(req.params.id)]; if (!s) throw notFound('Unknown server');

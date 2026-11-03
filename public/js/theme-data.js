@@ -3,6 +3,7 @@
 // Like profile-data.js, no browser or server APIs in here on purpose.
 import { DEFAULT_SETTINGS, MESH_WALLPAPERS, PHOTO_WALLPAPERS, deepMerge } from './defaults.js';
 import { sanitizeProfileStyle } from './profile-data.js';
+import { cleanLayout } from './layout-data.js';
 
 export const THEME_KINDS = ['profile', 'site'];
 export const LIBRARY_LIMIT = 25;   // per kind: 25 profile themes + 25 site themes = 50 in all
@@ -39,7 +40,9 @@ function checkValue(path, v, def) {
 export const CARD_SECTIONS = ['theme', 'bg', 'rain', 'glass', 'fonts', 'motion', 'chat'];
 /** A site theme: every appearance setting there is. Not saved in it: your saved wallpapers (bg.library), Reduce motion and the accessibility switches (yours alone),
  *  and the chat settings that are about what is fetched or shown rather than how it looks (link previews, GIF autoplay, 24-hour time …). */
-export const SITE_SECTIONS = ['theme', 'bg', 'rain', 'glass', 'fx', 'fonts', 'motion', 'chat'];
+export const SITE_SECTIONS = ['theme', 'bg', 'rain', 'glass', 'fx', 'layout', 'fonts', 'motion', 'chat'];
+/** Sections a site theme may leave out (a theme saved before they existed): applying it then leaves yours as it is, instead of putting Orata's defaults there. */
+const OPTIONAL_SECTIONS = new Set(['layout']);
 export const SITE_ONLY = { motion: ['speed', 'parallaxHover'], chat: ['compact', 'showAvatars', 'spacing', 'jumbo'] };
 const NEVER = new Set(['bg.library', 'motion.reduce', 'fonts.custom']);
 
@@ -48,6 +51,7 @@ export function checkLook(data, { sections = CARD_SECTIONS, only = {} } = {}) {
   const out = {};
   for (const sec of sections) {
     const src = data?.[sec]; const def = DEFAULT_SETTINGS[sec]; if (!src || typeof src !== 'object') continue;
+    if (sec === 'layout') { const l = cleanLayout(src); if (l) out.layout = l; continue; }   // (the edges pieces sit on, and their order: layout-data.js)
     const o = {};
     for (const [k, v] of Object.entries(src)) {
       if (!Object.hasOwn(def, k) || NEVER.has(`${sec}.${k}`) || (only[sec] && !only[sec].includes(k))) continue;
@@ -68,6 +72,7 @@ export function checkLook(data, { sections = CARD_SECTIONS, only = {} } = {}) {
 function siteDefaults() {
   const out = {};
   for (const sec of SITE_SECTIONS) {
+    if (OPTIONAL_SECTIONS.has(sec)) continue;
     out[sec] = {};
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS[sec])) if (!NEVER.has(`${sec}.${k}`) && (!SITE_ONLY[sec] || SITE_ONLY[sec].includes(k))) out[sec][k] = structuredClone(v);
   }

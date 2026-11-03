@@ -92,6 +92,18 @@ async function main() {
   await say(B, 'one more'); await sleep(150);
   ok(/<@\d+> reached \*\*level 1\*\*! You got the \*\*Helper\*\* role/.test((await last(A.token, text.id)).content) && (await view()).members.find((m) => m.id === B.user.id)?.roles.includes(helper.id), 'levelling up is announced and gives the role');
   r = await cmd(D, 'leaderboard'); ok(r.status === 200 && /🥇 Bob: level 1/.test((await last(A.token, text.id)).content), '/leaderboard shows the top of the server');
+  r = await cmd(B, 'xp', `<@${D.user.id}> 50`); ok(r.status === 403, 'only people who can manage the server give XP');
+  r = await cmd(A, 'xp', `<@${D.user.id}> 50`); ok(r.status === 200 && /gave <@\d+> \*\*50 XP\*\*! They now have \*\*50 XP\*\* \(level 0\)/.test((await last(A.token, text.id)).content), '/xp gives someone XP');
+  r = await cmd(D, 'rank'); ok(/level \*\*0\*\* with \*\*50 XP\*\*/.test(r.body.ephemeral), '… and /rank shows it');
+  r = await cmd(A, 'xp', `<@${D.user.id}> 50`); await sleep(150);
+  ok(/reached \*\*level 1\*\*! You got the \*\*Helper\*\* role/.test((await msgs(A.token, text.id)).at(-1).content) && (await view()).members.find((m) => m.id === D.user.id)?.roles.includes(helper.id), 'XP that reaches a level is announced and gives the role');
+  r = await cmd(A, 'xp', `<@${D.user.id}> 2000`); await sleep(150); ok(/reached \*\*level 4\*\*!/.test((await msgs(A.token, text.id)).at(-1).content), 'XP can jump over several levels');
+  r = await cmd(A, 'xp', `<@${D.user.id}> 0`); ok(r.status === 400, '/xp wants an amount of at least 1');
+  r = await cmd(A, 'xp', `<@${D.user.id}> lots`); ok(r.status === 400, '… that is a number');
+  r = await cmd(A, 'xp', `<@${D.user.id}> 100001`); ok(r.status === 400, '… and not more than 100,000 at a time');
+  r = await cmd(A, 'xp', '50'); ok(r.status === 400, '… for a member');
+  r = await cmd(A, 'xp', `<@${S.orbitId}> 50`); ok(r.status === 400 && /Bots don’t earn XP/.test(r.body.error), '… but not for a bot');
+  await stopServer(); startServer(); await ready();   // (commands are limited to 12 per 10 s each: a fresh start for the sections below)
 
   console.log('\nGiveaways');
   r = await cmd(B, 'giveaway', '1h 1 Cookie'); ok(r.status === 403, 'only people who can manage messages start giveaways');

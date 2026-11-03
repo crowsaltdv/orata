@@ -23,7 +23,11 @@ const NOUN = { profile: 'profile theme', site: 'site theme' };
 export const currentLook = (kind) => (kind === 'site' ? sanitizeSiteLook(siteLookOf(state.settings)) : profileLookOf(state.me));
 const sameLook = (a, b) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
 export const isWorn = (th) => {
-  if (th.kind === 'site') return sameLook(sanitizeSiteLook(th.data), currentLook('site'));
+  if (th.kind === 'site') {
+    const mine = sanitizeSiteLook(th.data); const now = currentLook('site');
+    if (mine && now && !mine.layout) delete now.layout;   // (a theme saved before layouts existed doesn't ask about yours)
+    return sameLook(mine, now);
+  }
   const mine = sanitizeProfileTheme(th.data); const now = currentLook('profile');
   if (mine && now && !mine.banner) delete now.banner;   // (a theme without a banner doesn't ask about yours)
   return sameLook(mine, now);

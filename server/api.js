@@ -1188,7 +1188,7 @@ export function createApi() {
     memberLeft(s, uid);
     for (const set of [...(conns.get(uid) || [])]) if (set.voice && db.channels[set.voice]?.serverId === s.id) set.leaveVoice?.('kicked');
   };
-  mountStaff(r, { h, limit, removeMember });   // reports, and the Staff page (server/staff.js)
+  mountStaff(r, { h, limit, removeMember, deleteServer });   // reports, and the Staff page (server/staff.js)
   // kick, ban and timeout are shared by their routes and Orbit's /kick, /ban and /timeout (server/orbit.js): req.user is the moderator
   function kickMember(req, s, uid, reason = '') {
     need(s, req.user.id, 'KICK_MEMBERS');

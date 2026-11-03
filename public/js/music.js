@@ -66,10 +66,12 @@ function yt() {
       fail(blocked ? t('This song can’t be played here.') : t('Couldn’t play this track.'));
       if (blocked) setTimeout(() => id === reqId && next(true), 1500);   // a song that can't be played is skipped; other problems are not retried down the list
     },
-  });
+  }, { insist: true });   // a click on a song plays it even when the browser ignores the player's autoplay: no second click
   player.volume(state.music.muted ? 0 : state.music.volume);
   return player;
 }
+/** Loads the player (with no song yet) so the first song starts as soon as it is clicked, not after the player has loaded. */
+const warm = () => { if (state.musicOk) yt().warm(); };
 function fail(message, ms = 4000) {
   clearTimeout(watchdog);
   setMusic({ playing: false, loading: false, error: message }); clearListening();
@@ -90,6 +92,7 @@ async function libraryTracks() {
 }
 // The queue is the order songs play in. `orig` is the list it came from, in its own order, so turning shuffle off puts it back.
 export const music = {
+  warm,
   play(track, list) {
     const m = state.music; const orig = list || [track];
     const queue = m.shuffle === 'off' ? orig : shuffleOrder(m.shuffle === 'library' && m.library?.length ? uniq([...orig, ...m.library]) : orig, track);
@@ -380,7 +383,7 @@ export function MusicPage() {
   const ok = useSel((s) => s.musicOk); const why = useSel((s) => s.musicWhy); const query = useSel((s) => s.music.query); const queueOpen = useSel((s) => s.music.showQueue && !!s.music.track);
   const view = useSel((s) => s.route.musicView); const vid = useSel((s) => s.route.musicId);
   const [q, setQ] = useState(query); const timer = useRef(null); const scroller = useRef(null);
-  useEffect(() => { if (ok !== false) { music.loadGenres(); music.openChart(state.music.category || 'top'); } }, [ok]);
+  useEffect(() => { if (ok !== false) { music.loadGenres(); music.openChart(state.music.category || 'top'); } if (ok) music.warm(); }, [ok]);
   useEffect(() => { if (scroller.current) scroller.current.scrollTop = 0; }, [view, vid]);
   const typing = (v) => { setQ(v); clearTimeout(timer.current); timer.current = setTimeout(() => music.search(v), 450); };
   const searching = !!query.trim(); const sub = ok !== false && !!view && !!vid;

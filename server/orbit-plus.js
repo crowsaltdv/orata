@@ -12,6 +12,8 @@ const hasOrbit = (s) => !!(s?.orbitId && s.members[s.orbitId] && db.users[s.orbi
 const humans = (s) => Object.keys(s.members).filter((id) => !db.users[id]?.bot);
 const levelOf = (xp) => Math.floor(Math.sqrt(xp / 100));   // level 1 at 100 XP, 2 at 400, 5 at 2,500, 10 at 10,000
 const XP_GAP = 60_000;   // one rewarded message a minute, so spamming earns nothing
+const MAX_GIVE_XP = 100_000;   // what one /xp gives at most
+const MAX_XP = 10_000_000;   // what anybody can have in all
 
 /** Orbit adds its own reaction (✅, 🎉, 👍…) to a message. */
 function orbitReact(ch, m, emoji) {
@@ -109,6 +111,15 @@ function updateCount(s) {
 }
 const shuffle = (list) => { const a = [...list]; for (let i = a.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
+/** `uid` went from level `before` to `after`: hands out the roles of the levels they passed and announces the new one (in the level-up channel, else `ch`). */
+function announceLevel(s, ch, uid, before, after) {
+  if (after <= before) return;
+  const L = s.orbit.levels; const roles = [];
+  for (let lvl = before + 1; lvl <= after; lvl++) { const rid = L.rewards?.[lvl]; const role = rid && giveRole(s, uid, rid); if (role) roles.push(`**${role.name}**`); }
+  const where = (L.channelId && db.channels[L.channelId]?.serverId === s.id && db.channels[L.channelId]) || ch;
+  postMessage(where, s.orbitId, { content: `🎉 <@${uid}> reached **level ${after}**!${roles.length ? ` You got the ${roles.join(' and ')} role${roles.length > 1 ? 's' : ''}.` : ''}` });
+}
+
 /* ---------------------------------------------------------------- messages: counting and levels */
 hooks.onMessage.push((ch, m) => {
   const s = ch.serverId && db.servers[ch.serverId];
@@ -127,10 +138,7 @@ hooks.onMessage.push((ch, m) => {
     const me = ((s.orbit.xp ||= {})[m.authorId] ||= { xp: 0, at: 0 });
     if (Date.now() - me.at < XP_GAP) return;
     const before = levelOf(me.xp); me.xp += 15 + crypto.randomInt(11); me.at = Date.now(); save();
-    const after = levelOf(me.xp); if (after <= before) return;
-    const rid = L.rewards?.[after]; const role = rid && giveRole(s, m.authorId, rid);
-    const where = (L.channelId && db.channels[L.channelId]?.serverId === s.id && db.channels[L.channelId]) || ch;
-    postMessage(where, s.orbitId, { content: `🎉 <@${m.authorId}> reached **level ${after}**!${role ? ` You got the **${role.name}** role.` : ''}` });
+    announceLevel(s, ch, m.authorId, before, levelOf(me.xp));
   }
 });
 
@@ -237,6 +245,17 @@ export function plusCommand(name, x) {
       const top = Object.entries(o.xp || {}).filter(([id]) => s.members[id] && o.xp[id].xp > 0).sort((a, b) => b[1].xp - a[1].xp).slice(0, 10);
       if (!top.length) return only(`Nobody has any XP yet.${o.levels?.on ? '' : ' Turn levels on with /levels on.'}`);
       return post(`🏆 **${s.name} leaderboard**\n${top.map(([id, v], i) => `${['🥇', '🥈', '🥉'][i] || `**${i + 1}.**`} ${nameIn(id)}: level ${levelOf(v.xp)} · ${v.xp} XP`).join('\n')}`);
+    }
+    case 'xp': {   // /xp @member 100: XP from the server's admins (kept even when levels are off; level-ups and their roles come only while they are on)
+      const uid = x.member(); const amount = Number(rest[0]);
+      if (!Number.isInteger(amount) || amount < 1 || amount > MAX_GIVE_XP) throw bad(`Say how much, from 1 to ${MAX_GIVE_XP.toLocaleString('en-US')}: /xp @member 100`);
+      if (db.users[uid]?.bot) throw bad('Bots don’t earn XP');
+      const e = ((o.xp ||= {})[uid] ||= { xp: 0, at: 0 }); const before = levelOf(e.xp);
+      if (e.xp + amount > MAX_XP) throw bad(`${nameIn(uid)} can’t have more than ${MAX_XP.toLocaleString('en-US')} XP`);
+      e.xp += amount; save();
+      const out = post(`✨ ${who} gave <@${uid}> **${amount.toLocaleString('en-US')} XP**! They now have **${e.xp.toLocaleString('en-US')} XP** (level ${levelOf(e.xp)}).${o.levels?.on ? '' : ' (Levels are off in this server, so there are no level-ups yet.)'}`);
+      if (o.levels?.on) announceLevel(s, ch, uid, before, levelOf(e.xp));
+      return out;
     }
     case 'giveaway': {
       if (first.toLowerCase() === 'end') {
