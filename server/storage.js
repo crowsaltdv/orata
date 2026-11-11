@@ -162,6 +162,9 @@ export class PgStore {
     if (r.rows.length) this.filesUsed = Math.max(0, this.filesUsed - Number(r.rows[0].size));
   }
   async listFiles() { return (await this.q('SELECT name, size FROM orate_files ORDER BY name')).rows.map((r) => ({ name: r.name, size: Number(r.size) })); }
+  /** Empties the table of uploaded files (after they were all moved to R2: db-tool.js, `npm run db:files-to-r2 -- --purge`). TRUNCATE gives the space back at once, which DELETE
+   *  doesn't (the dead rows stay until a vacuum, and a database that is full can't always run one). */
+  async purgeFiles() { await this.q('TRUNCATE orate_files'); this.filesUsed = 0; }
 
   /** Copies every file of a local uploads folder into the database (skipping ones already there). Resolves { added, skipped, bytes }. */
   async importDir(dir, log = () => {}) {

@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import sharp from 'sharp';
-import { db, save, newId, cmpId, publicUser, ENV, UPLOAD_DIR, pg, ApiError, bad, forbidden, notFound, conns, emitTo, storeUpload, restoreUpload, removeUpload } from './core.js';
+import { db, save, newId, cmpId, publicUser, ENV, UPLOAD_DIR, remoteFiles, listUploads, ApiError, bad, forbidden, notFound, conns, emitTo, storeUpload, restoreUpload, removeUpload } from './core.js';
 import { isSafeFileName } from './storage.js';
 import { isStaff } from './names.js';
 import { hasProfanity } from './profanity.js';
@@ -104,7 +104,7 @@ function inUse() {
 }
 /** Removes theme files nothing uses (and that are older than a day, so a picture just saved is never caught between two requests). Resolves how many went. */
 export async function sweepThemeFiles(graceMs = Number(ENV.THEME_FILE_GRACE_MS ?? 24 * 3600_000)) {
-  const names = (pg ? (await pg.listFiles()).map((f) => f.name) : fs.readdirSync(UPLOAD_DIR)).filter((n) => FILE.test(n));
+  const names = (remoteFiles ? (await listUploads()).map((f) => f.name) : fs.readdirSync(UPLOAD_DIR)).filter((n) => FILE.test(n));
   const keep = inUse(); const live = new Set(names); let n = 0;
   for (const name of names) {
     if (keep.has(name) || Date.now() - Number(FILE.exec(name)[1]) / 1000 < graceMs) continue;

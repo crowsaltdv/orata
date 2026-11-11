@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import sharp from 'sharp';
-import { ROOT, UPLOAD_DIR, ENV, ensureBot, db, pg, restoreUpload, storageSummary, BUILD } from './core.js';
+import { ROOT, UPLOAD_DIR, ENV, ensureBot, db, remoteFiles, restoreUpload, storageSummary, BUILD } from './core.js';
 import { discordOn } from './discord.js';
 import { createApi, turnConfigured, desktopDownload } from './api.js';
 import { attachGateway } from './gateway.js';
@@ -48,11 +48,11 @@ app.get(['/download', '/download/:version'], ...desktopDownload);   // orata.fun
 
 // Uploaded files: only well-known media renders inline; everything else downloads. CSP sandbox keeps stray HTML inert.
 const INLINE = /\.(png|jpe?g|gif|webp|avif|bmp|mp4|webm|mov|m4v|mp3|ogg|oga|wav|m4a|flac|opus|pdf|txt|woff2?|ttf|otf)$/i;   // (fonts: as fonts, for uploaded ones in Settings → Fonts and themes)
-// with Postgres the disk is only a cache: fetch a file back from the database if a restart wiped it
+// with Postgres or R2 the disk is only a cache: fetch a file back from there if a restart wiped it
 app.use('/uploads', (req, res, next) => {
-  if (!pg) return next();
+  if (!remoteFiles) return next();
   let name; try { name = decodeURIComponent(req.path.replace(/^\//, '')); } catch { return next(); }
-  restoreUpload(name).then(() => next(), (e) => { console.error('[orata] could not load an upload from the database:', e.message); next(); });
+  restoreUpload(name).then(() => next(), (e) => { console.error('[orata] could not load an upload from storage:', e.message); next(); });
 });
 app.use('/uploads', express.static(UPLOAD_DIR, {
   index: false, dotfiles: 'deny', maxAge: '30d', immutable: true,
@@ -71,7 +71,7 @@ app.get('/thumbs/:w/:name', async (req, res) => {
   const out = path.join(THUMBS, `${w}-${name}.a.webp`);   // .a: animated GIFs keep their frames (older copies were stills)
   try {
     if (!fs.existsSync(out)) {
-      if (pg) await restoreUpload(name);   // with Postgres the disk is only a cache
+      if (remoteFiles) await restoreUpload(name);   // with Postgres or R2 the disk is only a cache
       const src = path.join(UPLOAD_DIR, name); if (!fs.existsSync(src)) return res.status(404).end();
       fs.mkdirSync(THUMBS, { recursive: true });
       const make = (animated) => sharp(src, { animated, limitInputPixels: 50_000_000 }).rotate().resize({ width: w, withoutEnlargement: true }).webp({ quality: 55 }).toFile(out);

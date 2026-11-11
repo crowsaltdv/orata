@@ -18,7 +18,7 @@ services:
         sync: false
       - key: TRUST_PROXY           # Render puts a proxy in front of the app
         value: "true"
-      - key: MAX_UPLOAD_MB         # uploads are stored in the free database, so keep files small
+      - key: MAX_UPLOAD_MB         # uploads are stored in the free database, so keep files small (or keep them in Cloudflare R2: the R2_* values below)
         value: "8"
       - key: KLIPY_API_KEY
         sync: false
@@ -31,6 +31,15 @@ services:
       # - key: METERED_APP
       #   sync: false
       # - key: METERED_API_KEY
+      #   sync: false
+      # Optional: keep uploaded files in a Cloudflare R2 bucket instead of the database (README → "Cloudflare R2 for uploaded files"): the free database then only holds the chat
+      # - key: R2_BUCKET
+      #   sync: false
+      # - key: R2_ACCOUNT_ID
+      #   sync: false
+      # - key: R2_ACCESS_KEY_ID
+      #   sync: false
+      # - key: R2_SECRET_ACCESS_KEY
       #   sync: false
       # Optional: the Discord bridge (README → "Discord bridge"): the bot token from the Discord Developer Portal
       # - key: DISCORD_BOT_TOKEN

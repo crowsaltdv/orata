@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 
 import { ROOT, ENV, loadEnv } from './env.js';
 import { PgStore, ConflictError, isSafeFileName } from './storage.js';
+import { R2Store } from './r2.js';
 import { sanitizeProfileStyle } from '../public/js/profile-data.js';
 export { ROOT, ENV, loadEnv };
 export const DATA_DIR = process.env.ORATE_DATA || path.join(ROOT, 'data');
@@ -67,7 +68,13 @@ export const requestHashes = (req) => deviceHashes(req);
 
 /* ---------------------------------------------------------------- db: files in data/ (default) or PostgreSQL (DATABASE_URL) */
 export const pg = ENV.DATABASE_URL ? new PgStore(ENV.DATABASE_URL, ENV) : null;
-const empty = () => ({ users: {}, sessions: {}, servers: {}, channels: {}, messages: {}, invites: {}, emailTokens: {}, botId: null, defaultServerId: null });
+/** Where uploaded files live when they aren't in the database: a Cloudflare R2 bucket (server/r2.js; R2_BUCKET and its keys), or null. With it the database holds only the
+ *  chat state and sessions. Files uploaded before R2 was switched on stay readable from the database until `npm run db:files-to-r2` moves them. */
+export const r2 = R2Store.fromEnv(ENV);
+/** Are uploads kept anywhere besides data/uploads (so that the disk is only a cache)? */
+export const remoteFiles = !!(pg || r2);
+if (r2) await r2.init();
+const empty =() => ({ users: {}, sessions: {}, servers: {}, channels: {}, messages: {}, invites: {}, emailTokens: {}, botId: null, defaultServerId: null });
 export let db = empty();
 /** Orate_dev: co-owner of the community server and one of the first developers (see migrateDb and badges.js). */
 export const ORATE_DEV_ID = '1792465419498000';
@@ -88,8 +95,8 @@ if (pg) {
       db = seed;
       if (adopted) {
         console.log('[orata] This database is empty, so your local data/db.json was imported into it.');
-        const r = await pg.importDir(UPLOAD_DIR, console.log);
-        console.log(`[orata] ${r.added} uploaded file(s) copied to the database.`);
+        const r = await (r2 || pg).importDir(UPLOAD_DIR, console.log);
+        console.log(`[orata] ${r.added} uploaded file(s) copied to ${r2 ? 'R2' : 'the database'}.`);
       }
     } else { const again = await pg.loadState(); db = { ...empty(), ...JSON.parse(again.json) }; pgVersion = again.version; }   // another instance created it a moment ago
   }
@@ -187,28 +194,38 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {   // flush, the
   Promise.resolve(flush()).catch(() => {}).finally(() => process.exit(0));
 });
 
-/** Uploads: always kept in data/uploads (a cache when Postgres is used) and, with DATABASE_URL, also in the database. */
+/** Uploads: always kept in data/uploads (a cache when they are kept elsewhere too) and, with R2_BUCKET, also in the R2 bucket; else with DATABASE_URL, also in the database. */
 export async function storeUpload(name, type, buf) {
-  if (pg) await pg.putFile(name, type, buf);   // first, so a full database refuses the upload before anything is kept
+  if (r2) await r2.putFile(name, type, buf);   // first, so a full store refuses the upload before anything is kept
+  else if (pg) await pg.putFile(name, type, buf);
   fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
 }
-/** Makes sure an uploaded file is on local disk (fetching it from the database after a restart). Resolves whether it exists. */
+/** Makes sure an uploaded file is on local disk (fetching it from R2, or from the database for one kept there before R2, after a restart). Resolves whether it exists. */
 export async function restoreUpload(name) {
   if (!isSafeFileName(name)) return false;
   const file = path.join(UPLOAD_DIR, name);
   if (fs.existsSync(file)) return true;
-  if (!pg) return false;
-  const f = await pg.getFile(name); if (!f) return false;
+  if (!remoteFiles) return false;
+  let f = null; let trouble = null;
+  if (r2) { try { f = await r2.getFile(name); } catch (e) { trouble = e; } }
+  if (!f && pg) f = await pg.getFile(name);   // (a file from before R2: still in the database until it was moved)
+  if (!f) { if (trouble) throw trouble; return false; }
   const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, f.data); fs.renameSync(tmp, file);
   return true;
 }
-/** Deletes an upload everywhere it is kept (used when an audio message expires). */
+/** Deletes an upload everywhere it is kept (used when an audio message expires, and by the sweep of unused theme files). */
 export function removeUpload(name) {
   if (!isSafeFileName(name)) return;
   try { fs.unlinkSync(path.join(UPLOAD_DIR, name)); } catch { /* already gone */ }
-  if (pg) pg.deleteFile(name).catch((e) => console.error('[orata] could not delete an expired upload:', e.message));
+  for (const store of [r2, pg]) if (store) store.deleteFile(name).catch((e) => console.error('[orata] could not delete an expired upload:', e.message));
 }
-export const storageSummary = () => (pg ? `PostgreSQL (${pg.host})` : `local files (${path.relative(ROOT, DATA_DIR) || '.'}/)`);
+/** Every uploaded file kept outside the disk cache, as [{ name, size }] (R2's, and the database's that aren't moved yet). */
+export async function listUploads() {
+  const seen = new Map();
+  for (const store of [r2, pg]) if (store) for (const f of await store.listFiles()) if (!seen.has(f.name)) seen.set(f.name, f);
+  return [...seen.values()];
+}
+export const storageSummary = () => (pg ? `PostgreSQL (${pg.host})` : `local files (${path.relative(ROOT, DATA_DIR) || '.'}/)`) + (r2 ? `; uploaded files in ${r2.host}` : '');
 
 let lastId = 0;
 export function newId() { let t = Date.now() * 1000; if (t <= lastId) t = lastId + 1; lastId = t; return String(t); }

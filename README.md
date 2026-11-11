@@ -44,6 +44,7 @@ npm run reset-password <user>    # forgot a password? prints a new one
 | `ICE_TRANSPORT_POLICY` | `all` | Set to `relay` to force every call through TURN (testing / hiding IP addresses) |
 | `MUSIC` | on | `MUSIC=off` turns the Music player off — see [Music](#music-youtube-music--no-key-needed) |
 | `DISCORD_BOT_TOKEN` | – | Turns on the [Discord bridge](#discord-bridge): `/link` mirrors an Orata channel with a Discord channel |
+| `R2_BUCKET` (+ `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) | – | Keeps uploaded files in a [Cloudflare R2 bucket](#cloudflare-r2-for-uploaded-files) instead of the database |
 
 > **Microphone, camera, screen sharing and desktop notifications only work on `localhost` or over HTTPS.** To use voice with other devices on your network, set `HTTPS_KEY`/`HTTPS_CERT`, or put Orata behind a TLS reverse proxy (Caddy, nginx, Cloudflare Tunnel …). Make sure it forwards WebSocket upgrades on `/gateway`.
 
@@ -266,7 +267,7 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 | `DATABASE_URL` | the connection string from step 1 |
 | `TRUST_PROXY` | `true` (Render puts a proxy in front of the app) |
 | `PUBLIC_URL` | `https://<your-service>.onrender.com` |
-| `MAX_UPLOAD_MB` | `8` (uploads are stored in the free database, so keep files small) |
+| `MAX_UPLOAD_MB` | `8` (uploads are stored in the free database, so keep files small — or keep them in a bucket instead, see [Cloudflare R2](#cloudflare-r2-for-uploaded-files)) |
 | `KLIPY_API_KEY`, `SMTP_*` | as in your `.env` — put secrets here, never in git |
 
 **Settings**
@@ -287,6 +288,44 @@ An empty database adopts your local `data/db.json` and `data/uploads/` automatic
 - **Storage:** the database holds the whole chat history as one compressed record plus your uploads; the free tier's ~0.5 GB goes a long way for a friend group. `npm run db:info` shows what's used.
 - **Backups / leaving:** `npm run db:export` writes `data/db.json` and `data/uploads/` from the database (an existing `db.json` is backed up first), and that folder runs as a normal local Orata.
 - Your Postgres password is as sensitive as the data: keep `DATABASE_URL` out of git.
+
+## Cloudflare R2 for uploaded files
+
+Everything in the Postgres database counts against the free plan's storage, and a full database stops the site (on Neon, writes fail until there is room again). The chat itself is small — one compressed record — but **uploaded files** (pictures, avatars, wallpapers, attachments, fonts) are what fills it. With **R2** they live in a Cloudflare bucket instead — [10 GB a month free, and downloads cost nothing](https://developers.cloudflare.com/r2/platform/pricing/) — and the database keeps only the chat state and the sign-in sessions, a few megabytes. Orata talks to R2 itself (`server/r2.js`: plain `fetch` and AWS Signature V4 made with Node's own crypto), so there is **nothing to install**. The bucket stays private: Orata serves the files, keeping a copy on its disk as a cache, just as it does with the database.
+
+**Set it up once**
+1. In the Cloudflare dashboard open **R2** and create a bucket (any name, for example `orata-files`; leave it private).
+2. **R2 → Manage API tokens → Create API token**, with the permission **Object Read & Write** for that bucket. Copy its **Access Key ID** and **Secret Access Key** (shown once), and your **Account ID** (on the R2 page).
+3. Put them in `.env` (and in your host's environment, e.g. Render's) and restart:
+
+```ini
+R2_BUCKET=orata-files
+R2_ACCOUNT_ID=0123456789abcdef0123456789abcdef
+R2_ACCESS_KEY_ID=…
+R2_SECRET_ACCESS_KEY=…
+```
+
+The startup text then says `Storage: PostgreSQL (…); uploaded files in Cloudflare R2, bucket orata-files`. A wrong key, bucket or account id stops the start-up with a hint at what to fix; `npm run db:info` checks the bucket and says how much is in it.
+
+**Move the files that are already in the database** (nothing is lost if you wait: until you do, files not moved yet are still served from the database). With `DATABASE_URL` and the `R2_*` values in your local `.env`:
+
+```bash
+npm run db:files-to-r2              # copies every file into the bucket, then looks in the bucket again to check each one is there
+npm run db:files-to-r2 -- --purge   # the same, and then, only if every file is in the bucket, empties the database's table of files
+```
+
+`--purge` uses `TRUNCATE`, which gives the space back at once (deleting rows doesn't, until a vacuum, which a full database may not be able to run). Add `-- --from-disk` to also copy a local `data/uploads` folder. A file that can't be read or didn't arrive is listed and **nothing is deleted**. If the database is already so full that it refuses even to be read, upgrade it for a month first, run the commands, and the space comes back. `npm run db:export` writes the bucket's files to `data/uploads/` too, so backing up and leaving work as before.
+
+**Settings**
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `R2_BUCKET`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | – | Set the first to use R2; the other three are needed with it. |
+| `R2_FILES_MB` | `9000` | Cap for uploaded files in the bucket, so the free 10 GB can't be passed; uploads beyond it are refused with a clear message. |
+| `R2_PREFIX` | – | A folder inside the bucket to keep the files in, to share a bucket with something else. |
+| `R2_ENDPOINT`, `R2_REGION` | R2's address from the account id, `auto` | Any other S3-compatible store (AWS S3, Backblaze B2 …): give its S3 address (then `R2_ACCOUNT_ID` isn't needed) and, if it wants one, its region. |
+
+It also works without a database at all (local `data/` files for the chat, the bucket for the uploads), which suits a host whose disk lasts.
 
 ## What's inside
 
@@ -405,7 +444,8 @@ server/
   mail.js       dependency-free SMTP client (TLS / STARTTLS) with a console fallback
   signup.js     emailed sign-up codes
   storage.js    optional PostgreSQL storage (DATABASE_URL): state + uploaded files
-  env.js        .env parsing   db-tool.js  db:import / db:export / db:info
+  r2.js         optional Cloudflare R2 (S3) storage for uploaded files (R2_BUCKET), with its own request signing
+  env.js        .env parsing   db-tool.js  db:import / db:export / db:info / db:files-to-r2
   verify.js     email verification tokens, modes and gating
   sessions.js   sign-in sessions (never expire; in their own Postgres table when DATABASE_URL is set)
   music.js      YouTube Music search, charts, artist and album pages, your playlists and the "listening to" status, through the Python helper below
