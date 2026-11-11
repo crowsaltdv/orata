@@ -215,8 +215,9 @@ MODALS['theme-reject'] = function ThemeReject({ id, name, resolve }) {
 };
 
 /* ------------------------------------------------------------------ the cards */
-function Picture({ src, busy, children }) {
-  return html`<div class="tcard-prev">${src ? html`<img src=${src} alt="" loading="lazy" draggable=${false} />` : html`<div class="tcard-none">${busy ? html`<${Spinner} size=${22} />` : html`<${Icon} name="image" size=${28} sw=${1.5} />`}</div>`}${children}</div>`;
+function Picture({ src, busy, onBroken, children }) {
+  const [bad, setBad] = useState(null);   // the address that would not load (a file that has gone missing): the empty tile shows instead of a broken-image icon, and `onBroken` can have it drawn again
+  return html`<div class="tcard-prev">${src && bad !== src ? html`<img src=${src} alt="" loading="lazy" draggable=${false} onError=${() => { setBad(src); onBroken?.(); }} />` : html`<div class="tcard-none">${busy ? html`<${Spinner} size=${22} />` : html`<${Icon} name="image" size=${28} sw=${1.5} />`}</div>`}${children}</div>`;
 }
 /** The "…" in a card's corner: the things you do less often (rename, delete) are in its menu (the same one a right click opens), so a card shows only its main button. */
 function More({ items }) {
@@ -226,12 +227,12 @@ function More({ items }) {
 const Poster = ({ user, downloads }) => html`<div class="tcard-who">
   <button type="button" class="tcard-poster" data-tip=${t('View profile')} onClick=${(e) => { addUsers([user]); openProfile(user.id, e.currentTarget); }}><${Avatar} user=${user} size=${20} /><span>${user.displayName}</span></button>
   <span class="tcard-dl" data-tip=${t(`${downloads} downloads`)} aria-label=${t(`${downloads} downloads`)}><${Icon} name="download" size=${13} sw=${2.4} />${downloads}</span></div>`;
-function DiscoverCard({ th, onInstall, onRemove, onVote, staff }) {
+function DiscoverCard({ th, onInstall, onRemove, onVote, staff, fixing, onBroken }) {
   const [busy, setBusy] = useState(false);
   const menu = isStaffMe() && !th.mine ? [{ label: t('Take down (staff)'), icon: 'trash', danger: true, onClick: () => onRemove(th) }] : null;
   const install = async () => { setBusy(true); await onInstall(th); setBusy(false); };
   return html`<article class="tcard" onContextMenu=${menu ? (e) => openContext(e, menu) : null}>
-    <${Picture} src=${th.preview}>${menu ? html`<${More} items=${menu} />` : null}${staff ? html`<${Peek} th=${th} />` : null}<//>
+    <${Picture} src=${th.preview} busy=${fixing} onBroken=${onBroken}>${menu ? html`<${More} items=${menu} />` : null}${staff ? html`<${Peek} th=${th} />` : null}<//>
     <div class="tcard-meta">
       <div class="tcard-top"><b class="tcard-name" title=${th.name}>${th.name}</b>
         <button type="button" class=${cx('tcard-vote', th.voted && 'on')} disabled=${th.mine} aria-pressed=${th.voted} data-tip=${th.mine ? t('Your own theme') : th.voted ? t('Take back your upvote') : t('Upvote')} aria-label=${t('Upvote')} onClick=${() => onVote(th)}><${Icon} name="arrow-up" size=${14} sw=${2.8} />${th.votes}</button></div>
@@ -249,16 +250,16 @@ function PostTile({ onClick }) {
     <div class="tcard-meta"><b class="tcard-name">${t('Send a theme')}</b><span class="tcard-by">${t('Orata staff approve it first')}</span></div></button>`;
 }
 /** A theme waiting for Orata staff (their "Waiting" tab): its preview, author and kind, Approve or Turn away. */
-function ReviewCard({ th, onReview }) {
+function ReviewCard({ th, onReview, fixing, onBroken }) {
   const [busy, setBusy] = useState(null);
   const go2 = async (yes) => { setBusy(yes ? 'yes' : 'no'); await onReview(th, yes); setBusy(null); };
   return html`<article class="tcard">
-    <${Picture} src=${th.preview}><span class="tcard-badge">${t(BADGE[th.kind] || 'Theme')}</span><${Peek} th=${th} onReview=${onReview} /><//>
+    <${Picture} src=${th.preview} busy=${fixing} onBroken=${onBroken}><span class="tcard-badge">${t(BADGE[th.kind] || 'Theme')}</span><${Peek} th=${th} onReview=${onReview} /><//>
     <div class="tcard-meta"><div class="tcard-top"><b class="tcard-name" title=${th.name}>${th.name}</b></div><${Poster} user=${th.author} downloads=${0} /></div>
     <div class="tcard-review"><${Btn} variant="primary" icon="check" loading=${busy === 'yes'} disabled=${!!busy} onClick=${() => go2(true)}>${t('Approve')}<//><${Btn} variant="danger" icon="x" loading=${busy === 'no'} disabled=${!!busy} onClick=${() => go2(false)}>${t('Turn away')}<//></div>
   </article>`;
 }
-function LibraryCard({ th, worn, working, onApply, onRename, onDelete, onPost, onRemove }) {
+function LibraryCard({ th, worn, working, onApply, onRename, onDelete, onPost, onRemove, onBroken }) {
   const mayPost = !th.from;   // (a theme you installed isn't yours to post)
   const menu = [
     { label: t('Rename'), icon: 'edit', onClick: () => onRename(th) },
@@ -267,7 +268,7 @@ function LibraryCard({ th, worn, working, onApply, onRename, onDelete, onPost, o
     { label: t('Delete'), icon: 'trash', danger: true, onClick: () => onDelete(th) },
   ];
   return html`<article class=${cx('tcard', worn && 'worn')} onContextMenu=${(e) => openContext(e, menu)}>
-    <${Picture} src=${th.preview} busy=${working}>${worn ? html`<span class="tcard-badge"><${Icon} name="check" size=${12} sw=${3} />${t('In use')}</span>` : null}<${More} items=${menu} /><//>
+    <${Picture} src=${th.preview} busy=${working} onBroken=${onBroken}>${worn ? html`<span class="tcard-badge"><${Icon} name="check" size=${12} sw=${3} />${t('In use')}</span>` : null}<${More} items=${menu} /><//>
     <div class="tcard-meta">
       <div class="tcard-top"><b class="tcard-name" title=${th.name}>${th.name}</b>
         ${mayPost && !th.published ? html`<button type="button" class="tcard-plus" data-tip=${t('Send to Discovery')} aria-label=${t('Send to Discovery')} onClick=${() => onPost(th)}><${Icon} name="plus" size=${16} sw=${2.6} /></button>` : null}</div>
@@ -340,6 +341,27 @@ export function ThemesPage() {
 
   const reload = () => { if (view === 'library') loadLib(); else if (view === 'review') loadWaiting(); else loadPub(false); };
   const patchPub = (id, patch) => setPub((p) => p && { ...p, themes: p.themes.map((x) => (x.id === id ? { ...x, ...patch } : x)) });
+  /* A preview whose file is gone (the lists say `preview: null`, or its picture failed to load) is drawn again by the browser from the theme itself: by its author for their own, by Orata staff for anyone's.
+   * Each is tried once per visit. */
+  const [fixing, setFixing] = useState({});
+  const redraw = async (th) => {
+    const key = `p:${th.id}`; if (tried.current.has(key) || !(th.mine || staff)) return; tried.current.add(key);
+    setFixing((f) => ({ ...f, [th.id]: true }));
+    try {
+      const full = await api.get(`/themes/discover/${th.id}/data`);
+      const { renderThemePreview } = await import('/js/theme-preview.js');
+      const done = await api.put(`/themes/discover/${th.id}/preview`, await renderThemePreview(full.kind, full.data));
+      if (!closed.current) { patchPub(th.id, { preview: done.preview }); setWaiting((w) => w && { ...w, themes: w.themes.map((x) => (x.id === th.id ? { ...x, preview: done.preview } : x)) }); }
+    } catch { /* it stays the empty tile until the next visit */ }
+    if (!closed.current) setFixing((f) => { const n = { ...f }; delete n[th.id]; return n; });
+  };
+  useEffect(() => {
+    const list = view === 'discover' ? pub?.themes : view === 'review' ? waiting?.themes : null; if (!list) return;
+    const todo = list.filter((x) => !x.preview && (x.mine || staff) && !tried.current.has(`p:${x.id}`)).slice(0, 4);   // (a few at a time: the page that comes after this one picks up the next)
+    if (!todo.length) return;
+    (async () => { for (const x of todo) { if (closed.current) return; await redraw(x); } })();
+  }, [pub, waiting, view, staff]);
+  const libBroken = (th) => { if (!tried.current.has(th.id)) setLib((l) => l && l.map((y) => (y.id === th.id ? { ...y, preview: null } : y))); };   // (a picture of your own that won't load: the effect below draws it again)
   const install = async (th) => {
     const r = await act(api.post(`/themes/discover/${th.id}/install`));
     if (r) { toast(r.already ? t('Already in your library') : t(`Installed. It’s in your ${NOUN[th.kind]} library now.`), 'success', 2600); patchPub(th.id, { installed: true }); }
@@ -405,15 +427,15 @@ export function ThemesPage() {
       </div>`}
       ${error ? html`<${Empty} icon="alert-circle" title=${t('Couldn’t load themes')}>${error} <button type="button" class="link-btn" onClick=${reload}>${t('Try again')}</button><//>`
         : view === 'review' ? (!waiting ? html`<div class="pk-center"><${Spinner} /></div>` : waiting.themes.length
-          ? html`<p class="text-muted themes-note">${t('Approve a theme to put it on Discovery for everyone, or turn it away (it stays in its author’s library). Orbit tells the author either way.')}</p><div class="theme-grid">${waiting.themes.map((th) => html`<${ReviewCard} key=${th.id} th=${th} onReview=${review} />`)}</div>`
+          ? html`<p class="text-muted themes-note">${t('Approve a theme to put it on Discovery for everyone, or turn it away (it stays in its author’s library). Orbit tells the author either way.')}</p><div class="theme-grid">${waiting.themes.map((th) => html`<${ReviewCard} key=${th.id} th=${th} onReview=${review} fixing=${!!fixing[th.id]} onBroken=${() => redraw(th)} />`)}</div>`
           : html`<${Empty} icon="check-circle" title=${t('Nothing waiting')}>${t('New themes people send to Discovery show up here for you to approve.')}<//>`)
         : view === 'discover' ? (!pub ? html`<div class="pk-center"><${Spinner} /></div>` : html`
-          ${pub.themes.length || tile ? html`<div class="theme-grid">${tile}${pub.themes.map((th) => html`<${DiscoverCard} key=${th.id} th=${th} staff=${staff} onInstall=${install} onRemove=${removeFromDiscovery} onVote=${vote} />`)}</div>` : null}
+          ${pub.themes.length || tile ? html`<div class="theme-grid">${tile}${pub.themes.map((th) => html`<${DiscoverCard} key=${th.id} th=${th} staff=${staff} fixing=${!!fixing[th.id]} onBroken=${() => redraw(th)} onInstall=${install} onRemove=${removeFromDiscovery} onVote=${vote} />`)}</div>` : null}
           ${!pub.themes.length ? (searching ? noMatch() : html`<${Empty} icon="globe-grid" title=${t(`No ${NOUN[kind]}s here yet`)}>${t('Be the first: press the + to send one of yours. Orata staff check each theme before it shows here.')}<//>`) : null}
           ${pub.themes.length < pub.total ? html`<div class="themes-more"><${Btn} onClick=${async () => { setPubMore(true); await loadPub(true); setPubMore(false); }} loading=${pubMore}>${t('Show more')}<//></div>` : null}`)
           : !lib ? html`<div class="pk-center"><${Spinner} /></div>` : !shownLib.length
             ? (searching && mine.length ? noMatch() : html`<${Empty} icon="folder" title=${t(`No ${NOUN[kind]}s saved yet`)}>${t('Save the look you have now, or install one from Discovery.')}<//>`)
-            : html`<div class="theme-grid">${shownLib.map((th) => html`<${LibraryCard} key=${th.id} th=${th} worn=${isWorn(th)} working=${!!making[th.id] && !th.preview} onApply=${applyTheme} onRename=${rename} onDelete=${remove} onPost=${post} onRemove=${removeFromDiscovery} />`)}</div>`}
+            : html`<div class="theme-grid">${shownLib.map((th) => html`<${LibraryCard} key=${th.id} th=${th} worn=${isWorn(th)} working=${!!making[th.id] && !th.preview} onApply=${applyTheme} onRename=${rename} onDelete=${remove} onPost=${post} onRemove=${removeFromDiscovery} onBroken=${() => libBroken(th)} />`)}</div>`}
     </div>
   </main>`;
 }

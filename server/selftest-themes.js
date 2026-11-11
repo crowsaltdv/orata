@@ -455,6 +455,33 @@ async function main() {
   r = await api('GET', '/themes/library', E.token); ok(r.body.themes.filter((t) => t.kind === 'cursor').length === 1 && r.body.themes.filter((t) => t.kind === 'cursor')[0].from === CURPUB.id, '… where it counts as a cursor');
   r = await api('POST', '/themes/discover', E.token, { id: r.body.themes.find((t) => t.kind === 'cursor').id }); ok(r.status === 400, 'a cursor you installed isn’t yours to post again');
 
+  /* ---------------------------------------------------------------- previews whose file has gone */
+  console.log('\nPreviews that have gone missing');
+  const uploadsDir = path.join(data, 'uploads'); const lose = (url) => { const n = path.basename(String(url || '')); if (n) fs.rmSync(path.join(uploadsDir, n), { force: true }); };
+  ok(await fetchOk(CURPUB.preview), 'a posted theme’s preview is served');
+  lose(CURPUB.preview);
+  r = await api('GET', '/themes/discover?kind=cursor', E.token);
+  ok(r.body.themes.find((t) => t.id === CURPUB.id)?.preview === null, 'when its file is gone, Discovery says it has no preview (not a link to a broken picture)');
+  r = await api('GET', '/themes/library', N.token); ok(r.body.themes.find((t) => t.id === CUR.id)?.preview === null, '… and so does its author’s library, where the browser draws it again');
+  r = await api('GET', '/themes/library', E.token); ok(r.body.themes.filter((t) => t.kind === 'cursor').every((t) => t.preview === null), '… and the library of someone who installed it');
+  r = await api('GET', `/themes/discover/${CURPUB.id}/data`, E.token); ok(r.status === 403, 'someone else can’t open its whole look');
+  r = await api('GET', `/themes/discover/${CURPUB.id}/data`, N.token); ok(r.status === 200 && r.body.data.image === CUR.data.image, 'its author can (to draw the preview again)');
+  r = await sendBytes('PUT', `/themes/discover/${CURPUB.id}/preview`, E.token, prev); ok(r.status === 403, 'only its author or Orata staff can put a new preview on a posted theme');
+  r = await sendBytes('PUT', `/themes/discover/${CURPUB.id}/preview`, N.token, Buffer.from('nope')); ok(r.status === 400, '… and it has to be a picture');
+  r = await sendBytes('PUT', '/themes/discover/12345/preview', N.token, prev); ok(r.status === 404, '… of a theme that is there');
+  r = await sendBytes('PUT', `/themes/discover/${CURPUB.id}/preview`, N.token, prev); const fresh = r.body?.preview;
+  ok(r.status === 200 && /^\/uploads\/th_\d+\.webp$/.test(fresh) && fresh !== CURPUB.preview && await fetchOk(fresh), 'its author draws it again: the posted theme has a new preview that works');
+  r = await api('GET', '/themes/library', N.token); ok(r.body.themes.find((t) => t.id === CUR.id)?.preview === fresh, '… which is the author’s library picture too');
+  r = await api('GET', '/themes/discover?kind=cursor', E.token); ok(r.body.themes.find((t) => t.id === CURPUB.id)?.preview === fresh, '… and what everyone on Discovery sees');
+  lose(fresh);
+  r = await sendBytes('PUT', `/themes/discover/${CURPUB.id}/preview`, S.token, prev); ok(r.status === 200 && await fetchOk(r.body.preview), 'Orata staff can draw anyone’s preview again');
+  r = await sendBytes('PUT', `/themes/library/${CUR.id}/preview`, N.token, prev); const viaLibrary = r.body?.preview;
+  r = await api('GET', '/themes/discover?kind=cursor', E.token); ok(viaLibrary && r.body.themes.find((t) => t.id === CURPUB.id)?.preview === viaLibrary, 'drawing the preview in your own library updates the posted copy as well');
+  const lone = (await api('POST', '/themes/library', N.token, { kind: 'cursor', name: 'No preview', data: { image: imgUrl } })).body;
+  await sendBytes('PUT', `/themes/library/${lone.id}/preview`, N.token, prev);
+  const lp = (await api('GET', '/themes/library', N.token)).body.themes.find((t) => t.id === lone.id)?.preview; lose(lp);
+  r = await api('POST', '/themes/discover', N.token, { id: lone.id }); ok(!!lp && r.status === 400 && r.body.code === 'no_preview', 'a theme whose preview is gone can’t be posted until it has a new one');
+
   console.log('\nSyncing');
   const w1 = await connect(N.token); const w2 = await connect(N.token);
   const heard = w2.wait('themes_update');

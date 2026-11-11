@@ -71,6 +71,8 @@ function launch([cmd, ...args]) {
     const timer = setTimeout(() => fail(new Error('it did not start within 20 seconds')), 20_000);
     try { child = spawn(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, MUSIC_COUNTRY: COUNTRY, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' } }); } catch (e) { clearTimeout(timer); return reject(e); }
     child.on('error', (e) => fail(new Error(e.code === 'ENOENT' ? `${cmd} was not found` : e.message)));
+    child.stdin.on('error', () => { /* the helper died while we wrote to it: its 'exit' follows and the next request starts a new one (an unhandled pipe error would stop the whole server) */ });
+    child.stdout.on('error', () => {}); child.stderr.on('error', () => {});
     child.stderr.on('data', (d) => { tail = (tail + d).slice(-400); });
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (d) => {
@@ -117,7 +119,8 @@ async function ask(op, params = {}, timeoutMs = 25_000) {
     const id = ++seq;
     const timer = setTimeout(() => { pending.delete(id); reject(new ApiError(504, 'Music took too long to load. Try again.', 'music_upstream')); }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
-    try { h.child.stdin.write(`${JSON.stringify({ ...params, id, op })}\n`); } catch { pending.delete(id); clearTimeout(timer); reject(new ApiError(502, 'The music helper stopped. Try again.', 'music_upstream')); }
+    const stopped = () => { if (!pending.delete(id)) return; clearTimeout(timer); if (helper?.child === h.child) helper = null; reject(new ApiError(502, 'The music helper stopped. Try again.', 'music_upstream')); };   // (the next request starts a new one)
+    try { h.child.stdin.write(`${JSON.stringify({ ...params, id, op })}\n`, (err) => { if (err) stopped(); }); } catch { stopped(); }
   });
 }
 const calls = [];   // when the last requests to YouTube were made

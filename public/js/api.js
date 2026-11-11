@@ -25,17 +25,25 @@ async function req(method, url, body, extra = {}) {
   let payload;
   if (body !== undefined && !(body instanceof Blob) && !(body instanceof ArrayBuffer)) { headers['content-type'] = 'application/json'; payload = JSON.stringify(body); } else payload = body;
   let res;
-  try { res = await fetch('/api' + url, { method, headers, body: payload, signal: extra.signal }); } catch (e) {
-    if (e.name === 'AbortError') throw e;
-    throw new ApiError(0, 'Can’t reach the server. Check your connection.', 'network');
+  for (let attempt = 0; ; attempt++) {
+    try { res = await fetch('/api' + url, { method, headers, body: payload, signal: extra.signal }); } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      if (method === 'GET' && attempt < RETRIES.length) { await pause(RETRIES[attempt], extra.signal); continue; }
+      throw new ApiError(0, 'Can’t reach the server. Check your connection.', 'network');
+    }
+    // 502 / 503 / 504 without one of Orata's own answers (those are JSON, with a message) come from the host in front of Orata: it is restarting or overloaded. Looking things up is tried again.
+    if (method === 'GET' && TRANSIENT.has(res.status) && !/json/.test(res.headers.get('content-type') || '') && attempt < RETRIES.length) { await pause(RETRIES[attempt], extra.signal); continue; }
+    break;
   }
   let data = null; try { data = await res.json(); } catch { /* empty */ }
   if (!res.ok) {
     if (res.status === 401 && sentWith && sentWith === state.token && !url.startsWith('/auth/')) hooks.unauthorized();
-    throw new ApiError(res.status, data?.error || `Request failed (${res.status})`, data?.code);
+    throw new ApiError(res.status, data?.error || (TRANSIENT.has(res.status) ? `Orata’s server isn’t answering right now (${res.status}). It may be restarting: try again in a moment.` : `Request failed (${res.status})`), data?.code);
   }
   return data;
 }
+const TRANSIENT = new Set([502, 503, 504]); const RETRIES = [800, 2200];   // (a short wait, then a longer one)
+const pause = (ms, signal) => new Promise((resolve, reject) => { const t = setTimeout(resolve, ms); signal?.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')); }, { once: true }); });
 export const api = {
   get: (u, o) => req('GET', u, undefined, o), post: (u, b, o) => req('POST', u, b ?? {}, o), patch: (u, b) => req('PATCH', u, b ?? {}),
   put: (u, b) => req('PUT', u, b ?? {}), del: (u, b) => req('DELETE', u, b),

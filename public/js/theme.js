@@ -138,10 +138,11 @@ function applyWallpaper(s) {
         } else publish(img, src.url);
       }, () => {
         if (token !== loadToken) return;
+        const fallback = MESH_WALLPAPERS.find((m) => m.id === s.bg.mesh) || MESH_WALLPAPERS[0];   // a picture that is gone (or can't be loaded): the theme's own mesh background, not one fixed gradient
         // the proxy can't reach some hosts (bot protection) — show the original directly; WebGL effects need CORS so rain is skipped
         const direct = src.url.startsWith('/api/img?url=') ? decodeURIComponent(src.url.slice('/api/img?url='.length)) : null;
-        if (direct) loadImg(direct, false, (img) => { if (token !== loadToken) return; currentImg = null; show(direct, true); $('#wallpaper').classList.add('rain-fallback'); if (look().rain.enabled) toast('This wallpaper’s host blocks WebGL access, so the rain effect can’t use it. Pick another wallpaper for rain.', 'info', 6000); void img; }, () => { show(meshCss(MESH_WALLPAPERS[0]), false); syncRain(); });
-        else { show(meshCss(MESH_WALLPAPERS[0]), false); syncRain(); }
+        if (direct) loadImg(direct, false, (img) => { if (token !== loadToken) return; currentImg = null; show(direct, true); $('#wallpaper').classList.add('rain-fallback'); if (look().rain.enabled) toast('This wallpaper’s host blocks WebGL access, so the rain effect can’t use it. Pick another wallpaper for rain.', 'info', 6000); void img; }, () => { show(meshCss(fallback), false); syncRain(); });
+        else { show(meshCss(fallback), false); syncRain(); }
       });
     } else if (src.kind === 'solid') { const t = layers()[1 - activeLayer]; activeLayer = 1 - activeLayer; t.style.backgroundImage = 'none'; t.style.backgroundColor = src.css; t.classList.add('on'); layers()[1 - activeLayer].classList.remove('on'); syncRain(); }
     else { show(src.css, false); syncRain(); }

@@ -17,6 +17,17 @@ import { musicStatus } from './music.js';
 import { mirrorDesktop } from './desktop.js';
 import compression from 'compression';
 
+/* One stray error (in a request, a timer, a picture being resized, the music helper's pipe …) must not take the whole server down: the host answers every request with a 503
+ * until a fresh one is up, and everyone online is thrown out. It is logged and Orata carries on. A flood of them means something is badly wrong: then it leaves, so the host starts a new one. */
+const strays = [];
+const stray = (kind) => (err) => {
+  const now = Date.now(); while (strays.length && now - strays[0] > 60_000) strays.shift(); strays.push(now);
+  console.error(`[orata] ${kind} (kept running):`, err?.stack || err);
+  if (strays.length > 25) { console.error('[orata] too many unexpected errors in a minute: restarting'); process.exit(1); }
+};
+process.on('unhandledRejection', stray('unhandled rejection'));
+process.on('uncaughtException', stray('uncaught exception'));
+
 const app = express();
 app.disable('x-powered-by');
 if (ENV.TRUST_PROXY) app.set('trust proxy', true);

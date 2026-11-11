@@ -154,6 +154,34 @@ function pubView(t, viewer) {
     author: publicUser(a),   // (name, picture and style: what clicking their name on a card shows as their profile)
     mine: t.authorId === viewer.id, installed: (viewer.themes || []).some((x) => x.from === t.id), status: t.status === 'pending' ? 'pending' : 'approved' };
 }
+/* A preview picture whose file is gone from storage (lost, or deleted by mistake) would show as a broken image. So the lists say `preview: null` for it, and the theme's author (or
+ * Orata staff) has it drawn again: the browser draws it from the theme itself (public/js/theme-preview.js) and sends it to PUT /themes/library/:id/preview (or .../discover/:id/preview). */
+let stored = { at: 0, names: null };   // what storage holds, looked at once in a while (one listing, not one question per picture)
+async function storedNames() {
+  if (!remoteFiles) return null;
+  if (stored.names && Date.now() - stored.at < 120_000) return stored.names;
+  stored = { at: Date.now(), names: new Set((await listUploads()).map((f) => f.name)) };
+  return stored.names;
+}
+/** Is this /uploads address a file that is there? When storage can't be asked right now the answer is yes: a hiccup must not hide good pictures. */
+async function fileThere(url) {
+  const name = path.basename(String(url || '')); if (!isSafeFileName(name)) return false;
+  if (fs.existsSync(path.join(UPLOAD_DIR, name))) return true;
+  if (!remoteFiles) return false;
+  try { return (await storedNames()).has(name); } catch { return true; }
+}
+const withPreviewsChecked = (views) => Promise.all(views.map(async (v) => (v.preview && !(await fileThere(v.preview)) ? { ...v, preview: null } : v)));
+/** Checks a preview picture (drawn by the browser: a real PNG, JPEG or WebP between 120 and 2400 pixels), cuts it down to 720 pixels wide and keeps it as WebP. Resolves the file name. */
+async function previewFile(buf) {
+  if (!Buffer.isBuffer(buf) || !buf.length) throw bad('There is no picture in that request');
+  let meta; try { meta = await sharp(buf, { limitInputPixels: 20_000_000 }).metadata(); } catch { throw bad('That isn’t a picture', 'picture_bad'); }
+  if (!['png', 'jpeg', 'webp'].includes(meta.format) || (meta.pages || 1) > 1 || (meta.width || 0) < 120 || (meta.height || 0) < 120 || meta.width > 2400 || meta.height > 2400) throw bad('A theme preview must be a PNG, JPEG or WebP picture between 120 and 2400 pixels', 'picture_bad');
+  const out = await sharp(buf).resize({ width: 720, withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
+  const file = `th_${newId()}.webp`;
+  try { await storeUpload(file, 'image/webp', out); } catch (e) { throw e.code === 'QUOTA' ? new ApiError(507, e.message, 'storage_full') : new ApiError(503, 'Could not save the picture right now. Try again in a moment.', 'storage_error'); }
+  stored.at = 0;   // (the next look at storage includes it)
+  return file;
+}
 /** The same shuffle for the same seed (so scrolling through a random order doesn't reshuffle between pages). */
 function shuffled(list, seed) {
   let x = (Number(seed) >>> 0) || 1; const rnd = () => { x = (x + 0x6D2B79F5) >>> 0; let t = x; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -171,7 +199,7 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
   const pace = limit('themes', 60, 60_000, (req) => req.user.id);
 
   /* ---- your library ---- */
-  r.get('/themes/library', (req, res) => res.json({ limit: LIBRARY_LIMIT, themes: mine(req).map(libView) }));
+  r.get('/themes/library', h(async (req, res) => res.json({ limit: LIBRARY_LIMIT, themes: await withPreviewsChecked(mine(req).map(libView)) })));
   r.post('/themes/library', pace, h(async (req, res) => {
     const b = req.body || {}; const kind = b.kind;
     if (!THEME_KINDS.includes(kind)) throw bad('Say whether this is a profile theme, a site theme or a cursor');
@@ -194,13 +222,10 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
   /** The preview picture (drawn by the browser): checked to be a real picture, cut down to 720 pixels wide and kept as WebP. */
   r.put('/themes/library/:id/preview', limit('themeprev', 40, 60_000, (req) => req.user.id), express.raw({ type: () => true, limit: '3mb' }), h(async (req, res) => {
     const t = find(req);
-    if (!Buffer.isBuffer(req.body) || !req.body.length) throw bad('There is no picture in that request');
-    let meta; try { meta = await sharp(req.body, { limitInputPixels: 20_000_000 }).metadata(); } catch { throw bad('That isn’t a picture', 'picture_bad'); }
-    if (!['png', 'jpeg', 'webp'].includes(meta.format) || (meta.pages || 1) > 1 || (meta.width || 0) < 120 || (meta.height || 0) < 120 || meta.width > 2400 || meta.height > 2400) throw bad('A theme preview must be a PNG, JPEG or WebP picture between 120 and 2400 pixels', 'picture_bad');
-    const out = await sharp(req.body).resize({ width: 720, withoutEnlargement: true }).webp({ quality: 82 }).toBuffer();
-    const file = `th_${newId()}.webp`;
-    try { await storeUpload(file, 'image/webp', out); } catch (e) { throw e.code === 'QUOTA' ? new ApiError(507, e.message, 'storage_full') : new ApiError(503, 'Could not save the picture right now. Try again in a moment.', 'storage_error'); }
-    t.preview = `/uploads/${file}`; save(); changed(req.user.id, req);
+    const file = await previewFile(req.body);
+    t.preview = `/uploads/${file}`;
+    const pub = t.published && db.themes[t.published]; if (pub && pub.authorId === req.user.id) pub.preview = t.preview;   // (the posted theme shows the same picture)
+    save(); changed(req.user.id, req);
     res.json(libView(t));
   }));
 
@@ -209,7 +234,7 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
     if (req.query.status === 'pending') {   // what Orata staff still have to look at: both kinds, oldest first
       if (!isStaff(req.user)) throw forbidden('Only Orata staff review themes');
       const waiting = Object.values(db.themes).filter((t) => t.status === 'pending' && alive(t)).sort((a, b) => cmpId(a.id, b.id));
-      return res.json({ total: waiting.length, themes: waiting.slice(0, 100).map((t) => pubView(t, req.user)) });
+      return res.json({ total: waiting.length, themes: await withPreviewsChecked(waiting.slice(0, 100).map((t) => pubView(t, req.user))) });
     }
     const kind = THEME_KINDS.includes(req.query.kind) ? req.query.kind : 'site';
     let list = Object.values(db.themes).filter((t) => t.kind === kind && shown(t));
@@ -222,14 +247,14 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
         : req.query.sort === 'downloads' ? list.sort((a, b) => (b.installs || 0) - (a.installs || 0) || votesOf(b) - votesOf(a) || cmpId(b.id, a.id))
           : list.sort((a, b) => votesOf(b) - votesOf(a) || cmpId(b.id, a.id));
     const off = Math.max(0, Math.floor(Number(req.query.offset)) || 0); const lim = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit)) || 48));
-    res.json({ total: list.length, themes: list.slice(off, off + lim).map((t) => pubView(t, req.user)) });
+    res.json({ total: list.length, themes: await withPreviewsChecked(list.slice(off, off + lim).map((t) => pubView(t, req.user))) });
   }));
   /** Send one of your own library themes to Discovery (a theme you installed from someone else can't be). It waits for Orata staff; a staff member's own goes up at once. */
   r.post('/themes/discover', limit('themepub', 20, 60_000, (req) => req.user.id), h(async (req, res) => {
     const t = find({ ...req, params: { id: String(req.body?.id || '') } });
     if (t.from) throw bad('You can only post themes you made yourself, not ones you installed.', 'not_yours');
     if (t.published && db.themes[t.published]) throw bad('This theme is already posted. Remove it from Discovery first to post it again.', 'already_published');
-    if (!t.preview) throw bad('This theme has no preview picture yet. Open it in your library and try again.', 'no_preview');
+    if (!t.preview || !await fileThere(t.preview)) throw bad('This theme has no preview picture yet. Open it in your library and try again.', 'no_preview');
     const name = cleanThemeName(req.body?.name ?? t.name); if (!name) throw bad('Give the theme a name');
     if (hasProfanity(name)) throw bad('That name isn’t allowed.', 'name');
     const pub = { id: newId(), kind: t.kind, name, data: structuredClone(t.data), preview: t.preview, authorId: req.user.id, createdAt: Date.now(), installs: 0, status: isStaff(req.user) ? 'approved' : 'pending' };
@@ -249,9 +274,19 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
   /** Orata staff decide on a theme waiting for Discovery: { approve: true } puts it up; { approve: false, reason } turns it away (it stays in its author's library). */
   /** Orata staff try a theme on before deciding (or any time): its whole look, not just the picture everyone sees. */
   r.get('/themes/discover/:id/data', h(async (req, res) => {
-    if (!isStaff(req.user)) throw forbidden('Only Orata staff preview themes');
     const pub = db.themes[req.params.id]; if (!pub || !alive(pub)) throw notFound('That theme isn’t on Discovery any more');
+    if (!isStaff(req.user) && pub.authorId !== req.user.id) throw forbidden('Only Orata staff and the theme’s author can open its whole look');
     res.json({ id: pub.id, kind: pub.kind, name: pub.name, data: pub.data });
+  }));
+  /** A posted theme's preview picture, drawn again by its author's browser or by Orata staff's (when the file it had is gone). The author's library entry gets the new picture too. */
+  r.put('/themes/discover/:id/preview', limit('themeprev2', 120, 60_000, (req) => req.user.id), express.raw({ type: () => true, limit: '3mb' }), h(async (req, res) => {
+    const pub = db.themes[req.params.id]; if (!pub) throw notFound('That theme isn’t on Discovery');
+    if (pub.authorId !== req.user.id && !isStaff(req.user)) throw forbidden('Only the theme’s author or Orata staff can redraw its preview.');
+    const file = await previewFile(req.body);
+    pub.preview = `/uploads/${file}`;
+    for (const x of db.users[pub.authorId]?.themes || []) if (x.published === pub.id) x.preview = pub.preview;
+    save(); changed(pub.authorId, pub.authorId === req.user.id ? req : undefined);
+    res.json(pubView(pub, req.user));
   }));
   r.post('/themes/discover/:id/review', h(async (req, res) => {
     if (!isStaff(req.user)) throw forbidden('Only Orata staff review themes');
