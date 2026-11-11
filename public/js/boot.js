@@ -7,15 +7,20 @@ import { gateway } from '/js/api.js';
 import '/js/events.js';
 import { initTooltips } from '/js/ui.js';
 import { App } from '/js/app.js';
-import { startPerfWatchdog } from '/js/perf.js';
+import { startPerfWatchdog, startBatteryWatch } from '/js/perf.js';
 import { initFx } from '/js/fx.js';
+import { initContextMenu } from '/js/contextmenu.js';
+import { initCursor } from '/js/cursor.js';
 import { initCloak } from '/js/cloak.js';
 
 initCloak();   // a saved tab cloak (title + icon) applies before anything else shows
 initTheme();
 initTooltips();
 initFx();
+initContextMenu();   // every right click opens Orata's menu
+initCursor();   // a custom cursor, when one is switched on (Settings → Theme)
 startPerfWatchdog();
+startBatteryWatch();
 const route = parseRoute(location.pathname + location.search);
 set({ route: { ...state.route, ...route } });
 if (state.token) { set({ phase: 'loading' }); gateway.connect(); } else {

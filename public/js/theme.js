@@ -4,10 +4,11 @@ import { DEFAULT_SETTINGS } from '/js/defaults.js';
 import { hexToRgb, luminance, mixHex, readableOn, ls } from '/js/lib.js';
 import { MESH_WALLPAPERS, PHOTO_WALLPAPERS } from '/js/defaults.js';
 import { LITE } from '/js/lite.js';
+import { perfOf, applyPerfToLook } from '/js/perf-data.js';
 
 // the rain (26 KB) loads only once it's switched on
-let rainMod = null;
-const rain = { start: (cfg) => (rainMod ||= import('/js/rain.js')).then((m) => m.rain.start(cfg)), stop: () => rainMod?.then((m) => m.rain.stop()) };
+let rainMod = null; let away = false;   // away: Settings → Performance paused the effects because Orata isn't the window being used
+const rain = { start: (cfg) => (rainMod ||= import('/js/rain.js')).then((m) => { m.rain.setAway(away); return m.rain.start(cfg); }), stop: () => rainMod?.then((m) => m.rain.stop()), setAway: (v) => rainMod?.then((m) => m.rain.setAway(v)) };
 
 const root = document.documentElement;
 const $ = (s) => document.querySelector(s);
@@ -59,15 +60,27 @@ export function drawMesh(ctx, w, h, def) {
 }
 /** The look to render. Nobody signed in (the login / sign-up screens) always gets the default theme, never what a previous account left in this browser. */
 let liteFrom = null; let liteLook = null;
+/** The colour of a plain background (Lite mode, and Settings → Performance → plain colour): the theme's panel colour, pushed towards black (or white in light mode). */
+function plainColor(s) {
+  const light = s.theme.mode === 'light' || (s.theme.mode === 'auto' && window.matchMedia('(prefers-color-scheme: light)').matches);
+  return mixHex(s.theme.panelColor, light ? '#ffffff' : '#000000', 0.55);
+}
 /** Lite mode's look: no rain, glass, wallpaper picture, blur or downloaded fonts (the saved settings stay as they are). */
 function lite(s) {
   if (s === liteFrom) return liteLook; liteFrom = s;
-  const light = s.theme.mode === 'light' || (s.theme.mode === 'auto' && window.matchMedia('(prefers-color-scheme: light)').matches);
-  liteLook = { ...s, rain: { ...s.rain, enabled: false }, glass: { ...s.glass, style: 'off' }, bg: { ...s.bg, type: 'solid', color: mixHex(s.theme.panelColor, light ? '#ffffff' : '#000000', 0.55), parallax: false, blur: 0 },
+  liteLook = { ...s, rain: { ...s.rain, enabled: false }, glass: { ...s.glass, style: 'off' }, bg: { ...s.bg, type: 'solid', color: plainColor(s), parallax: false, blur: 0 },
     fonts: { ...s.fonts, ui: 'System UI', chat: null, code: null }, theme: { ...s.theme, panelBlur: 0 } };
   return liteLook;
 }
-function look() { const s = state.token ? state.settings : DEFAULT_SETTINGS; return LITE ? lite(s) : s; }
+/** Settings → Performance (perf-data.js): the options laid over the look, on this device only. The same object comes back until the settings or the options change. */
+let perfFrom = null; let perfFlags = null; let perfLook = null;
+function withPerf(s) {
+  const f = perfOf(state);
+  if (s === perfFrom && f === perfFlags) return perfLook;
+  perfFrom = s; perfFlags = f; perfLook = f.any ? { ...applyPerfToLook(s, f, { plain: plainColor(s) }) } : s;   // (always a new object while an option is on, so the attributes below are redone when only an option changed)
+  return perfLook;
+}
+function look() { const s = state.token ? state.settings : DEFAULT_SETTINGS; return withPerf(LITE ? lite(s) : s); }
 export function wallpaperSource(bg = look().bg) {
   switch (bg.type) {
     case 'mesh': { const def = MESH_WALLPAPERS.find((m) => m.id === bg.mesh) || MESH_WALLPAPERS[0]; return { kind: 'mesh', def, css: meshCss(def), key: 'mesh:' + def.id }; }
@@ -232,6 +245,26 @@ function applyMisc(s) {
   root.style.setProperty('--msg-gap', s.chat.spacing + 'px');
   root.lang = s.lang || 'en';
   applyGlass(s.glass);
+  const f = perfOf(state);   // the options that are plain CSS (extras.css)
+  root.dataset.perfBlur = f.blur ? 'off' : ''; root.dataset.perfFx = f.profileFx ? 'off' : '';
+}
+/** "Pause the effects while Orata is in the background": the rain and every animation that loops (spinners, pulses, rainbows, the equalizer…) stop while another window has the
+ *  focus, and carry on when it comes back. Only loops are paused, never the one-time fades that bring things in (frozen at their first frame they would leave things invisible). */
+let pausedLoops = new Set(); let awayTimer = 0;
+function sweepLoops() {
+  for (const a of document.getAnimations()) {
+    if (a.playState === 'running' && a.effect?.getComputedTiming().iterations === Infinity) { a.pause(); pausedLoops.add(a); }
+  }
+}
+function pauseLoops(on) {
+  clearInterval(awayTimer);
+  if (on) { sweepLoops(); awayTimer = setInterval(sweepLoops, 4000); }   // (a loop that starts while away is caught on the next round)
+  else { for (const a of pausedLoops) { try { a.play(); } catch { /* it ended while paused */ } } pausedLoops = new Set(); }
+}
+function syncAway() {
+  const now = !state.focused && perfOf(state).pause;
+  if (now === away) return; away = now;
+  root.dataset.perfAway = now ? '1' : ''; rain.setAway(now); pauseLoops(now);
 }
 
 /* ------------------------------------------------------------------ main */
@@ -252,7 +285,7 @@ function stopParallax() { par.tx = par.ty = par.cx = par.cy = 0; root.style.setP
 export function initTheme() {
   bootPreview();
   applyTheme(true);
-  subscribe(() => { if (look() !== last) { clearTimeout(raf); raf = setTimeout(() => applyTheme(), 12); } });
+  subscribe(() => { syncAway(); if (look() !== last) { clearTimeout(raf); raf = setTimeout(() => applyTheme(), 12); } });
   window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (look().theme.mode === 'auto') applyTheme(true); });
   // gentle parallax on the wallpaper
   const tick = () => {

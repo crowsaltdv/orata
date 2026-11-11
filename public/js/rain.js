@@ -406,6 +406,7 @@ class RainController {
   constructor() {
     this.canvas = document.getElementById('rain'); this.gl = null; this.drops = null; this.running = false; this.raf = 0; this.cfg = null; this.sig = '';
     this.assets = null; this.supported = true; this.last = 0; this.parallaxTarget = [0, 0]; this.flashTimer = 0; this.flashSeq = null; this.buildId = 0;
+    this.away = false;   // Settings → Performance: paused while Orata isn't the window being used (setAway)
     this.onVis = () => { if (document.hidden) this.pause(); else if (this.cfg) this.resume(); };
     this.onMove = (e) => { this.parallaxTarget = [(e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1]; };
     this.onResize = null;
@@ -444,8 +445,13 @@ class RainController {
     document.removeEventListener('visibilitychange', this.onVis); window.removeEventListener('pointermove', this.onMove); this.drops = null; this.sig = '';
   }
   pause() { this.running = false; cancelAnimationFrame(this.raf); clearInterval(this.flashTimer); }
+  /** Pause the rain while `away` (and carry on when it is over), without tearing anything down. */
+  setAway(away) { this.away = !!away; if (this.away) { this.pause(); this.paintOnce(); } else if (this.cfg) this.resume(); }
+  /** The canvas shows the wallpaper itself, so it is never left empty: even while paused (away) the first frame is drawn once. */
+  paintOnce() { if (this.drawn || !this.cfg || !this.drops || !this.gl) return; this.drops.update(Date.now()); this.gl.draw(this.drops.canvas); this.drawn = true; }
   resume() {
     if (this.running || !this.cfg || document.hidden || !this.drops) return;
+    if (this.away) { this.paintOnce(); return; }
     this.running = true; this.last = performance.now(); this.raf = requestAnimationFrame((t) => this.frame(t));
     clearInterval(this.flashTimer); this.flashTimer = setInterval(() => this.maybeFlash(), 500);
   }
@@ -469,6 +475,7 @@ class RainController {
     const bgTex = wallpaperCanvas(source, bg, 512, Math.round(512 / aspect), { blur: mist });
     this.drops = new Raindrops(W * q, H * q, d * q, this.assets.alpha, this.assets.color, this.dropOptions(s));
     gl.configure({ width: W, height: H, fg: fgTex, bg: bgTex, options: this.renderOptions(s) });
+    this.drawn = false; if (this.away) this.paintOnce();   // (a resize while paused clears the canvas: paint the wallpaper again)
   }
   applyLive() {
     const s = this.cfg.settings;
@@ -492,7 +499,7 @@ class RainController {
     // parallax eases toward the pointer, like the demo's TweenLite
     const p = this.gl.parallax; p[0] += (this.parallaxTarget[0] - p[0]) * 0.06; p[1] += (this.parallaxTarget[1] - p[1]) * 0.06;
     this.drops.update(Date.now());
-    this.gl.draw(this.drops.canvas);
+    this.gl.draw(this.drops.canvas); this.drawn = true;
   }
 }
 

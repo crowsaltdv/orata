@@ -59,7 +59,7 @@ function YourFonts({ value, onPick }) {
 const CATS = [['all', 'All'], ['Sans Serif', 'Sans'], ['Serif', 'Serif'], ['Display', 'Display'], ['Handwriting', 'Script'], ['Monospace', 'Mono']];
 const ROW = 48;
 
-function FontList({ value, onPick, mono }) {
+function FontList({ value, onPick, mono, uploads = true }) {
   const [list, setList] = useState(fontList); const [q, setQ] = useState(''); const [cat, setCat] = useState(mono ? 'Monospace' : 'all');
   const [top, setTop] = useState(0); const [hover, setHover] = useState(null); const box = useRef(null);
   useEffect(() => { loadFontList().then(setList); }, []);
@@ -78,7 +78,7 @@ function FontList({ value, onPick, mono }) {
     if (list && value && box.current && !q) { const i = rows.findIndex((f) => f.family === value); if (i > 3) { box.current.scrollTop = (i - 2) * ROW; setTop((i - 2) * ROW); } }
   }, [list]);
   return html`<div class="fp">
-    <${YourFonts} value=${value} onPick=${onPick} />
+    ${uploads ? html`<${YourFonts} value=${value} onPick=${onPick} />` : null}
     <div class="picker-search"><${Icon} name="search" size=${16} /><input class="pk-input" placeholder=${t('Search Google Fonts')} value=${q} onInput=${(e) => setQ(e.target.value)} autofocus />${q ? html`<button type="button" class="pk-clear" onClick=${() => setQ('')}><${Icon} name="x" size=${14} /></button>` : null}</div>
     <div class="fp-cats">${CATS.map(([k, l]) => html`<button type="button" class=${cx(cat === k && 'on')} onClick=${() => setCat(k)}>${l}</button>`)}</div>
     ${!list ? html`<div class="pk-center" style="height:300px"><${Spinner} /></div>` : html`<div class="fp-scroll" ref=${box} onScroll=${(e) => setTop(e.target.scrollTop)} style=${{ height: H + 'px' }}>
@@ -92,13 +92,14 @@ function FontList({ value, onPick, mono }) {
   </div>`;
 }
 
-POPOVERS['font-picker'] = function FontPopover({ value, onChange, mono, close }) {
-  return html`<div class="pop-card fp-pop"><${FontList} value=${value} mono=${mono} onPick=${(f) => { onChange(f); loadFont(f); close(); }} /></div>`;
+POPOVERS['font-picker'] = function FontPopover({ value, onChange, mono, uploads, close }) {
+  return html`<div class="pop-card fp-pop"><${FontList} value=${value} mono=${mono} uploads=${uploads} onPick=${(f) => { onChange(f); loadFont(f); close(); }} /></div>`;
 };
 
-export function FontField({ value, onChange, mono, defaultName = 'Inter', label }) {
+/** `uploads={false}`: only Google Fonts (a profile can't use a font file of yours). */
+export function FontField({ value, onChange, mono, defaultName = 'Inter', label, uploads = true }) {
   const ref = useRef(null);
-  const open = () => { const r = ref.current.getBoundingClientRect(); set({ popover: { id: uid(), kind: 'font-picker', props: { value, onChange, mono }, rect: { x: r.x, y: r.y, w: r.width, h: r.height }, placement: 'bottom-start' } }); loadFontList(); };
+  const open = () => { const r = ref.current.getBoundingClientRect(); set({ popover: { id: uid(), kind: 'font-picker', props: { value, onChange, mono, uploads }, rect: { x: r.x, y: r.y, w: r.width, h: r.height }, placement: 'bottom-start' } }); loadFontList(); };
   const fam = value || defaultName; const css = `"${fontFamilyName(fam)}", ${mono ? 'monospace' : 'system-ui, sans-serif'}`;
   useEffect(() => { loadFont(value); }, [value]);
   return html`<button type="button" ref=${ref} class="font-field" onClick=${open} aria-label=${label}>

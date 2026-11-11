@@ -172,3 +172,23 @@
 .pc-conn { display: flex; align-items: center; gap: 10px; } .pc-conn-av { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: none; background: rgb(var(--surface-rgb) / .12); }
 .pc-conn-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; } .pc-conn-text b { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pc-conn-text small { color: var(--text-3); font-size: 12px; }
 .dp-orata { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: 2px 0 6px !important; color: var(--text-2); } .dp-orata small { color: var(--text-3); }
+
+/* ------------------------------------------------ Settings → Performance (settings-performance.js) */
+.perf-presets { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.perf-presets small { color: var(--text-3); font-size: 13px; }
+.perf-note { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-radius: var(--radius); background: rgb(var(--accent-rgb) / .12); border: 1px solid rgb(var(--accent-rgb) / .35); font-size: 13px; color: var(--text); margin-bottom: 12px; }
+.perf-note .icon { color: var(--accent); flex: none; margin-top: 1px; }
+.perf-batt { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); } .perf-batt .icon { flex: none; }
+.perf-batt.low { color: #f5a524; }
+.perf-test { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 14px; color: var(--text-2); } .perf-test b { color: var(--text); }
+.perf-count { font-size: 13px; color: var(--text-3); }
+
+/* ------------------------------------------------ Settings → Theme → Cursor (settings-cursor.js) */
+.cur-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 10px 0; }
+.cur-slot { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 14px; background: var(--input-bg); }
+.cur-head { display: flex; flex-direction: column; gap: 2px; } .cur-head b { font-size: 14px; } .cur-head small { color: var(--text-3); font-size: 12.5px; line-height: 1.35; }
+.cur-stage { display: flex; align-items: center; justify-content: center; height: 128px; border-radius: 12px; color: var(--text-3); background: repeating-conic-gradient(rgb(var(--surface-rgb) / .09) 0% 25%, rgb(var(--surface-rgb) / .03) 0% 50%) 0 0 / 16px 16px; }
+.cur-pick { position: relative; display: inline-block; line-height: 0; cursor: crosshair; outline: 1px dashed rgb(var(--surface-rgb) / .3); outline-offset: 2px; }
+.cur-pick img { display: block; height: 96px; width: auto; max-width: 200px; object-fit: contain; image-rendering: pixelated; }
+.cur-dot { position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; border-radius: 50%; border: 2px solid #fff; background: #f04d6a; box-shadow: 0 0 0 1px rgb(0 0 0 / .6); pointer-events: none; }
+.cur-btns, .cur-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; } .cur-actions { margin-top: 12px; }

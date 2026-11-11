@@ -3,6 +3,8 @@
 // `mode` is the last pick, `modePref` the mode Orata opens in ('ask' = the launch screen asks, app.js ModeChooser). Only orata_dev sees the
 // choice, for now.
 import { ls } from '/js/lib.js';
+import { state } from '/js/store.js';
+import { perfOf } from '/js/perf-data.js';
 
 export const MODE_OWNER = 'orata_dev';   // the only account that sees the launch screen and the Settings switch, for now
 export const preferredMode = () => ls('modePref', 'ask');
@@ -18,4 +20,4 @@ export function setMode(mode, prefer = null) {
 export const modeChosenThisVisit = () => { try { return !!sessionStorage.getItem('orate:modeChosen'); } catch { return true; } };
 
 /** In Lite mode an uploaded picture comes as a smaller, lighter copy (server/index.js /thumbs; animated GIFs stay animated). */
-export const thumb = (url, w) => (LITE && /^\/uploads\/[A-Za-z0-9_.-]+\.(png|jpe?g|gif|webp|avif)$/i.test(url || '') ? `/thumbs/${w}/${url.slice(9)}` : url);
+export const thumb = (url, w) => ((LITE || perfOf(state).thumbs) &&/^\/uploads\/[A-Za-z0-9_.-]+\.(png|jpe?g|gif|webp|avif)$/i.test(url || '') ? `/thumbs/${w}/${url.slice(9)}` : url);

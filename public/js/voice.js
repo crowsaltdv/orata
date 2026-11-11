@@ -4,6 +4,7 @@ import { state, set, toast, getChannel, notify, hasPerm, hasChannelPerm } from '
 import { gateway, api } from '/js/api.js';
 import { playSound } from '/js/sound.js';
 import { t } from '/js/i18n.js';
+import { perfOf } from '/js/perf-data.js';
 
 // ICE servers come from the server (/api/ice) so STUN/TURN is configured in .env; this is the offline fallback.
 let ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }], iceCandidatePoolSize: 4 };
@@ -28,7 +29,7 @@ export function micConstraints(v = state.local.voice) {
   return { audio: { deviceId: v.inputDevice && v.inputDevice !== 'default' ? { exact: v.inputDevice } : undefined, noiseSuppression: !!v.noiseSuppression, echoCancellation: !!v.echoCancellation, autoGainControl: !!v.autoGain, channelCount: 1 } };
 }
 export function cameraConstraints(v = state.local.voice) {
-  const h = Number(v.videoQuality || 720); const w = Math.round((h * 16) / 9);
+  const h = Math.min(Number(v.videoQuality || 720), perfOf(state).video ? 360 : Infinity); const w = Math.round((h * 16) / 9);   // (Settings → Performance can cap it at 360p)
   return { video: { deviceId: v.cameraDevice && v.cameraDevice !== 'default' ? { exact: v.cameraDevice } : undefined, width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: 30 } } };
 }
 export function createMeter(stream, onLevel) {

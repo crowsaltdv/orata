@@ -8,6 +8,7 @@ import { html, useState, useEffect, useRef, cx, ls } from '/js/lib.js';
 import { state, set, useSel, toast } from '/js/store.js';
 import { Icon } from '/js/icons.js';
 import { t } from '/js/i18n.js';
+import { perfOf, reducedMotion } from '/js/perf-data.js';
 
 export const openVisualizer = () => set({ visualizer: true });
 const DEFAULTS = { style: 'wings', color: 'auto', shape: 'circle', particles: 'bokeh', amount: 60, shake: 'auto', shakeType: 'shake', background: 'auto', energy: 'auto', time: true, flash: false, alwaysReal: false, sensitivity: 1 };
@@ -75,7 +76,7 @@ export function VisualizerHost() {
 
 function Visualizer() {
   const track = useSel((s) => s.music.track); const playing = useSel((s) => s.music.playing);
-  const reduce = useSel((s) => !!s.settings.motion?.reduce);
+  const reduce = useSel((s) => reducedMotion(s));
   const [opts, setOpts] = useState(() => ({ ...DEFAULTS, ...(ls('visualizer', {}) || {}) }));
   const [panel, setPanel] = useState(false); const [liveOn, setLiveOn] = useState(false);
   const canvas = useRef(null); const live = useRef(null); const sim = useRef({ opts, playing, track, reduce });
@@ -112,7 +113,8 @@ function Visualizer() {
   useEffect(() => {
     const cv = canvas.current; const g = cv.getContext('2d'); let raf = 0; let alive = true;
     let W = 0; let H = 0; let dpr = 1;
-    const fit = () => { dpr = Math.min(1.5, window.devicePixelRatio || 1);   // (sharp enough, and fast every frame)
+    const light = perfOf(state).visualizer; let lastDraw = 0;   // Settings → Performance: 30 frames a second at a lower resolution
+    const fit = () => { dpr = light ? 1 : Math.min(1.5, window.devicePixelRatio || 1);   // (sharp enough, and fast every frame)
       W = window.innerWidth; H = window.innerHeight; cv.width = W * dpr; cv.height = H * dpr; };
     fit(); window.addEventListener('resize', fit);
     const bands = new Float32Array(N); const raw = new Float32Array(N); const hist = Array.from({ length: HIST }, () => new Float32Array(N)); let h0 = 0;
@@ -144,6 +146,7 @@ function Visualizer() {
     const t0 = performance.now(); let lastNow = t0;
     const frame = () => {
       if (!alive) return;
+      if (light) { const nowF = performance.now(); if (nowF - lastDraw < 30) { raf = requestAnimationFrame(frame); return; } lastDraw = nowF; }
       const { opts: o, playing: on, track: tr, reduce: still } = sim.current; const sens = Math.max(0.3, Math.min(3, Number(o.sensitivity) || 1));
       if ((tr?.id || null) !== coverFor) prepare(tr);
       const now = performance.now(); const tt = (now - t0) / 1000; const dt = Math.min(0.05, (now - lastNow) / 1000); lastNow = now;

@@ -1,6 +1,7 @@
 // Orata community-features self-test (runs after the other suites):  npm test
 // Optional emails at sign-up, bans that follow the person's browser (hashed, never shown; networks are ignored), ban reasons, timeouts, GIF icons / banners,
 // custom emoji and stickers, forum channels and polls.
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import os from 'node:os';
@@ -464,6 +465,12 @@ async function main() {
   r = await api('PATCH', '/me', A.token, { profile: style }); const ps = r.body.profile;
   ok(r.status === 200 && ps.colors.a === '#ff0000' && ps.colors.angle === 360 && ps.colors.tint === 1 && ps.outline.width === 8 && ps.outline.style === 'solid' && ps.outline.color2 === '#ffff00' && ps.shadow.blur === 80, 'colours, outline and shadow are saved (numbers clamped, unknown styles replaced)');
   ok(ps.fonts.name === 'pacifico' && ps.fonts.text === null && ps.nameColor.mode === 'gradient' && ps.nameColor.a === '#fde047' && ps.nameColor.angle === 360 && ps.nameOutline.width === 6 && ps.nameOutline.b === '#14532d' && ps.nameShadow.distance === 24 && ps.nameShadow.angle === 135, 'the name font, a gradient name color, its outline and an angled shadow are saved (clamped)');
+  r = await api('PATCH', '/me', A.token, { profile: { ...style, fonts: { name: 'g:Roboto Slab', text: 'g:Press Start 2P' } } });
+  ok(r.status === 200 && r.body.profile.fonts.name === 'g:Roboto Slab' && r.body.profile.fonts.text === 'g:Press Start 2P', 'any Google font can be the name or text font (saved as "g:" and its family)');
+  r = await api('PATCH', '/me', A.token, { profile: { ...style, fonts: { name: 'g:Evil";} body{display:none}', text: 'g:' + 'A'.repeat(80) } } });
+  ok(r.status === 200 && r.body.profile.fonts === undefined, 'a font name that could break out of the CSS isn’t saved');
+  r = await api('PATCH', '/me', A.token, { profile: style });
+  ok(r.status === 200 && r.body.profile.fonts.name === 'pacifico', '(and the profile goes on as before)');
   ok(ps.effect.id === 'rays' && ps.effect.density === 1 && !('frame' in ps) && !('avatarFrame' in ps) && !('nameStyle' in ps) && !('evil' in ps), 'effects are saved; frames, the old name style and unknown parts are dropped');
   r = await api('GET', `/users/${A.user.id}`, T.token); ok(r.status === 200 && r.body.user.profile?.nameShadow?.color === '#14532d', 'other people see it on your profile');
   r = await api('GET', '/ready', T.token); ok(r.body.users.find((x) => x.id === A.user.id)?.profile?.effect?.id === 'rays', '… and on you everywhere you appear');

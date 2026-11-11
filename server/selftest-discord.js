@@ -2,6 +2,7 @@
 // Starts a fake Discord (its API and its gateway WebSocket) and an Orata server pointed at it, then links a channel and sends messages,
 // pictures, edits, deletes and replies both ways, catches up after a restart, and unlinks. Then moves a Discord server's roles, channels and emoji
 // into Orata with /transfer.
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import os from 'node:os';

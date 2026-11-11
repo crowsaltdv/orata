@@ -1,5 +1,6 @@
 // Orata backend self-test:  npm test
 // Boots the server on a scratch port with a throw-away data dir and exercises the main flows.
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import fs from 'node:fs';

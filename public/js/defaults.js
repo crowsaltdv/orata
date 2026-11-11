@@ -1,5 +1,7 @@
 // Orata — default settings and built-in presets (wallpapers, colour palettes).
 import { DEFAULT_LAYOUT } from './layout-data.js';
+import { DEFAULT_PERF } from './perf-data.js';
+import { DEFAULT_CURSOR } from './cursor-data.js';
 
 export const PHOTO_WALLPAPERS = [
   { id: 'photo-1', name: 'Misty Dawn', url: 'https://t4.ftcdn.net/jpg/12/93/55/89/360_F_1293558974_ILjrwntCvlZe1rWFZvbIpnb69nvrgBS9.jpg' },
@@ -47,6 +49,7 @@ export const DEFAULT_SETTINGS = {
   rain: { enabled: true, preset: 'rain', amount: 0.7, size: 0.88, speed: 1, refraction: 1, mist: 3, trails: 1, droplets: 50, lightning: 0, fps: 60 },
   glass: { style: 'off', intensity: 1, rail: true, nav: true, toolbar: true, buttons: true, composer: true, panels: true },
   fx: { particles: true, ripples: true, amount: 1 },
+  cursor: structuredClone(DEFAULT_CURSOR),   // a custom cursor (cursor-data.js, Settings → Theme): off = the normal one. Not part of a site theme: cursors are their own kind of theme
   layout: structuredClone(DEFAULT_LAYOUT),   // where the server bar, channel list, profile bar and members panel sit (layout-data.js, Settings → Layout); part of a site theme
   fonts: { ui: 'Montserrat', chat: null, code: 'JetBrains Mono', size: 16, weight: 400, lineHeight: 1.45, letterSpacing: 0, custom: [] },   // custom: the fonts you uploaded, [{ url, name }] (fontpicker.js)
   motion: { reduce: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, parallaxHover: true },
@@ -66,6 +69,7 @@ export const DEFAULT_LOCAL = {
     pushToTalk: false, pttKey: 'KeyV', videoQuality: '720', mirrorVideo: true, joinMuted: false,
   },
   panel: 'members', frequentEmoji: {}, sidebarW: 248,
+  perf: { ...DEFAULT_PERF },   // Settings → Performance: what to switch off on THIS device to save battery (perf-data.js); never part of a theme or synced
 };
 
 /** Upgrades settings saved by older versions (new defaults for blur/panels, the rewritten rain, removed quests). */

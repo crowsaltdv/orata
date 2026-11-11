@@ -97,6 +97,17 @@ export function channelMenu(ch) {
     void server,
   ];
 }
+/** Right-clicking the empty part of the channel list: the server's quick actions, and for anyone who manages channels a way to add a channel or a category. */
+export function channelListMenu(server) {
+  const canManage = hasPerm(server.id, 'MANAGE_CHANNELS');
+  return [
+    { label: t('Mark Server As Read'), icon: 'check', onClick: () => markServerRead(server.id) },
+    hasPerm(server.id, 'CREATE_INVITE') && { label: t('Invite People'), icon: 'user-plus', onClick: () => openModal('invite', { serverId: server.id }) },
+    canManage && { type: 'sep' },
+    canManage && { label: t('Create Channel'), icon: 'plus', onClick: () => openModal('create-channel', { serverId: server.id }) },
+    canManage && { label: t('Create Category'), icon: 'folder', onClick: () => openModal('create-channel', { serverId: server.id, type: 'category' }) },
+  ];
+}
 export async function deleteChannel(ch) {
   if (await confirmDialog({ title: `Delete ${ch.type === 'category' ? 'Category' : 'Channel'}`, body: `Are you sure you want to delete ${ch.type === 'category' ? ch.name : '#' + ch.name}? This cannot be undone.`, confirmLabel: 'Delete', danger: true })) act(api.del(`/channels/${ch.id}`));
 }
@@ -161,7 +172,7 @@ export function ChannelSidebar() {
       ${server.banner ? html`<span class="banner" style=${{ backgroundImage: `url("${server.banner}")` }}></span>` : null}
       <span class="sbh-name">${server.name}</span><${Icon} name="chevron-down" size=${18} />
     </button>
-    <div class=${cx('sb-scroll', dnd.drag && 'dnd', dnd.drag?.kind === 'category' && 'dnd-cats')} ref=${dnd.root} style="padding-top:2px">
+    <div class=${cx('sb-scroll', dnd.drag && 'dnd', dnd.drag?.kind === 'category' && 'dnd-cats')} ref=${dnd.root} style="padding-top:2px" onContextMenu=${(e) => openContext(e, channelListMenu(server))}>
       ${groups.map(({ cat, items }) => html`<div key=${cat?.id || 'loose'}>
         ${cat ? html`<div class=${cx('cat-head', collapsed[cat.id] && 'collapsed', moving === cat.id && 'dnd-placeholder', hot === cat.id && collapsed[cat.id] && 'dnd-hot')} data-dnd=${cat.id} data-kind="category" onPointerDown=${dnd.enabled ? (e) => dnd.down(e, 'category', cat.id) : null} role="button" tabindex="0" onClick=${() => updateSettings({ collapsed: { [cat.id]: !collapsed[cat.id] } }, { sync: false })} onContextMenu=${(e) => openContext(e, channelMenu(cat))}>
           <${Icon} name="chevron-down" size=${13} sw=${3} /><span>${cat.name}</span>

@@ -19,6 +19,7 @@ import { ThemePage, WallpaperPage, EffectsPage, FontsPage, ChatPage, SToggle, SS
 import { VoicePage } from '/js/settings-voice.js';
 import { LayoutPage } from '/js/settings-layout.js';
 import { ConnectionsPage } from '/js/settings-connections.js';
+import { PerformancePage } from '/js/settings-performance.js';
 import { fullLayout } from '/js/layout-data.js';
 import { LANGUAGES, t } from '/js/i18n.js';
 import { resendVerification } from '/js/verify.js';
@@ -237,10 +238,10 @@ const legalPage = (path) => function LegalPage() {
 const NAV = [
   { group: 'User Settings', items: [['desktop', 'download', 'Desktop App'], ['account', 'user', 'My Account'], ['profile', 'smile', 'Profile'], ['connections', 'link', 'Connections']] },
   { group: 'Appearance', items: [['appearance', 'palette', 'Theme'], ['layout', 'grid', 'Layout'], ['wallpaper', 'image', 'Wallpaper'], ['effects', 'cloud-rain', 'Rain & Glass'], ['fonts', 'type', 'Fonts'], ['chat', 'message', 'Chat']] },
-  { group: 'App Settings', items: [['access', 'eye', 'Accessibility'], ['voice', 'mic', 'Voice & Video'], ['notifications', 'bell', 'Notifications'], ['language', 'globe', 'Language & Time'], ['keybinds', 'keyboard', 'Keybinds'], ['privacy', 'shield', 'Privacy & Safety'], ['cloak', 'monitor', 'Cloak'], ['advanced', 'sliders', 'Advanced']] },
+  { group: 'App Settings', items: [['access', 'eye', 'Accessibility'], ['performance', 'bolt', 'Performance'], ['voice', 'mic', 'Voice & Video'], ['notifications', 'bell', 'Notifications'], ['language', 'globe', 'Language & Time'], ['keybinds', 'keyboard', 'Keybinds'], ['privacy', 'shield', 'Privacy & Safety'], ['cloak', 'monitor', 'Cloak'], ['advanced', 'sliders', 'Advanced']] },
   { group: 'Policies', items: [['terms', 'file-text', 'Terms of Service'], ['privacy-policy', 'lock', 'Privacy Policy'], ['guidelines', 'heart', 'Community Guidelines']] },
 ];
-const PAGES = { desktop: DesktopPage, account: AccountPage, profile: ProfilePage, connections: ConnectionsPage, appearance: ThemePage, layout: LayoutPage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, cloak: CloakPage, advanced: AdvancedPage, terms: legalPage('/terms'), 'privacy-policy': legalPage('/privacy'), guidelines: legalPage('/guidelines') };
+const PAGES = { desktop: DesktopPage, account: AccountPage, profile: ProfilePage, connections: ConnectionsPage, appearance: ThemePage, layout: LayoutPage, wallpaper: WallpaperPage, effects: EffectsPage, fonts: FontsPage, chat: ChatPage, access: AccessPage, performance: PerformancePage, voice: VoicePage, notifications: NotificationsPage, language: LanguagePage, keybinds: KeybindsPage, privacy: PrivacyPage, cloak: CloakPage, advanced: AdvancedPage, terms: legalPage('/terms'), 'privacy-policy': legalPage('/privacy'), guidelines: legalPage('/guidelines') };
 
 export function SettingsHost() {
   const page = useSel((s) => s.settingsPage);
@@ -250,7 +251,7 @@ export function SettingsHost() {
   useEffect(() => { body.current?.scrollTo({ top: 0 }); }, [shown]);
   if (!shown) return null;
   const Page = PAGES[shown] || AccountPage; const label = NAV.flatMap((g) => g.items).find((i) => i[0] === shown)?.[2] || '';
-  const compactBg = ['appearance', 'wallpaper', 'effects', 'fonts'].includes(shown);
+  const compactBg = ['appearance', 'wallpaper', 'effects', 'fonts', 'performance'].includes(shown);
   return html`<div class=${cx('settings', closing && 'closing', compactBg && 'live')} role="dialog" aria-label="Settings">
     <nav class="settings-nav panel">
       <div class="sn-scroll">${NAV.map((g) => html`<div class="sn-group" key=${g.group}><h5>${t(g.group)}</h5>${g.items.map(([k, ic, l]) => html`<button type="button" class=${cx('sn-item', shown === k && 'on')} onClick=${() => openSettings(k)}><${Icon} name=${ic} size=${18} /><span>${t(l)}</span></button>`)}</div>`)}

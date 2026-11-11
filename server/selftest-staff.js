@@ -1,5 +1,6 @@
 // Orata self-test for joining by application, server tags you can join from, channel emoji, the newer AutoMod rules, name rules, and the
 // Orata staff tools (badges, locking, terminating, reports and flags). Runs with the other suites:  npm test
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import fs from 'node:fs';

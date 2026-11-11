@@ -257,6 +257,17 @@ export function plusCommand(name, x) {
       if (o.levels?.on) announceLevel(s, ch, uid, before, levelOf(e.xp));
       return out;
     }
+    case 'setxp': {   // /setxp @member 500: their XP becomes exactly that (0 clears it). Going up announces the new levels and gives their roles while levels are on; going down never takes a role away
+      const uid = x.member(); const raw = rest[0] ?? ''; const amount = Number(raw);
+      if (!/^\d{1,8}$/.test(raw) || !Number.isInteger(amount) || amount > MAX_XP) throw bad(`Say how much XP they should have, from 0 to ${MAX_XP.toLocaleString('en-US')}: /setxp @member 500`);
+      if (db.users[uid]?.bot) throw bad('Bots don’t earn XP');
+      const was = o.xp?.[uid]?.xp || 0; const before = levelOf(was);
+      if (amount === 0) { if (o.xp) delete o.xp[uid]; } else { const e = ((o.xp ||= {})[uid] ||= { xp: 0, at: 0 }); e.xp = amount; }
+      save();
+      const out = post(`✨ ${who} set <@${uid}>’s XP to **${amount.toLocaleString('en-US')} XP** (level ${levelOf(amount)}, it was ${was.toLocaleString('en-US')} XP).${o.levels?.on ? '' : ' (Levels are off in this server, so there are no level-ups yet.)'}`);
+      if (o.levels?.on) announceLevel(s, ch, uid, before, levelOf(amount));
+      return out;
+    }
     case 'giveaway': {
       if (first.toLowerCase() === 'end') {
         const g = [...(db.giveaways || [])].reverse().find((y) => y.channelId === ch.id); if (!g) throw bad('There’s no giveaway running in this channel.');

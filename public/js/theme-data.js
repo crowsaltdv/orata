@@ -4,9 +4,10 @@
 import { DEFAULT_SETTINGS, MESH_WALLPAPERS, PHOTO_WALLPAPERS, deepMerge } from './defaults.js';
 import { sanitizeProfileStyle } from './profile-data.js';
 import { cleanLayout } from './layout-data.js';
+import { sanitizeCursor } from './cursor-data.js';
 
-export const THEME_KINDS = ['profile', 'site'];
-export const LIBRARY_LIMIT = 25;   // per kind: 25 profile themes + 25 site themes = 50 in all
+export const THEME_KINDS = ['profile', 'site', 'cursor'];   // (a cursor theme is a custom cursor: cursor-data.js)
+export const LIBRARY_LIMIT = 25;   // per kind: 25 profile themes + 25 site themes + 25 cursors = 75 in all
 export const THEME_NAME_MAX = 40;
 
 /* ------------------------------------------------------------------ checking a look
@@ -113,8 +114,8 @@ export function sanitizeProfileTheme(data) {
 export const profileLookOf = ({ profile, banner, bannerColor, accentColor } = {}) => sanitizeProfileTheme({ ...(profile || {}), banner: { image: banner || null, color: bannerColor || null, color2: accentColor || null } });
 
 /* ------------------------------------------------------------------ any theme */
-/** A clean theme of `kind` ('site' or 'profile'), or null when nothing usable is in it. */
-export const sanitizeTheme = (kind, data) => (kind === 'site' ? sanitizeSiteLook(data) : kind === 'profile' ? sanitizeProfileTheme(data) : null);
+/** A clean theme of `kind` ('site', 'profile' or 'cursor'), or null when nothing usable is in it. */
+export const sanitizeTheme = (kind, data) => (kind === 'site' ? sanitizeSiteLook(data) : kind === 'profile' ? sanitizeProfileTheme(data) : kind === 'cursor' ? sanitizeCursor(data) : null);
 /* ---- searching (the same on the server, for Discovery's pages, and in the browser, for your library) */
 /** Lower case with the accents taken off, so "cafe" finds "Café". */
 export const fold = (s) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -126,12 +127,13 @@ export const matchesWords = (words, text) => { const h = fold(text); return word
 /** A theme's name: one line, at most THEME_NAME_MAX characters ('' when there is none). */
 export const cleanThemeName = (name) => String(name ?? '').replace(/[\u0000-\u001f\u007f<>]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, THEME_NAME_MAX);
 
-/** Where a theme keeps files of this server's: a site theme's wallpaper and uploaded fonts; a profile theme's card picture and banner. [{ get, set }] on the (cloned) data. */
+/** Where a theme keeps files of this server's: a site theme's wallpaper and uploaded fonts; a profile theme's card picture and banner; a cursor's two pictures. [{ get, set }] on the (cloned) data. */
 function pictureSlots(kind, data) {
   if (kind === 'site') {
     const fonts = isObj(data?.fonts) ? ['ui', 'chat', 'code'].map((k) => ({ get: () => data.fonts[k], set: (v) => { data.fonts[k] = v; } })) : [];
     return [...(isObj(data?.bg) ? [{ get: () => data.bg.image, set: (v) => { data.bg.image = v; } }] : []), ...fonts];
   }
+  if (kind === 'cursor') return ['image', 'pointer'].filter((k) => typeof data?.[k] === 'string').map((k) => ({ get: () => data[k], set: (v) => { data[k] = v; } }));
   const slots = [];
   if (isObj(data?.colors)) slots.push({ get: () => data.colors.image, set: (v) => { data.colors.image = v; } });
   if (isObj(data?.banner)) slots.push({ get: () => data.banner.image, set: (v) => { data.banner.image = v; } });

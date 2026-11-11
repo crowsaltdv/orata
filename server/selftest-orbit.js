@@ -1,6 +1,7 @@
 // Orata self-test for what Orbit does that Discord servers add other bots for (server/orbit-plus.js): counting, welcome and goodbye messages,
 // a role for newcomers, the member count, levels, giveaways, the starboard, tickets, warnings, saved replies, suggestions, slowmode, and /lock and /unlock.
 // Runs with the other suites:  npm test
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -104,6 +105,26 @@ async function main() {
   r = await cmd(A, 'xp', '50'); ok(r.status === 400, '… for a member');
   r = await cmd(A, 'xp', `<@${S.orbitId}> 50`); ok(r.status === 400 && /Bots don’t earn XP/.test(r.body.error), '… but not for a bot');
   await stopServer(); startServer(); await ready();   // (commands are limited to 12 per 10 s each: a fresh start for the sections below)
+
+  console.log('\n/setxp');
+  r = await cmd(B, 'setxp', `<@${D.user.id}> 10`); ok(r.status === 403, 'only people who can manage the server set XP');
+  r = await cmd(A, 'setxp', `<@${D.user.id}> 50`); await sleep(150);
+  ok(r.status === 200 && /set <@\d+>’s XP to \*\*50 XP\*\* \(level 0, it was 2,100 XP\)/.test((await last(A.token, text.id)).content), '/setxp sets it to exactly that, even lower than before');
+  r = await cmd(D, 'rank'); ok(/level \*\*0\*\* with \*\*50 XP\*\*/.test(r.body.ephemeral), '… and /rank shows it');
+  ok((await view()).members.find((m) => m.id === D.user.id)?.roles.includes(helper.id), '… going down keeps the roles they earned');
+  r = await cmd(A, 'setxp', `<@${D.user.id}> 2500`); await sleep(150);
+  ok(/reached \*\*level 5\*\*!/.test((await last(A.token, text.id)).content), 'going up announces the new level');
+  r = await cmd(A, 'setxp', `<@${D.user.id}> 0`); await sleep(150);
+  ok(r.status === 200 && /to \*\*0 XP\*\* \(level 0, it was 2,500 XP\)/.test((await last(A.token, text.id)).content), '0 clears their XP');
+  r = await cmd(D, 'rank'); ok(/with \*\*0 XP\*\*/.test(r.body.ephemeral) && !/Rank \*\*#/.test(r.body.ephemeral), '… so they are off the leaderboard');
+  r = await cmd(A, 'setxp', `<@${D.user.id}> -5`); ok(r.status === 400, '/setxp wants a whole number from 0 …');
+  r = await cmd(A, 'setxp', `<@${D.user.id}> lots`); ok(r.status === 400, '… not words');
+  r = await cmd(A, 'setxp', `<@${D.user.id}> 1.5`); ok(r.status === 400, '… not a fraction');
+  r = await cmd(A, 'setxp', `<@${D.user.id}> 10000001`); ok(r.status === 400, '… and at most 10,000,000');
+  r = await cmd(A, 'setxp', `<@${D.user.id}>`); ok(r.status === 400, '… an amount is needed');
+  r = await cmd(A, 'setxp', '50'); ok(r.status === 400, '… and a member');
+  r = await cmd(A, 'setxp', `<@${S.orbitId}> 50`); ok(r.status === 400 && /Bots don’t earn XP/.test(r.body.error), '… but not for a bot');
+  await stopServer(); startServer(); await ready();
 
   console.log('\nGiveaways');
   r = await cmd(B, 'giveaway', '1h 1 Cookie'); ok(r.status === 403, 'only people who can manage messages start giveaways');

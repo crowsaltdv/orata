@@ -7,6 +7,7 @@ import { MESH_WALLPAPERS, PHOTO_WALLPAPERS } from '/js/defaults.js';
 import { hexToRgb, luminance } from '/js/lib.js';
 import { fontFamily } from '/js/profile-data.js';
 import { sanitizeSiteLook, sanitizeProfileTheme } from '/js/theme-data.js';
+import { sanitizeCursor, cursorBox } from '/js/cursor-data.js';
 
 export const PREVIEW_W = 960; export const PREVIEW_H = 540;
 const TAU = Math.PI * 2;
@@ -306,16 +307,37 @@ async function drawProfile(c, style, images) {
   c.restore();
 }
 
+/* ------------------------------------------------------------------ a cursor */
+/** A cursor theme's picture: the cursor (and its pointer, when it has one) big, on a soft dark stage, each with a dot where its tip is. */
+async function drawCursor(c, look) {
+  const W = PREVIEW_W; const H = PREVIEW_H;
+  c.fillStyle = linear(c, 0, 0, W, H, 150, ['#241b3a', '#0e0c16']); c.fillRect(0, 0, W, H);
+  const glow = c.createRadialGradient(W / 2, H / 2, 20, W / 2, H / 2, W * 0.55); glow.addColorStop(0, 'rgba(139,92,246,.28)'); glow.addColorStop(1, 'rgba(139,92,246,0)'); c.fillStyle = glow; c.fillRect(0, 0, W, H);
+  c.fillStyle = 'rgba(255,255,255,.06)';
+  for (let x = 24; x < W; x += 48) for (let y = 24; y < H; y += 48) { c.beginPath(); c.arc(x, y, 1.6, 0, TAU); c.fill(); }   // a dotted grid, like graph paper
+  const pics = [[look.image, look.hot]]; if (look.pointer) pics.push([look.pointer, look.hotPointer]);
+  const images = await Promise.all(pics.map(([url]) => loadImage(url)));
+  const size = 230; const gap = 150; const boxes = images.map((im, i) => (im ? cursorBox(im.naturalWidth || im.width, im.naturalHeight || im.height, size, pics[i][1]) : null));
+  const total = boxes.reduce((n, b) => n + (b ? b.w : 0), 0) + gap * (boxes.length - 1); let x = (W - total) / 2;
+  boxes.forEach((b, i) => {
+    if (!b || !images[i]) return;
+    const y = (H - b.h) / 2; c.save(); c.imageSmoothingEnabled = b.w < 64; c.shadowColor = 'rgba(0,0,0,.55)'; c.shadowBlur = 28; c.shadowOffsetY = 12;
+    c.drawImage(images[i], x, y, b.w, b.h); c.restore();
+    c.save(); c.fillStyle = '#f04d6a'; c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.arc(x + b.x, y + b.y, 7, 0, TAU); c.fill(); c.stroke(); c.restore();
+    x += b.w + gap;
+  });
+}
+
 /* ------------------------------------------------------------------ the picture */
 /** Draws the preview picture of a theme and resolves it as an image Blob (WebP, or PNG where that isn't supported). Never throws for a theme that can be saved:
  *  if a picture of the theme can't be read into the canvas (a wallpaper that blocks it), the preview is drawn without that picture. */
 export async function renderThemePreview(kind, data) {
-  const look = kind === 'site' ? sanitizeSiteLook(data) : sanitizeProfileTheme(data);
+  const look = kind === 'site' ? sanitizeSiteLook(data) : kind === 'cursor' ? sanitizeCursor(data) : sanitizeProfileTheme(data);
   if (!look) throw new Error('There is nothing to draw');
   for (const images of [true, false]) {
     const cv = document.createElement('canvas'); cv.width = PREVIEW_W; cv.height = PREVIEW_H; const c = cv.getContext('2d');
     try {
-      if (kind === 'site') await drawSite(c, look, images); else await drawProfile(c, look, images);
+      if (kind === 'site') await drawSite(c, look, images); else if (kind === 'cursor') await drawCursor(c, look); else await drawProfile(c, look, images);
       return await toBlob(cv);
     } catch (e) { if (!images) throw e; }
   }

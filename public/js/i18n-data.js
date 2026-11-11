@@ -181,6 +181,23 @@ const ROWS = [
   ['Orata Member Since', 'Miembro de Orata desde', 'Membre d’Orata depuis', 'Orata-Mitglied seit', 'Membro do Orata desde', 'Su Orata dal', 'Lid van Orata sinds', 'Orata 登録日', 'Orata 가입일', '加入 Orata 时间', 'В Orata с', 'Orata Üyeliği'],
   ['Search members', 'Buscar miembros', 'Rechercher des membres', 'Mitglieder suchen', 'Pesquisar membros', 'Cerca membri', 'Leden zoeken', 'メンバーを検索', '멤버 검색', '搜索成员', 'Поиск участников', 'Üye ara'],
   ['Search messages', 'Buscar mensajes', 'Rechercher des messages', 'Nachrichten suchen', 'Pesquisar mensagens', 'Cerca messaggi', 'Berichten zoeken', 'メッセージを検索', '메시지 검색', '搜索消息', 'Поиск сообщений', 'Mesaj ara'],
+  ['Performance', 'Rendimiento', 'Performances', 'Leistung', 'Desempenho', 'Prestazioni', 'Prestaties', 'パフォーマンス', '성능', '性能', 'Производительность', 'Performans'],
+  ['Show more', 'Mostrar más', 'Afficher plus', 'Mehr anzeigen', 'Mostrar mais', 'Mostra altro', 'Meer tonen', 'もっと見る', '더 보기', '显示更多', 'Показать больше', 'Daha fazla göster'],
+  ['Show less', 'Mostrar menos', 'Afficher moins', 'Weniger anzeigen', 'Mostrar menos', 'Mostra meno', 'Minder tonen', '表示を減らす', '간략히 보기', '显示更少', 'Показать меньше', 'Daha az göster'],
+  ['Full quality', 'Calidad completa', 'Qualité maximale', 'Volle Qualität', 'Qualidade total', 'Qualità massima', 'Volledige kwaliteit', 'フル品質', '최고 품질', '完整画质', 'Полное качество', 'Tam kalite'],
+  ['Balanced', 'Equilibrado', 'Équilibré', 'Ausgewogen', 'Equilibrado', 'Bilanciato', 'Gebalanceerd', 'バランス', '균형', '均衡', 'Сбалансированный', 'Dengeli'],
+  ['Battery saver', 'Ahorro de batería', 'Économiseur de batterie', 'Energiesparmodus', 'Economia de bateria', 'Risparmio batteria', 'Batterijbesparing', 'バッテリーセーバー', '배터리 절약', '省电模式', 'Экономия заряда', 'Pil tasarrufu'],
+  ['Cut', 'Cortar', 'Couper', 'Ausschneiden', 'Recortar', 'Taglia', 'Knippen', '切り取り', '잘라내기', '剪切', 'Вырезать', 'Kes'],
+  ['Paste', 'Pegar', 'Coller', 'Einfügen', 'Colar', 'Incolla', 'Plakken', '貼り付け', '붙여넣기', '粘贴', 'Вставить', 'Yapıştır'],
+  ['Select All', 'Seleccionar todo', 'Tout sélectionner', 'Alles auswählen', 'Selecionar tudo', 'Seleziona tutto', 'Alles selecteren', 'すべて選択', '모두 선택', '全选', 'Выделить всё', 'Tümünü seç'],
+  ['Reload', 'Recargar', 'Actualiser', 'Neu laden', 'Recarregar', 'Ricarica', 'Opnieuw laden', '再読み込み', '새로고침', '重新加载', 'Перезагрузить', 'Yenile'],
+  ['Forward', 'Adelante', 'Suivant', 'Vorwärts', 'Avançar', 'Avanti', 'Vooruit', '進む', '앞으로', '前进', 'Вперёд', 'İleri'],
+  ['Copy Page Link', 'Copiar enlace de la página', 'Copier le lien de la page', 'Seitenlink kopieren', 'Copiar link da página', 'Copia il link della pagina', 'Paginalink kopiëren', 'ページのリンクをコピー', '페이지 링크 복사', '复制页面链接', 'Копировать ссылку на страницу', 'Sayfa bağlantısını kopyala'],
+  ['Cursors', 'Cursores', 'Curseurs', 'Cursor', 'Cursores', 'Cursori', 'Cursors', 'カーソル', '커서', '光标', 'Курсоры', 'İmleçler'],
+  ['Cursor', 'Cursor', 'Curseur', 'Cursor', 'Cursor', 'Cursore', 'Cursor', 'カーソル', '커서', '光标', 'Курсор', 'İmleç'],
+  ['Use a custom cursor', 'Usar un cursor personalizado', 'Utiliser un curseur personnalisé', 'Eigenen Cursor verwenden', 'Usar um cursor personalizado', 'Usa un cursore personalizzato', 'Eigen cursor gebruiken', 'カスタムカーソルを使う', '사용자 지정 커서 사용', '使用自定义光标', 'Использовать свой курсор', 'Özel imleç kullan'],
+  ['Create Category', 'Crear categoría', 'Créer une catégorie', 'Kategorie erstellen', 'Criar categoria', 'Crea categoria', 'Categorie maken', 'カテゴリを作成', '카테고리 만들기', '创建分类', 'Создать категорию', 'Kategori oluştur'],
+  ['Mark Server As Read', 'Marcar servidor como leído', 'Marquer le serveur comme lu', 'Server als gelesen markieren', 'Marcar servidor como lido', 'Segna il server come letto', 'Server als gelezen markeren', 'サーバーを既読にする', '서버를 읽음으로 표시', '将服务器标为已读', 'Отметить сервер прочитанным', 'Sunucuyu okundu say'],
 ];
 
 export const DICT = {};

@@ -13,6 +13,7 @@ import { upload } from '/js/api.js';
 import { errMsg } from '/js/actions.js';
 import { t } from '/js/i18n.js';
 import { LITE } from '/js/lite.js';
+import { CursorSection } from '/js/settings-cursor.js';
 /** In Lite mode these pages' choices don't show (they're kept for Normal mode): says so at the top. */
 const LiteNote = () => (LITE ? html`<div class="lite-note"><${Icon} name="bolt" size=${16} /><span>${t('Lite mode is on, so this doesn’t show right now. What you pick here is kept for Normal mode (Settings → Advanced).')}</span></div>` : null);
 
@@ -47,6 +48,7 @@ export function ThemePage() {
     <${Section} title=${t('Theme library')} desc=${t('Save your whole look — colors, wallpaper, fonts, glass and rain — to your library, or install themes other people made.')}>
       <${ThemeLibraryBar} kind="site" />
     <//>
+    <${CursorSection} />
     <${Section} title=${t('Theme')} desc=${t('Pick a base. Everything below fine-tunes it.')}>
       <div class="mode-grid">${MODES.map(([k, l, bg, fg]) => html`<button type="button" class=${cx('mode-card', th.mode === k && 'sel')} onClick=${() => setMode(k)}>
         <span class="mode-prev" style=${k === 'auto' ? { background: 'linear-gradient(105deg,#15121f 50%,#fff 50%)' } : { background: bg, color: fg }}><i></i><i></i></span><b>${t(l)}</b>${th.mode === k ? html`<span class="mode-check"><${Icon} name="check" size=${13} sw=${3.5} /></span>` : null}</button>`)}</div>

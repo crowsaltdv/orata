@@ -5,6 +5,7 @@ import { state, set, rebuildIndex } from '/js/store.js';
 import { api } from '/js/api.js';
 import { act } from '/js/actions.js';
 import { buildLayout, moveChannel, moveCategory, layoutChanges, applyChanges } from '/js/channel-order.js';
+import { createGhost } from '/js/drag-ghost.js';
 
 const THRESHOLD = 5;   // px of travel before a press becomes a drag, so a plain click still opens the channel
 const SLIDE = 220;     // ms for the other rows to slide aside
@@ -57,7 +58,7 @@ function createController(root, setLayoutState, setDragState) {
     if (next !== lay) { snapshot(); setLayout(next); }
   }
 
-  const place = () => { const a = c.active; if (c.ghost && a) c.ghost.style.transform = `translate3d(${c.pointer.x - a.dx}px, ${c.pointer.y - a.dy}px, 0)`; };
+  const place = () => { if (c.ghost && c.active) c.ghost.move(c.pointer.x, c.pointer.y); };   // (the copy, which also swings as the pointer moves: drag-ghost.js)
 
   /** Scrolls the list when the pointer is held near its top or bottom edge. */
   function tick() {
@@ -75,11 +76,7 @@ function createController(root, setLayoutState, setDragState) {
     const p = c.pending; c.pending = null;
     const rect = p.el.getBoundingClientRect();
     c.active = { kind: p.kind, id: p.id, dx: p.x - rect.left, dy: p.y - rect.top };
-    const g = p.el.cloneNode(true);
-    g.removeAttribute('data-dnd'); g.removeAttribute('tabindex'); g.removeAttribute('role'); g.setAttribute('aria-hidden', 'true');
-    g.classList.add('dnd-ghost'); g.style.width = `${rect.width}px`; g.style.height = `${rect.height}px`;
-    c.ghost = g; place(); document.body.appendChild(g);
-    void g.offsetWidth; g.classList.add('lifted');   // lift off: it grows a little and tilts
+    c.ghost = createGhost(p.el, { x: p.x, y: p.y, dx: c.active.dx, dy: c.active.dy });   // lift off: a copy that grows a little and hangs from where you took hold of it
     document.body.classList.add('dnd-active');
     c.scrollTop = root.current?.scrollTop || 0; c.raf = requestAnimationFrame(tick);
     snapshot(); setLayout(buildLayout(c.server.channels)); setDragState({ kind: p.kind, id: p.id });
@@ -117,16 +114,13 @@ function createController(root, setLayoutState, setDragState) {
   /** The copy glides into the slot it was dropped on (or into the category's name if the slot is hidden in a collapsed category), then the real row takes over. */
   function land(a) {
     const g = c.ghost; const row = rowOf(a.id); row?.getAnimations().forEach((x) => x.cancel());   // measure the slot where it really is, not mid-slide
+    const ms = 240 * motion();
     let slot = row && slotOf(row, a.kind); let hidden = false;
     const list = slot?.closest('.ch-list.collapsed');
     if (list) { slot = list.previousElementSibling; hidden = true; }
     const r = slot?.getBoundingClientRect();
-    if (g) {
-      g.classList.remove('lifted'); g.classList.add('landing');
-      if (r) g.style.transform = `translate3d(${r.left}px, ${r.top}px, 0)`;
-      if (hidden || !r) g.style.opacity = '0';
-    }
-    setTimeout(() => { g?.remove(); c.ghost = null; c.landing = false; document.body.classList.remove('dnd-active'); setLayout(null); setDragState(null); }, 240 * motion() + 20);
+    g?.land(r, { hidden: hidden || !r, ms });
+    setTimeout(() => { g?.destroy(); c.ghost = null; c.landing = false; document.body.classList.remove('dnd-active'); setLayout(null); setDragState(null); }, ms + 20);
   }
 
   /** Shows the new order at once and tells the server; if it refuses, puts the old order back. */
@@ -146,7 +140,7 @@ function createController(root, setLayoutState, setDragState) {
     c.pending = { kind, id, el: e.currentTarget, x: e.clientX, y: e.clientY }; c.pointer = { x: e.clientX, y: e.clientY };
     listen(true);
   };
-  c.destroy = () => { listen(false); cancelAnimationFrame(c.raf); c.ghost?.remove(); document.body.classList.remove('dnd-active'); };
+  c.destroy = () => { listen(false); cancelAnimationFrame(c.raf); c.ghost?.destroy(); document.body.classList.remove('dnd-active'); };
   return c;
 }
 

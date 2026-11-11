@@ -5,8 +5,10 @@ import { useSel, toast } from '/js/store.js';
 import { chooseAndUploadImage } from '/js/imageutil.js';
 import { Btn, Segmented, Dropdown, Slider, Toggle, ColorSwatch } from '/js/ui.js';
 import { loadFont } from '/js/theme.js';
+import { perfOf, reducedMotion } from '/js/perf-data.js';
 import { t } from '/js/i18n.js';
-import { PROFILE_FONTS, EFFECTS, OUTLINE_STYLES, PROFILE_DEFAULTS, fontFamily, effectColors } from '/js/profile-data.js';
+import { EFFECTS, OUTLINE_STYLES, PROFILE_DEFAULTS, fontFamily, fontId, effectColors } from '/js/profile-data.js';
+import { FontField } from '/js/fontpicker.js';
 
 const rgba = (h, a) => { const [r, g, b] = hexToRgb(h); return `rgb(${r} ${g} ${b} / ${a})`; };
 const q = (family) => `"${family}"`;
@@ -66,7 +68,7 @@ export function UserName({ user, text, class: c }) {
 
 /** The effect drawn over a profile card. Pauses when the tab is hidden and shows a still picture under Reduce motion. */
 export function ProfileEffect({ fx }) {
-  const ref = useRef(null); const reduce = useSel((s) => s.settings.motion?.reduce);
+  const ref = useRef(null); const reduce = useSel((s) => reducedMotion(s) || perfOf(s).profileFx);   // (Settings → Performance can stop these without touching Reduce motion)
   const eff = rainbowFx(fx);
   useEffect(() => (ref.current ? runEffect(ref.current, eff, { reduce }) : undefined), [fx?.id, eff.color, eff.color2, fx?.density, fx?.speed, fx?.opacity, reduce]);
   return html`<canvas class=${cx('pf-fx', fx?.rainbow && 'rainbow')} ref=${ref} aria-hidden="true"></canvas>`;
@@ -103,7 +105,7 @@ function Group({ title, on, onToggle, children, desc }) {
 }
 /** One option of the effect gallery: its name with a live little preview below it. */
 function EffectOption({ id, name, on, fx, onPick }) {
-  const ref = useRef(null); const reduce = useSel((s) => s.settings.motion?.reduce);
+  const ref = useRef(null); const reduce = useSel((s) => reducedMotion(s) || perfOf(s).profileFx);
   const eff = rainbowFx(fx);
   useEffect(() => (ref.current ? runEffect(ref.current, { ...eff, id }, { reduce, fps: 24, onlyWhenVisible: true, size: { width: 150, height: 84 } }) : undefined), [id, eff.color, eff.color2, fx.density, fx.speed, fx.opacity, reduce]);
   return html`<button type="button" class=${cx('ps-fx', on && 'on')} onClick=${onPick} aria-pressed=${on}><span class="ps-fx-name">${t(name)}</span><span class="ps-fx-view"><canvas class=${cx(fx.rainbow && 'rainbow')} ref=${ref} aria-hidden="true"></canvas></span></button>`;
@@ -127,8 +129,6 @@ export function ProfileStyleEditor({ value, change, me }) {
   const p = value || null;
   const put = (key, patch) => change((prev) => ({ ...(prev || {}), [key]: { ...(prev?.[key] || PROFILE_DEFAULTS[key]), ...patch } }));
   const toggle = (key, on) => change((prev) => { const n = { ...(prev || {}) }; if (on) n[key] = { ...PROFILE_DEFAULTS[key] }; else delete n[key]; return Object.keys(n).length ? n : null; });
-  const fonts = [{ value: '', label: t('Default') }, ...PROFILE_FONTS.map(([id, fam]) => ({ value: id, label: fam }))];   // '' (not null): the dropdown matches options by value
-  const fontOpt = (o) => { const fam = fontFamily(o.value); if (fam) loadFont(fam); return html`<span style=${fam ? { fontFamily: q(fam), fontSize: '16px' } : null}>${o.label}</span>`; };
   const tabs = [{ value: 'colors', label: t('Colors') }, { value: 'outline', label: t('Outline') }, { value: 'name', label: t('Name & text') }, { value: 'effect', label: t('Effect') }];
   const c = p?.colors; const o = p?.outline; const s = p?.shadow; const f = p?.fonts; const nc = p?.nameColor; const no = p?.nameOutline; const ns = p?.nameShadow; const e = p?.effect;
   const choosePicture = async () => {
@@ -169,9 +169,9 @@ export function ProfileStyleEditor({ value, change, me }) {
     ${tab === 'name' ? html`
       <div class="ps-namepreview" style=${nameFont}><${NameText} text=${me?.displayName || 'Name'} profile=${p} /></div>
       <div class="ps-group"><div class="ps-body flat">
-        <${Row} label=${t('Name font')} wide=${true}><${Dropdown} value=${f?.name || ''} options=${fonts} onChange=${(v) => put('fonts', { name: v || null })} renderOption=${fontOpt} /><//>
-        <${Row} label=${t('Text font')} wide=${true}><${Dropdown} value=${f?.text || ''} options=${fonts} onChange=${(v) => put('fonts', { text: v || null })} renderOption=${fontOpt} /><//>
-        <p class="ps-note">${t('The text font is used for your username, status and About me.')}</p>
+        <${Row} label=${t('Name font')} wide=${true}><${FontField} value=${fontFamily(f?.name)} onChange=${(fam) => put('fonts', { name: fam ? fontId(fam) : null })} defaultName=${t('Default')} label=${t('Name font')} uploads=${false} /><//>
+        <${Row} label=${t('Text font')} wide=${true}><${FontField} value=${fontFamily(f?.text)} onChange=${(fam) => put('fonts', { text: fam ? fontId(fam) : null })} defaultName=${t('Default')} label=${t('Text font')} uploads=${false} /><//>
+        <p class="ps-note">${t('Pick any font from Google Fonts: search by name. The text font is used for your username, status and About me.')}</p>
       </div></div>
       <${Group} title=${t('Name color')} desc=${t('A color or gradient for your name.')} on=${has(p, 'nameColor')} onToggle=${(v) => toggle('nameColor', v)}>
         <${FillControls} f=${nc || PROFILE_DEFAULTS.nameColor} put=${(patch) => put('nameColor', patch)} label=${t('Name color')} />

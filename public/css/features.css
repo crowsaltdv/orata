@@ -32,7 +32,9 @@
 /* ------------------------------------------------ profile */
 .profile-card { display: flex; flex-direction: column; width: 100%; position: relative; }
 .profile-pop { width: 340px; padding: 0; overflow: hidden; border-radius: 20px; }
-.profile-pop .profile-card { max-height: min(640px, calc(100vh - 40px)); overflow-y: auto; }
+.profile-pop .profile-card { max-height: min(640px, calc(100vh - 40px)); }   /* the card itself never scrolls (its outline, effect and shadow must always cover all of it): when it is taller than the window, its body scrolls */
+.profile-card > .pc-body { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; } .profile-card > .pc-body::-webkit-scrollbar { display: none; }
+.profile-card > .pc-body > * { flex-shrink: 0; }
 .pc-top { position: relative; flex: none; }
 .pc-banner { background-size: cover; background-position: center; width: 100%; }
 .pc-avatar { position: absolute !important; left: 16px; bottom: -40px; box-shadow: 0 0 0 6px rgb(var(--panel-rgb) / .97); border-radius: 50%; }
@@ -52,6 +54,12 @@
 .pc-mutual-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); } .mut-avs { display: flex; } .mut-av { width: 22px; height: 22px; border-radius: 50%; background: var(--accent-grad); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; margin-right: -6px; overflow: hidden; box-shadow: 0 0 0 2px rgb(var(--panel-rgb) / .9); color: var(--on-accent); } .mut-av img { width: 100%; height: 100%; object-fit: cover; }
 .pc-list { display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto; } .pc-list-item { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
 .pc-msg .input { background: rgb(0 0 0 / .22); }
+/* the folded part of a profile: Connections and Orata Member Since, opened with the arrow */
+.pc-more-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 6px 10px; border-radius: 10px; color: var(--text-2); font-size: 12.5px; font-weight: 700; letter-spacing: .02em; transition: background var(--t-fast), color var(--t-fast); } .pc-more-btn:hover { background: var(--hover); color: var(--text); }
+.pc-more-btn .icon { transition: transform calc(.25s * var(--m, 1)) ease; } .pc-more.open .pc-more-btn .icon { transform: rotate(180deg); }
+.pc-more-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows calc(.25s * var(--m, 1)) ease; } .pc-more.open .pc-more-body { grid-template-rows: 1fr; }
+.pc-more-in { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px; visibility: hidden; transition: visibility 0s linear calc(.25s * var(--m, 1)); } .pc-more.open .pc-more-in { visibility: visible; transition-delay: 0s; }
+.pc-more.open .pc-more-in { padding-top: 6px; }
 .pc-view { padding: 9px; border-radius: 10px; background: var(--hover); font-weight: 700; font-size: 13.5px; transition: background var(--t-fast); } .pc-view:hover { background: var(--active); }
 .profile-pane { overflow-y: auto; } .profile-pane .profile-card { }
 .profile-card.modal .pc-body { padding-bottom: 6px; }

@@ -17,6 +17,7 @@ import { hasProfanity } from './profanity.js';
 import { staffLog } from './staff.js';
 import { orbitTells } from './applications.js';
 import { THEME_KINDS, LIBRARY_LIMIT, sanitizeTheme, cleanThemeName, themeFiles, mapThemeFiles, searchWords, matchesWords } from '../public/js/theme-data.js';
+import { CURSOR_MAX_PX } from '../public/js/cursor-data.js';
 
 db.themes ||= {};        // Discovery: id -> { id, kind, name, data, preview, authorId, createdAt, installs, status: 'pending' (waiting for staff) | 'approved' (none: posted before approval existed) }
 db.themeCopies ||= {};   // an upload's name -> the theme file that is its copy (so saving one wallpaper in many themes keeps one copy)
@@ -24,7 +25,8 @@ db.themeCopies ||= {};   // an upload's name -> the theme file that is its copy 
 const FILE = /^th_(\d+)\.[a-z0-9]+$/;
 const FORMATS = { png: 'png', jpeg: 'jpg', webp: 'webp', gif: 'gif', heif: 'avif' };
 const BIG_BYTES = 3 * 1024 * 1024; const BIG_PIXELS = 2600; const MAX_ANIMATED = 15 * 1024 * 1024; const MAX_REMOTE = 25 * 1024 * 1024; const MAX_DATA = 12_000;
-const kindName = (k) => (k === 'site' ? 'site' : 'profile');
+const kindName = (k) => (k === 'site' ? 'site' : k === 'cursor' ? 'cursor' : 'profile');
+const fallbackName = (k) => (k === 'site' ? 'My site theme' : k === 'cursor' ? 'My cursor' : 'My profile theme');
 const votesOf = (t) => (Array.isArray(t.votes) ? t.votes.length : 0);
 
 /** Checks a picture (a real PNG, JPEG, WebP, GIF or AVIF; a GIF may move) and keeps it as a file the theme owns. Resolves the new file name. */
@@ -39,6 +41,15 @@ async function keepPicture(buf) {
   }
   const file = `th_${newId()}.${ext}`;
   try { await storeUpload(file, `image/${ext === 'jpg' ? 'jpeg' : ext}`, buf); } catch (e) { throw e.code === 'QUOTA' ? new ApiError(507, e.message, 'storage_full') : new ApiError(503, 'Could not save the picture right now. Try again in a moment.', 'storage_error'); }
+  return file;
+}
+/** Checks a cursor picture (any picture Orata can read; a GIF gives its first frame) and keeps it as a PNG of at most CURSOR_MAX_PX on its longer side: browsers ignore bigger cursors. Resolves the new file name. */
+async function keepCursor(buf) {
+  let png;
+  try { png = await sharp(buf, { limitInputPixels: 40_000_000 }).rotate().resize({ width: CURSOR_MAX_PX, height: CURSOR_MAX_PX, fit: 'inside', withoutEnlargement: true }).png().toBuffer(); }
+  catch { throw bad('A cursor picture isn’t a picture Orata can use (PNG, JPEG, WebP, GIF and AVIF work).', 'picture_bad'); }
+  const file = `th_${newId()}.png`;
+  try { await storeUpload(file, 'image/png', png); } catch (e) { throw e.code === 'QUOTA' ? new ApiError(507, e.message, 'storage_full') : new ApiError(503, 'Could not save the cursor right now. Try again in a moment.', 'storage_error'); }
   return file;
 }
 const FONT_FILE = /\.(woff2?|ttf|otf)$/i; const MAX_FONT = 5 * 1024 * 1024;
@@ -62,6 +73,15 @@ async function ownCopy(name) {
   db.themeCopies[name] = file;
   return file;
 }
+/** A cursor's picture: one of this server's uploads, kept as a small PNG of its own. A picture that already is a theme's small PNG stays as it is. */
+async function ownCursorCopy(name) {
+  if (!isSafeFileName(name) || !await restoreUpload(name)) throw bad('A cursor picture can’t be found any more. Pick it again and save once more.', 'picture_missing');
+  const buf = fs.readFileSync(path.join(UPLOAD_DIR, name));
+  if (FILE.test(name)) { try { const m = await sharp(buf).metadata(); if (m.format === 'png' && (m.pages || 1) === 1 && m.width <= CURSOR_MAX_PX && m.height <= CURSOR_MAX_PX) return name; } catch { /* a picture that can't be read is made again below (and refused) */ } }
+  const key = `cursor:${name}`; const known = db.themeCopies[key];
+  if (known && await restoreUpload(known)) return known;
+  const file = await keepCursor(buf); db.themeCopies[key] = file; return file;
+}
 let fetchImage = null;   // the server's address-checked fetch (api.js), which never reaches into the server's own network
 /** A wallpaper that is a web link, fetched and kept like an upload. Resolves its new /uploads address, or null when it can't be fetched or isn't a picture (the theme then keeps the link). */
 async function copyRemote(url) {
@@ -84,7 +104,7 @@ async function copyRemote(url) {
 async function readyTheme(kind, data) {
   const clean = sanitizeTheme(kind, data);
   if (!clean) throw bad('There is nothing in that theme to save.', 'empty_theme');
-  const own = await mapThemeFiles(kind, clean, ownCopy);
+  const own = await mapThemeFiles(kind, clean, kind === 'cursor' ? ownCursorCopy : ownCopy);
   if (kind === 'site' && /^https?:\/\//i.test(own.bg?.image || '')) own.bg.image = await copyRemote(own.bg.image) || own.bg.image;
   if (JSON.stringify(own).length > MAX_DATA) throw bad('That theme is too large.', 'theme_big');
   return own;
@@ -96,6 +116,7 @@ function inUse() {
   const keep = new Set(); const ref = (v) => { if (typeof v === 'string' && v.startsWith('/uploads/')) keep.add(v.slice(9)); };
   for (const u of Object.values(db.users)) {
     ref(u.avatar); ref(u.banner); ref(u.profile?.colors?.image); ref(u.settings?.bg?.image); for (const x of u.settings?.bg?.library || []) ref(x);
+    ref(u.settings?.cursor?.image); ref(u.settings?.cursor?.pointer);   // the cursor someone is using right now
     for (const k of ['ui', 'chat', 'code']) ref(u.settings?.fonts?.[k]);   // a theme's font someone is using right now
     for (const t of u.themes || []) for (const f of filesOf(t)) keep.add(f);
   }
@@ -153,8 +174,8 @@ export function mountThemes(r, { h, limit, fetchImage: fetcher }) {
   r.get('/themes/library', (req, res) => res.json({ limit: LIBRARY_LIMIT, themes: mine(req).map(libView) }));
   r.post('/themes/library', pace, h(async (req, res) => {
     const b = req.body || {}; const kind = b.kind;
-    if (!THEME_KINDS.includes(kind)) throw bad('Say whether this is a profile theme or a site theme');
-    const name = cleanThemeName(b.name) || (kind === 'site' ? 'My site theme' : 'My profile theme');
+    if (!THEME_KINDS.includes(kind)) throw bad('Say whether this is a profile theme, a site theme or a cursor');
+    const name = cleanThemeName(b.name) || fallbackName(kind);
     if (mine(req).filter((x) => x.kind === kind).length >= LIBRARY_LIMIT) throw full(kind);
     const data = await readyTheme(kind, b.data);
     if (mine(req).filter((x) => x.kind === kind).length >= LIBRARY_LIMIT) throw full(kind);   // (again: another save may have landed while the pictures were copied)

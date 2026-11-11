@@ -10,7 +10,19 @@ export const PROFILE_FONTS = [
   ['cinzel', 'Cinzel', 'serif'], ['playfair', 'Playfair Display', 'serif'], ['lora', 'Lora', 'serif'], ['merriweather', 'Merriweather', 'serif'], ['nunito', 'Nunito', 'clean'], ['poppins', 'Poppins', 'clean'], ['jetbrains', 'JetBrains Mono', 'mono'],
   ['unbounded', 'Unbounded', 'display'], ['chewy', 'Chewy', 'display'], ['rubikglitch', 'Rubik Glitch', 'tech'], ['shadows', 'Shadows Into Light', 'hand'],
 ];
-export const fontFamily = (id) => PROFILE_FONTS.find((f) => f[0] === id)?.[1] || null;
+/** Any Google Font can be picked for a name or text: it is saved as "g:" + the family ("g:Roboto Slab"). The few above keep their short ids (older profiles use them).
+ *  A family is letters, digits, spaces and hyphens only, so a made-up one can never break out of the CSS or the Google Fonts address it ends up in. */
+const GOOGLE_FONT = /^g:([A-Za-z0-9][A-Za-z0-9 -]{0,48})$/;
+/** The font to save for a family the picker gives: the short id when it is one of the first few, otherwise "g:Family". Null when the family can't be used. */
+export const fontId = (family) => {
+  const fam = typeof family === 'string' ? family.trim().replace(/\s+/g, ' ') : '';
+  const known = PROFILE_FONTS.find((f) => f[1] === fam); if (known) return known[0];
+  return fam && GOOGLE_FONT.test(`g:${fam}`) ? `g:${fam}` : null;
+};
+/** A saved font (a short id or "g:Family", checked here) → its Google Fonts family; null when it isn't a font. */
+export const fontFamily = (id) => PROFILE_FONTS.find((f) => f[0] === id)?.[1] || (typeof id === 'string' && GOOGLE_FONT.test(id) ? id.slice(2).trim().replace(/\s+/g, ' ') : null);
+/** A font as stored: the same value when it is usable, null when not. */
+const cleanFont = (v) => (typeof v === 'string' && fontFamily(v) ? (PROFILE_FONTS.some((f) => f[0] === v) ? v : `g:${fontFamily(v)}`) : null);
 
 /** Animated effects drawn over a profile card: [id, name]. Each id has an engine in profile-effects.js. */
 export const EFFECTS = [
@@ -83,7 +95,7 @@ export function sanitizeProfileStyle(p) {
   }
   const f = p.fonts;
   if (isObj(f)) {
-    const fonts = { name: oneOf(PROFILE_FONTS, f.name), text: oneOf(PROFILE_FONTS, f.text) };
+    const fonts = { name: cleanFont(f.name), text: cleanFont(f.text) };
     if (fonts.name || fonts.text) out.fonts = fonts;
   }
   const nc = fill(p.nameColor, false); if (nc) out.nameColor = nc;

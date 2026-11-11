@@ -68,3 +68,6 @@
 .theme-preview-bar .tpb-text { display: flex; align-items: center; gap: 10px; min-width: 0; } .theme-preview-bar .tpb-text > .icon { color: rgb(var(--accent-rgb)); flex: none; }
 .theme-preview-bar small { display: block; color: var(--text-3); font-size: 12px; }
 .theme-preview-card { width: 100%; max-width: 360px; margin: 0 auto; pointer-events: none; }
+
+/* a cursor on Discovery: the boxes of its preview dialog (themes.js) */
+.cur-try { display: flex; align-items: center; justify-content: center; text-align: center; height: 110px; margin-bottom: 12px; padding: 12px; border-radius: 14px; font-size: 14px; font-weight: 700; color: var(--text-2); background: repeating-conic-gradient(rgb(var(--surface-rgb) / .09) 0% 25%, rgb(var(--surface-rgb) / .03) 0% 50%) 0 0 / 18px 18px; box-shadow: inset 0 0 0 1px rgb(var(--surface-rgb) / .12); }

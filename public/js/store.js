@@ -17,6 +17,7 @@ export const state = {
   modals: [], ctx: null, popover: null, saveBar: null, lightbox: null, toasts: [], quick: false, settingsPage: null, serverSettings: null,
   settings: deepMerge(DEFAULT_SETTINGS, migrateSettings(ls('settings', {}))),
   local: deepMerge(DEFAULT_LOCAL, ls('local', {})),
+  battery: null, batteryLow: false,   // the device's battery ({ level, charging }, perf.js; null where the browser doesn't say) and whether it is low and not charging
   focused: document.hasFocus(), idle: false, width: window.innerWidth, mobileNav: false,
   music: { genres: null, category: 'top', charts: {}, chartLoading: false, chartError: null, recent: ls('musicRecentYT', []) || [], playlists: null, artists: [], query: '', results: null, searching: false, error: null, queue: [], orig: [], index: -1, track: null, playing: false, loading: false, position: 0, duration: 0, volume: Number(ls('musicVolume', 0.7)) || 0.7, muted: false, shuffle: ['off', 'playlist', 'library'].includes(ls('musicShuffle', 'off')) ? ls('musicShuffle', 'off') : 'off', repeat: ['off', 'all', 'one'].includes(ls('musicRepeat', 'off')) ? ls('musicRepeat', 'off') : 'off', library: [], showQueue: false, chartMore: {}, loadingMore: false, resultsMore: false }, musicOk: null, watchOk: null, party: null, partyPanel: false, postIndex: {}, postLists: {},
   gifOk: true, gated: false, wsDiag: null, emailVerif: { enabled: false, required: false, smtp: false }, verifyDismissed: false, botId: null, sessionId: null, jump: null, themesRev: 0, replyTo: null, editing: null, searchQuery: '', speaking: {},

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export function loadEnv() {
+  if (process.env.ORATE_SELFTEST) return { ...process.env };   // a self-test (selftest-env.js): never the real .env, so tests can't reach the real database, R2 bucket or mail account
   const env = {};
   try {
     const raw = fs.readFileSync(path.join(ROOT, '.env'), 'utf8');

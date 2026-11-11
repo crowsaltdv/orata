@@ -34,6 +34,7 @@ export const ORBIT_COMMANDS = [
   { name: 'rank', desc: 'Your level and XP (or someone else’s)', arg: '[@member]', only: true, args: [{ name: 'member', type: 'user', optional: true }] },
   { name: 'leaderboard', desc: 'Who has the most XP here' },
   { name: 'xp', desc: 'Give someone XP', arg: '@member 100', perm: 'MANAGE_SERVER', args: [{ name: 'member', type: 'user' }, { name: 'amount', type: 'number', min: 1, max: 100_000, choices: ['50', '100', '500', '1000'] }] },
+  { name: 'setxp', desc: 'Set someone’s XP to an exact amount (0 clears it)', arg: '@member 500', perm: 'MANAGE_SERVER', args: [{ name: 'member', type: 'user' }, { name: 'amount', type: 'number', min: 0, max: 10_000_000, choices: ['0', '100', '500', '1000'] }] },
   { name: 'giveaway', desc: 'Start a giveaway people enter with 🎉 (or end one now)', arg: '1h [winners] prize | end', perm: 'MANAGE_MESSAGES' },
   { name: 'starboard', desc: 'Repost messages that get enough ⭐ reactions', arg: '[#channel] [stars] | off', perm: 'MANAGE_SERVER', only: true },
   { name: 'ticket', desc: 'Open a private channel with the server’s staff', arg: '[what it’s about]', only: true, args: [{ name: 'about', type: 'text', optional: true }] },

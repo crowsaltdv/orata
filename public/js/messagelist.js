@@ -6,6 +6,7 @@ import { Avatar, Spinner, Faces } from '/js/ui.js';
 import { Message } from '/js/message.js';
 import { loadMessages, loadOlder, loadNewer, jumpToLatest, ackChannel, getEntry } from '/js/actions.js';
 import { t } from '/js/i18n.js';
+import { perfOf } from '/js/perf-data.js';
 
 function buildRows(list, lastRead, meId) {
   const rows = []; let prev = null; let newPlaced = !lastRead;
@@ -53,7 +54,7 @@ export function MessageList({ chId }) {
   const replyTo = useSel((s) => (s.replyTo?.channelId === chId ? s.replyTo.id : null));
   const jump = useSel((s) => s.jump);
   const hour12 = useSel((s) => !s.settings.chat.hour24);
-  const embeds = useSel((s) => s.settings.chat.linkPreviews);
+  const embeds = useSel((s) => s.settings.chat.linkPreviews && !perfOf(s).previews);
   const compact = useSel((s) => s.settings.chat.compact);
   const focused = useSel((s) => s.focused);
   const lastMsg = useSel((s) => s.lastMsg[chId]);

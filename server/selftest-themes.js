@@ -1,6 +1,7 @@
 // Orata self-test for the theme library and Discovery:  npm test
 // The library (25 profile + 25 site themes per account, enforced here), everything a site / profile theme keeps, pictures that keep working, the
 // preview pictures, sending a theme (anyone; Orata staff approve or turn it away; the old Creator badge is gone) and removing, installing from Discovery, upvotes and Featured sorting, and the sweep of theme files nobody uses.
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import os from 'node:os';
@@ -421,6 +422,39 @@ async function main() {
   await api('DELETE', `/themes/discover/${staffPub.id}`, S.token); await api('DELETE', `/themes/discover/${devPub.id}`, X.token);
 
   /* ---------------------------------------------------------------- syncing between devices */
+  /* ---------------------------------------------------------------- cursors */
+  console.log('\nCursors');
+  const swatch = (tok, w, h) => sharp({ create: { width: w, height: h, channels: 4, background: { r: 240, g: 60, b: 90, alpha: 1 } } }).png().toBuffer().then((buf) => upload(tok, buf));
+  const imgUrl = await swatch(N.token, 40, 40); const ptrUrl = await swatch(N.token, 30, 36);
+  r = await api('POST', '/themes/library', N.token, { kind: 'cursor', name: 'Red arrow', data: { image: imgUrl, pointer: ptrUrl, size: 48, hot: { x: 0.1, y: 0.2 }, hotPointer: { x: 0.5, y: 0 }, evil: 'x' } });
+  const CUR = r.body;
+  ok(r.status === 200 && CUR.kind === 'cursor' && /^\/uploads\/th_\d+\.png$/.test(CUR.data.image) && /^\/uploads\/th_\d+\.png$/.test(CUR.data.pointer) && CUR.data.size === 48 && CUR.data.hot.x === 0.1 && CUR.data.hotPointer.x === 0.5 && !('evil' in CUR.data), 'a cursor is saved to the library with its own copy of both pictures, and nothing else', JSON.stringify(r.body));
+  ok(await fetchOk(CUR.data.image) && await fetchOk(CUR.data.pointer) && CUR.data.image !== imgUrl, '… served from the server');
+  r = await api('POST', '/themes/library', N.token, { kind: 'cursor', data: { image: imgUrl, size: 20 } }); ok(r.status === 200 && r.body.name === 'My cursor' && r.body.data.size === 32 && r.body.data.pointer === null, 'a cursor with no name is called My cursor, an odd size becomes the usual one, and the pointer is optional');
+  const bigUrl = await upload(N.token, await png(300, 200, '#2255aa'));
+  r = await api('POST', '/themes/library', N.token, { kind: 'cursor', name: 'Huge', data: { image: bigUrl } });
+  const meta = r.status === 200 ? await sharp(Buffer.from(await (await fetch(base + r.body.data.image)).arrayBuffer())).metadata() : null;
+  ok(r.status === 200 && meta && meta.format === 'png' && Math.max(meta.width, meta.height) === 64 && meta.width > meta.height, 'a big picture is shrunk to a cursor of at most 64 pixels, keeping its shape', JSON.stringify(meta));
+  const gifUrl = await upload(N.token, animatedGif(), 'image/gif', 'c.gif');
+  r = await api('POST', '/themes/library', N.token, { kind: 'cursor', name: 'Moving', data: { image: gifUrl } }); ok(r.status === 200 && /\.png$/.test(r.body.data.image), 'a GIF becomes a still cursor (cursors can’t move)');
+  r = await api('POST', '/themes/library', N.token, { kind: 'cursor', name: 'x', data: { image: 'https://evil.example/c.png' } }); ok(r.status === 400, 'a picture from another website isn’t a cursor');
+  r = await api('POST', '/themes/library', N.token, { kind: 'cursor', name: 'x', data: { size: 32 } }); ok(r.status === 400, 'a cursor without a picture is refused');
+  r = await api('POST', '/themes/library', N.token, { kind: 'cursor', name: 'x', data: { image: '/uploads/not-there-at-all.png' } }); ok(r.status === 400, '… and so is one whose picture isn’t there');
+  const junk = await sendBytes('POST', '/upload', N.token, Buffer.from('this is not a picture at all'), 'image/png', 'x.png');
+  r = await api('POST', '/themes/library', N.token, { kind: 'cursor', name: 'x', data: { image: junk.body?.url } }); ok(r.status === 400, 'something that isn’t a picture is refused');
+  await sendBytes('PUT', `/themes/library/${CUR.id}/preview`, N.token, prev);
+  r = await api('POST', '/themes/discover', N.token, { id: CUR.id, name: 'Red arrow' }); const CURPUB = r.body;
+  ok(r.status === 200 && CURPUB.kind === 'cursor' && CURPUB.status === 'pending', 'a cursor is sent to Discovery and waits for Orata staff');
+  r = await api('GET', '/themes/discover?kind=cursor', E.token); ok(r.body.total === 0, '… so the Cursors tab doesn’t show it yet');
+  r = await api('GET', '/themes/discover?status=pending', S.token); ok(r.body.themes.some((t) => t.id === CURPUB.id && t.kind === 'cursor'), '… and staff find it in their queue');
+  r = await api('GET', `/themes/discover/${CURPUB.id}/data`, S.token); ok(r.status === 200 && r.body.kind === 'cursor' && r.body.data.image === CUR.data.image, 'staff can look at the whole cursor before they decide');
+  r = await api('POST', `/themes/discover/${CURPUB.id}/review`, S.token, { approve: true }); ok(r.status === 200, 'staff approve it');
+  r = await api('GET', '/themes/discover?kind=cursor', E.token); ok(r.body.total === 1 && r.body.themes[0].name === 'Red arrow' && r.body.themes[0].kind === 'cursor', 'it shows on the Cursors tab');
+  r = await api('GET', '/themes/discover?kind=site', E.token); ok(!r.body.themes.some((t) => t.id === CURPUB.id), '… and nowhere else');
+  r = await api('POST', `/themes/discover/${CURPUB.id}/install`, E.token); ok(r.status === 200 && r.body.theme.kind === 'cursor' && r.body.theme.data.image === CUR.data.image, 'anyone can install it into their own library');
+  r = await api('GET', '/themes/library', E.token); ok(r.body.themes.filter((t) => t.kind === 'cursor').length === 1 && r.body.themes.filter((t) => t.kind === 'cursor')[0].from === CURPUB.id, '… where it counts as a cursor');
+  r = await api('POST', '/themes/discover', E.token, { id: r.body.themes.find((t) => t.kind === 'cursor').id }); ok(r.status === 400, 'a cursor you installed isn’t yours to post again');
+
   console.log('\nSyncing');
   const w1 = await connect(N.token); const w2 = await connect(N.token);
   const heard = w2.wait('themes_update');
@@ -440,6 +474,8 @@ async function main() {
   const kept = (await api('POST', '/themes/library', E.token, { kind: 'site', name: 'Kept', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: await upload(E.token, await png(51, 50, '#12abcd')) } }) })).body;
   const worn = (await api('POST', '/themes/library', E.token, { kind: 'site', name: 'Worn', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: await upload(E.token, await png(52, 50, '#cdab12')) } }) })).body;
   await api('PATCH', '/me/settings', E.token, { bg: { type: 'image', image: worn.data.bg.image } });   // wearing it now: the theme can go, the picture stays
+  const wornCur = (await api('POST', '/themes/library', E.token, { kind: 'cursor', name: 'Worn cursor', data: { image: await upload(E.token, await png(32, 32, '#a1b2c3')) } })).body;
+  await api('PATCH', '/me/settings', E.token, { cursor: { on: true, image: wornCur.data.image } }); await api('DELETE', `/themes/library/${wornCur.id}`, E.token);   // wearing it now: the theme can go, the picture stays
   await sendBytes('PUT', `/themes/library/${lonely.id}/preview`, E.token, prev);
   const lonelyPreview = (await api('GET', '/themes/library', E.token)).body.themes.find((t) => t.id === lonely.id).preview;
   await api('DELETE', `/themes/library/${lonely.id}`, E.token); await api('DELETE', `/themes/library/${worn.id}`, E.token);
@@ -448,6 +484,7 @@ async function main() {
   await stopServer(); startServer({ THEME_FILE_GRACE_MS: '0', THEME_SWEEP_FIRST_MS: '400' }); await ready(); await sleep(1500);
   ok(!(await fetchOk(lonely.data.bg.image)) && !(await fetchOk(lonelyPreview)), 'the sweep removes the picture and preview nothing uses any more');
   ok(await fetchOk(kept.data.bg.image) && await fetchOk(worn.data.bg.image) && await fetchOk(T2.data.bg.image) && await fetchOk(PUB1.preview) && await fetchOk(t2Preview) && await fetchOk(BT.data.banner.image) && await fetchOk(GT.data.banner.image), '… and keeps every one that a theme (a banner or card picture too), a posted theme or your current wallpaper still uses');
+  ok(await fetchOk(wornCur.data.image) && await fetchOk(CUR.data.image) && await fetchOk(CUR.data.pointer), 'a cursor someone is wearing, and the pictures of one that is saved and posted, survive the sweep');
   r = await api('GET', '/themes/library', N.token); ok(r.body.themes.some((t) => t.id === IN1.id), 'everything is still there after a restart');
   r = await api('POST', '/themes/library', E.token, { kind: 'site', name: 'Again', data: siteLook({ bg: { ...siteLook().bg, type: 'image', image: kept.data.bg.image } }) }); ok(r.status === 200, 'saving after a sweep works');
 

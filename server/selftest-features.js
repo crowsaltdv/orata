@@ -1,6 +1,7 @@
 // Orata feature self-test (runs after the main self-test):  npm test
 // Channel & category permission overwrites (allow / deny / inherit, sync with the category), sessions that never expire, invite cards,
 // the Music player's server side (YouTube Music through ytmusicapi, against a fake helper) and the "listening to" status.
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import crypto from 'node:crypto';

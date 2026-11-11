@@ -12,17 +12,21 @@ import { api } from '/js/api.js';
 import { act, errMsg, closeSettings } from '/js/actions.js';
 import { t } from '/js/i18n.js';
 import { LIBRARY_LIMIT, sanitizeSiteLook, siteLookOf, sanitizeProfileTheme, profileLookOf, searchWords, matchesWords } from '/js/theme-data.js';
+import { sanitizeCursor, cursorLookOf, sameCursor } from '/js/cursor-data.js';
 import { isStaffMe } from '/js/staff.js';
 import { ProfileCard } from '/js/profile.js';
 
-const KINDS = [{ value: 'profile', label: 'Profile themes' }, { value: 'site', label: 'Site themes' }];
-const NOUN = { profile: 'profile theme', site: 'site theme' };
+const KINDS = [{ value: 'profile', label: 'Profile themes' }, { value: 'site', label: 'Site themes' }, { value: 'cursor', label: 'Cursors' }];
+const NOUN = { profile: 'profile theme', site: 'site theme', cursor: 'cursor' };
+const BADGE = { profile: 'Profile theme', site: 'Site theme', cursor: 'Cursor' };   // (what a card calls its kind)
+const FRESH = { profile: 'My profile theme', site: 'My site theme', cursor: 'My cursor' };   // (the name a new one starts with)
 
 /* ------------------------------------------------------------------ the look you have now, and wearing a theme */
 /** The theme your look is right now: your whole site look (wallpaper picture or GIF included), or your saved profile style with your card picture and your banner picture or GIF (null when you haven't styled your profile). */
-export const currentLook = (kind) => (kind === 'site' ? sanitizeSiteLook(siteLookOf(state.settings)) : profileLookOf(state.me));
+export const currentLook = (kind) => (kind === 'site' ? sanitizeSiteLook(siteLookOf(state.settings)) : kind === 'cursor' ? cursorLookOf(state.settings) : profileLookOf(state.me));
 const sameLook = (a, b) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
 export const isWorn = (th) => {
+  if (th.kind === 'cursor') return !!state.settings.cursor?.on && sameCursor(sanitizeCursor(th.data), cursorLookOf(state.settings));
   if (th.kind === 'site') {
     const mine = sanitizeSiteLook(th.data); const now = currentLook('site');
     if (mine && now && !mine.layout) delete now.layout;   // (a theme saved before layouts existed doesn't ask about yours)
@@ -41,8 +45,12 @@ const setKindNow = (k) => { kindNow = k; ls('themesKind', null, k); changed(); }
 /** Puts a theme on: a site theme becomes your whole site look (your wallpapers, Reduce motion and accessibility switches stay yours), a profile theme your profile style, card picture and banner. */
 export async function applyTheme(th) {
   const m = state.me;
-  const before = th.kind === 'profile' ? { kind: 'profile', me: { profile: m.profile || null, banner: m.banner || null, bannerColor: m.bannerColor || null, accentColor: m.accentColor || null } } : { kind: 'site', data: currentLook('site') };
-  if (th.kind === 'site') {
+  const before = th.kind === 'profile' ? { kind: 'profile', me: { profile: m.profile || null, banner: m.banner || null, bannerColor: m.bannerColor || null, accentColor: m.accentColor || null } }
+    : th.kind === 'cursor' ? { kind: 'cursor', cursor: structuredClone(state.settings.cursor) } : { kind: 'site', data: currentLook('site') };
+  if (th.kind === 'cursor') {
+    const look = sanitizeCursor(th.data); if (!look) { toast(t('That cursor can’t be applied'), 'error'); return false; }
+    updateSettings({ cursor: { ...look, on: true } }); toast(t('Cursor applied'), 'success', 2200);   // (the pointer picture is replaced too: a cursor without one has none)
+  } else if (th.kind === 'site') {
     const look = sanitizeSiteLook(th.data); if (!look) { toast(t('That theme can’t be applied'), 'error'); return false; }
     const img = look.bg.image && !/^https?:/i.test(look.bg.image) ? look.bg.image : null;
     updateSettings({ ...look, bg: { ...look.bg, ...(img ? { library: [img, ...state.settings.bg.library.filter((x) => x !== img)].slice(0, 8) } : {}) } });   // (a wallpaper of its own also joins your Wallpaper page)
@@ -57,7 +65,7 @@ export async function applyTheme(th) {
 }
 async function undoApply() {
   const u = undo; if (!u) return;
-  if (u.kind === 'site') updateSettings(u.data || {}); else if (!await act(api.patch('/me', u.me))) return;
+  if (u.kind === 'site') updateSettings(u.data || {}); else if (u.kind === 'cursor') updateSettings({ cursor: u.cursor }); else if (!await act(api.patch('/me', u.me))) return;
   setUndo(null); toast(t('Your previous look is back'), 'success', 2200);
 }
 
@@ -68,8 +76,9 @@ let previewing = null;   // { before, th, onReview } while a site theme is on fo
  *  lets either approve it or turn it away. */
 async function previewTheme(th, onReview) {
   const full = await act(api.get(`/themes/discover/${th.id}/data`)); if (!full) return;
-  const look = th.kind === 'site' ? sanitizeSiteLook(full.data) : sanitizeProfileTheme(full.data);
+  const look = th.kind === 'site' ? sanitizeSiteLook(full.data) : th.kind === 'cursor' ? sanitizeCursor(full.data) : sanitizeProfileTheme(full.data);
   if (!look) { toast(t('That theme can’t be shown'), 'error'); return; }
+  if (th.kind === 'cursor') { openModal('cursor-preview', { th, look, onReview }); return; }
   if (th.kind === 'profile') { openModal('theme-preview', { th, look, onReview }); return; }
   if (!previewing) previewing = { before: structuredClone(state.settings) };
   Object.assign(previewing, { th, onReview }); updateSettings(look, { sync: false }); changed();
@@ -101,6 +110,17 @@ MODALS['theme-preview'] = function ThemePreview({ id, th, look, onReview }) {
     <div class="theme-preview-card pop-card"><${ProfileCard} userId=${me.id} mode="popout" userOverride=${user} /></div>
   <//>`;
 };
+/** Staff (or anyone looking at one): boxes to move the mouse over with the cursor on, nothing saved. */
+MODALS['cursor-preview'] = function CursorPreview({ id, th, look, onReview }) {
+  const [css, setCss] = useState(null);
+  useEffect(() => { let live = true; import('/js/cursor.js').then(async (m) => { const a = await m.cursorCss(look.image, look.size, look.hot); const p = look.pointer ? await m.cursorCss(look.pointer, look.size, look.hotPointer) : null; if (live && a) setCss({ arrow: a.arrow, pointer: (p || a).pointer }); }); return () => { live = false; }; }, []);
+  const decide = async (yes) => { if (await onReview?.(th, yes)) closeModal(id); };
+  return html`<${Modal} title=${`${t('Preview')}: ${th.name}`} subtitle=${`${t('By')} ${th.author?.displayName || '?'} · ${t('move your mouse over the boxes (nothing is saved)')}`} width=${420} onClose=${() => closeModal(id)}
+    footer=${html`${th.status === 'pending' && onReview ? html`<${Btn} variant="danger" icon="x" onClick=${() => decide(false)}>${t('Turn away')}<//><${Btn} variant="primary" icon="check" onClick=${() => decide(true)}>${t('Approve')}<//>` : null}<${Btn} variant="ghost" onClick=${() => closeModal(id)}>${t('Close')}<//>`}>
+    <div class="cur-try" style=${css ? { cursor: css.arrow } : null}>${t('The cursor')}</div>
+    <div class="cur-try" style=${css ? { cursor: css.pointer } : null}>${t(look.pointer ? 'Its pointer, over buttons and links' : 'Over buttons and links it stays the same')}</div>
+  <//>`;
+};
 const Peek = ({ th, onReview }) => html`<button type="button" class="tcard-peek" onClick=${() => previewTheme(th, onReview)}><${Icon} name="eye" size=${14} />${t('Preview')}</button>`;
 
 /* ------------------------------------------------------------------ the library (server) */
@@ -122,10 +142,10 @@ export async function saveToLibrary(kind, data, name) {
 }
 /** Asks for a name, then saves the look you have now as a theme. `kind` is 'site' or 'profile'; `data` defaults to the look you have now. */
 export async function saveCurrentLook(kind, data = currentLook(kind)) {
-  if (!data) { toast(kind === 'profile' ? t('You haven’t styled your profile yet. Style it in Settings → Profile first.') : t('There is nothing to save yet'), 'info', 4000); return null; }
+  if (!data) { toast(kind === 'profile' ? t('You haven’t styled your profile yet. Style it in Settings → Profile first.') : kind === 'cursor' ? t('You haven’t picked a cursor yet. Upload one in Settings → Theme first.') : t('There is nothing to save yet'), 'info', 4000); return null; }
   const count = (await act(api.get('/themes/library'), { silent: true }))?.themes.filter((x) => x.kind === kind).length ?? 0;
   if (count >= LIBRARY_LIMIT) { toast(t(`Your ${NOUN[kind]} library is full (${LIBRARY_LIMIT} of ${LIBRARY_LIMIT}). Delete one from your library to make room.`), 'error', 5000); return null; }
-  const name = await askName({ title: t('Save to your library'), label: t('Theme name'), value: kind === 'site' ? t('My site theme') : t('My profile theme'), confirm: t('Save') });
+  const name = await askName({ title: t('Save to your library'), label: t('Theme name'), value: t(FRESH[kind]), confirm: t('Save') });
   return name ? saveToLibrary(kind, data, name) : null;
 }
 function askName(props) { return new Promise((resolve) => openModal('theme-name', { ...props, resolve })); }
@@ -150,7 +170,7 @@ const POST_NOTE = () => t('Orata staff check each theme before it shows on Disco
 /** The + in Discovery: pick one of your saved themes (or the look you have now), set the title, post it. */
 MODALS['post-theme'] = function PostTheme({ id, kind, onDone }) {
   const [mine, setMine] = useState(null); const [pick, setPick] = useState(null); const [name, setName] = useState(''); const [busy, setBusy] = useState(false);
-  const now = currentLook(kind); const fresh = kind === 'site' ? t('My site theme') : t('My profile theme');
+  const now = currentLook(kind); const fresh = t(FRESH[kind]);
   useEffect(() => {
     api.get('/themes/library').then((r) => {
       const own = r.themes.filter((x) => x.kind === kind && !x.from);   // only your own work (a theme you installed can't be posted again)
@@ -173,7 +193,7 @@ MODALS['post-theme'] = function PostTheme({ id, kind, onDone }) {
       <div class="pick-list pt-list">
         ${now ? row('now', null, t('The look I have now'), t('Saved to your library first'), false, fresh) : null}
         ${mine.map((x) => row(x.id, x.preview, x.name, x.pending ? t('Waiting for approval') : x.published ? t('Already posted') : t('In your library'), !!x.published, x.name))}
-        ${!now && !mine.length ? html`<p class="text-muted" style="padding:8px;margin:0">${kind === 'profile' ? t('Style your profile in Settings → Profile first, then post it here.') : t('You have nothing to post yet.')}</p>` : null}
+        ${!now && !mine.length ? html`<p class="text-muted" style="padding:8px;margin:0">${kind === 'profile' ? t('Style your profile in Settings → Profile first, then post it here.') : kind === 'cursor' ? t('Upload a cursor in Settings → Theme first, then post it here.') : t('You have nothing to post yet.')}</p>` : null}
       </div>
       <${Field} label=${t('Title')}><${TextInput} value=${name} onInput=${setName} maxlength="40" onKeyDown=${(e) => e.key === 'Enter' && pick && name.trim() && post()} /><//>
       <p class="text-muted" style="font-size:13px;margin:0">${POST_NOTE()}</p>`}
@@ -233,7 +253,7 @@ function ReviewCard({ th, onReview }) {
   const [busy, setBusy] = useState(null);
   const go2 = async (yes) => { setBusy(yes ? 'yes' : 'no'); await onReview(th, yes); setBusy(null); };
   return html`<article class="tcard">
-    <${Picture} src=${th.preview}><span class="tcard-badge">${th.kind === 'site' ? t('Site theme') : t('Profile theme')}</span><${Peek} th=${th} onReview=${onReview} /><//>
+    <${Picture} src=${th.preview}><span class="tcard-badge">${t(BADGE[th.kind] || 'Theme')}</span><${Peek} th=${th} onReview=${onReview} /><//>
     <div class="tcard-meta"><div class="tcard-top"><b class="tcard-name" title=${th.name}>${th.name}</b></div><${Poster} user=${th.author} downloads=${0} /></div>
     <div class="tcard-review"><${Btn} variant="primary" icon="check" loading=${busy === 'yes'} disabled=${!!busy} onClick=${() => go2(true)}>${t('Approve')}<//><${Btn} variant="danger" icon="x" loading=${busy === 'no'} disabled=${!!busy} onClick=${() => go2(false)}>${t('Turn away')}<//></div>
   </article>`;
@@ -354,7 +374,7 @@ export function ThemesPage() {
   };
   const saveNow = async () => { if (await saveCurrentLook(kind)) loadLib(); };
 
-  const mine = (lib || []).filter((x) => x.kind === kind); const counts = { profile: (lib || []).filter((x) => x.kind === 'profile').length, site: (lib || []).filter((x) => x.kind === 'site').length };
+  const mine = (lib || []).filter((x) => x.kind === kind); const counts = { profile: (lib || []).filter((x) => x.kind === 'profile').length, site: (lib || []).filter((x) => x.kind === 'site').length, cursor: (lib || []).filter((x) => x.kind === 'cursor').length };
   const libWords = searchWords(text.library);
   const sortedLib = useMemo(() => (sort === 'alpha' ? [...mine].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) : shuffle(mine, seed)), [lib, kind, sort, seed]);
   const shownLib = libWords.length ? sortedLib.filter((th) => matchesWords(libWords, th.name)) : sortedLib;   // (your library is all here, so it is searched here)

@@ -2,6 +2,7 @@
 // Needs a Postgres to talk to. It uses PGlite (real Postgres compiled to WebAssembly) behind a local socket, so no install of
 // Postgres is required — but PGlite is not an Orata dependency; if it is missing this suite is skipped. To run it:
 //     npm install --no-save @electric-sql/pglite @electric-sql/pglite-socket
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import fs from 'node:fs';

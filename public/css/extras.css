@@ -600,7 +600,9 @@ button.stat-tile { text-align: left; font: inherit; } button.stat-tile:disabled 
 /* Lite mode (public/js/lite.js): nothing blurred or see-through, no wallpaper picture or rain */
 html.lite *, html.lite *::before, html.lite *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 html.lite #rain, html.lite .wp-image { display: none !important; }
-/* the launch screen: Normal or Lite mode (app.js ModeChooser) */
+/* Settings → Performance (public/js/perf-data.js, theme.js): the options that are plain CSS */
+html[data-perf-blur="off"] *, html[data-perf-blur="off"] *::before, html[data-perf-blur="off"] *::after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+html[data-perf-fx="off"] :is(.profile-card.pf-rainbow, .pn.rainbow, .pf-fx.rainbow, .ps-fx-view canvas.rainbow) { animation: none !important; }/* the launch screen: Normal or Lite mode (app.js ModeChooser) */
 .mode-screen { position: fixed; inset: 0; z-index: 9000; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / .62); }
 .mode-box { width: min(690px, 100%); padding: 26px; border-radius: var(--radius-lg); background: rgb(var(--panel-rgb) / .97); border: 1px solid var(--border); text-align: center; display: flex; flex-direction: column; gap: 16px; align-items: center; }
 .mode-box h2 { margin: 0; font-size: 22px; } .mode-box p { margin: 0; color: var(--text-2); line-height: 1.5; }

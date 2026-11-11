@@ -21,6 +21,7 @@ import { ServerTag } from '/js/server-tag.js';
 import { ApplicationCard } from '/js/applications.js';
 import { isStaffMe } from '/js/staff.js';
 import { LITE, thumb } from '/js/lite.js';
+import { perfOf } from '/js/perf-data.js';
 
 const JOIN_LINES = ['{name} just joined the party.', '{name} just landed.', 'Welcome, {name}. We hope you brought snacks.', '{name} hopped into the server.', 'A wild {name} appeared.', 'Everyone welcome {name}!', '{name} is here.', 'Glad you\'re here, {name}.'];
 const URL_RE = /https?:\/\/[^\s<>()]+/gi;
@@ -97,8 +98,8 @@ function Attachment({ a, onImage }) {
 function GifMedia({ g, onImage }) {
   // the whole GIF, at its own proportions (never cropped or rounded): as big as it is, up to 440 × 380
   const gw = g.w || 280; const gh = g.h || 200; const k = Math.min(1, 440 / gw, 380 / gh); const w = Math.max(60, Math.round(gw * k));
-  const autoplay = state.settings.chat.gifAutoplay; const favs = useFavGifs(); const fav = favs.some((x) => x.id === String(g.id));
-  const mp4 = (LITE && g.smallMp4) || g.mp4; const moving = (LITE && (g.smallWebp || g.smallGif)) || g.gif || g.url;   // Lite mode plays the smaller copy
+  const autoplay = useSel((s) => s.settings.chat.gifAutoplay && !perfOf(s).gifs); const small = useSel((s) => LITE || perfOf(s).thumbs); const favs = useFavGifs(); const fav = favs.some((x) => x.id === String(g.id));
+  const mp4 = (small && g.smallMp4) || g.mp4; const moving = (small && (g.smallWebp || g.smallGif)) || g.gif || g.url;   // Lite mode (and Settings → Performance) plays the smaller copy
   return html`<div class=${cx('gif-wrap', fav && 'fav')} style=${{ width: w + 'px', aspectRatio: `${gw} / ${gh}` }} onClick=${() => onImage({ url: g.gif || g.url, name: g.title || 'GIF', video: g.mp4, gif: true })}>
     ${mp4 && autoplay ? html`<video src=${mp4} poster=${g.poster} autoplay loop muted playsinline preload="metadata" aria-label=${g.title}></video>` : html`<img src=${autoplay ? moving : (g.poster || g.url)} alt=${g.title || 'GIF'} loading="lazy" />`}
     <span class="gif-badge">GIF</span>${g.id ? html`<button type="button" class=${cx('gif-fav', fav && 'on')} aria-label=${fav ? t('Remove from Favorites') : t('Add to Favorites')} data-tip=${fav ? t('Remove from Favorites') : t('Add to Favorites')} onClick=${(e) => { e.stopPropagation(); toggleFavGif(gifFromMessage(g)); }}><${Icon} name="star" size=${15} fill=${fav} /></button>` : null}</div>`;

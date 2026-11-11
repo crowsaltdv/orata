@@ -1,11 +1,12 @@
 // Orata — button feedback: press ripples and particle bursts (sparkles, confetti, emoji) so every click feels good.
 import { state } from '/js/store.js';
+import { perfOf, reducedMotion } from '/js/perf-data.js';
 
 let canvas = null; let ctx = null; let dpr = 1; let raf = 0; let last = 0;
 const parts = [];
 const root = document.documentElement;
 
-const on = () => !state.settings.motion.reduce && state.settings.fx?.particles !== false;
+const on = () => !reducedMotion(state) && state.settings.fx?.particles !== false && !perfOf(state).bursts;
 const amountK = () => state.settings.fx?.amount ?? 1;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
@@ -79,7 +80,7 @@ const RIPPLE_SEL = '.btn, .icon-btn, .comp-btn, .rail-btn, .nav-item, .fr-btn, .
 const PARTICLE_SEL = '.btn, .toggle, .reaction, .emoji-cell, .rail-btn, .grad-swatch, .panel-swatch, .preset-chip, .fr-btn, .segmented button, .mode-card, .lang-card, .wp-tile, .choice, .tpl, .gif-tile';
 
 function ripple(el, e) {
-  if (state.settings.fx?.ripples === false || state.settings.motion.reduce || el.disabled) return;
+  if (state.settings.fx?.ripples === false || reducedMotion(state) || perfOf(state).bursts || el.disabled) return;
   const r = el.getBoundingClientRect(); const x = (e.clientX || r.left + r.width / 2) - r.left; const y = (e.clientY || r.top + r.height / 2) - r.top;
   if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
   const wrap = document.createElement('span'); wrap.className = 'fx-ripple-wrap'; wrap.setAttribute('aria-hidden', 'true');

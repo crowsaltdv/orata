@@ -4,6 +4,7 @@
 //   * sign-up needs the 6-digit code from the email (no account exists before that),
 //   * wrong codes, lock-out, resend cooldown, mail failures surfaced to the person signing up,
 //   * changing the address later sends a verification link, and in "required" mode unverified accounts are locked out.
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import os from 'node:os';

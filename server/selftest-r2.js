@@ -2,6 +2,7 @@
 // 1. The request signing (AWS Signature Version 4) against AWS's own published examples. 2. The store against a fake R2 (S3 protocol) that checks the signature of every request
 // it gets, including pages, retries, quota and wrong keys. 3. Moving files into R2 (and that nothing is deleted unless every file made it). 4. The real server with R2 set up:
 // an upload lands in the bucket, and comes back from it after the disk cache is wiped. Runs with the other suites:  npm test
+import './selftest-env.js';   // first: tests never read the real .env (see that file)
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import http from 'node:http';

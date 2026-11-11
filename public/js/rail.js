@@ -10,6 +10,7 @@ import { copyText } from '/js/lib.js';
 import { t } from '/js/i18n.js';
 import { openMusic } from '/js/music.js';
 import { fullLayout, TIP_SIDE, PHONE_MAX } from '/js/layout-data.js';
+import { useRailDnd } from '/js/rail-dnd.js';
 
 /** The edge the server bar sits on (settings.layout, Settings → Layout): left, top, right or bottom. A phone keeps it as the left column of its drawer. */
 const railDock = (s) => (s.width > PHONE_MAX ? fullLayout(s.settings.layout).rail : 'left');
@@ -150,12 +151,13 @@ MODALS['edit-folder'] = function EditFolder({ id, folderId }) {
 };
 
 /* ------------------------------------------------------------------ items */
+const noNativeDrag = (e) => e.preventDefault();   // (a server's picture would start the browser's own drag: rail-dnd.js does the dragging)
 const ServerButton = memo(function ServerButton({ id, folderId, active, unread, mentions, dnd }) {
   const server = useSel((s) => s.servers[id]); const tip = useSel(railTip);
   if (!server) return null;
-  const over = dnd.over && dnd.over.kind === 'server' && dnd.over.id === id ? dnd.over.zone : null;
-  return html`<div class=${cx('rail-item', active && 'active', unread && !active && 'unread', dnd.drag?.kind === 'server' && dnd.drag.id === id && 'dragging', over && `drop-${over}`)} draggable="true"
-    onDragStart=${(e) => dnd.start(e, { kind: 'server', id, folderId })} onDragOver=${(e) => dnd.hover(e, { kind: 'server', id, folderId })} onDrop=${(e) => dnd.drop(e, { kind: 'server', id, folderId })} onDragEnd=${dnd.end}
+  const merge = dnd.merge?.kind === 'server' && dnd.merge.id === id;   // another server is being dragged over the middle of this one: dropping makes a folder
+  return html`<div class=${cx('rail-item', active && 'active', unread && !active && 'unread', dnd.drag?.kind === 'server' && dnd.drag.id === id && 'dragging', merge && 'drop-merge')} data-rail=${`server:${id}`} data-flip=${`server:${id}`} data-folder=${folderId || ''}
+    onPointerDown=${(e) => dnd.down(e, { kind: 'server', id, folderId }, e.currentTarget)} onDragStart=${noNativeDrag}
     onContextMenu=${(e) => openContext(e, serverMenu(server))}>
     <span class="rail-pill"></span>
     <button type="button" class="rail-btn glass glass-rail" data-tip=${server.name} data-tip-pos=${tip} aria-label=${server.name} onClick=${() => goChannel(id, null)}>
@@ -170,7 +172,7 @@ function FolderItem({ folder, info, route, dnd }) {
   const unread = folder.servers.some((id) => info[id]?.unread);
   const holdsActive = folder.servers.includes(route);
   const servers = useSel((s) => s.servers); const tip = useSel(railTip);
-  const over = dnd.over && dnd.over.kind === 'folder' && dnd.over.id === folder.id ? dnd.over.zone : null;
+  const merge = dnd.merge?.kind === 'folder' && dnd.merge.id === folder.id;   // a server is being dragged over this folder: dropping puts it in
   const toggle = () => updateSettings({ serverFolders: (state.settings.serverFolders || []).map((f) => (f.id === folder.id ? { ...f, open: !folder.open } : f)) });
   const label = folder.name || folder.servers.map((id) => servers[id]?.name).filter(Boolean).join(', ');
   const menu = [
@@ -180,9 +182,9 @@ function FolderItem({ folder, info, route, dnd }) {
     { type: 'sep' },
     { label: t('Ungroup Folder'), icon: 'trash', danger: true, onClick: () => folderOps.ungroup(folder.id) },
   ];
-  return html`<div class=${cx('rail-folder', folder.open && 'open', over && `drop-${over}`, dnd.drag?.kind === 'folder' && dnd.drag.id === folder.id && 'dragging')} style=${folder.color ? { '--fc': folder.color } : null}>
-    <div class=${cx('rail-item folder-head', !folder.open && holdsActive && 'active', !folder.open && unread && !holdsActive && 'unread')} draggable="true"
-      onDragStart=${(e) => dnd.start(e, { kind: 'folder', id: folder.id })} onDragOver=${(e) => dnd.hover(e, { kind: 'folder', id: folder.id })} onDrop=${(e) => dnd.drop(e, { kind: 'folder', id: folder.id })} onDragEnd=${dnd.end}
+  return html`<div class=${cx('rail-folder', folder.open && 'open', merge && 'drop-merge', dnd.drag?.kind === 'folder' && dnd.drag.id === folder.id && 'dragging')} data-rail=${`folder:${folder.id}`} style=${folder.color ? { '--fc': folder.color } : null}>
+    <div class=${cx('rail-item folder-head', !folder.open && holdsActive && 'active', !folder.open && unread && !holdsActive && 'unread')} data-flip=${`folder:${folder.id}`}
+      onPointerDown=${(e) => dnd.down(e, { kind: 'folder', id: folder.id }, e.currentTarget.parentElement)} onDragStart=${noNativeDrag}
       onContextMenu=${(e) => openContext(e, menu)}>
       <span class="rail-pill"></span>
       <button type="button" class="rail-btn folder glass glass-rail" data-tip=${label || t('Folder')} data-tip-pos=${tip} aria-label=${label || t('Folder')} aria-expanded=${folder.open} onClick=${toggle}>
@@ -212,34 +214,12 @@ export function ServerRail() {
   const layout = useMemo(() => railLayout(servers, order, folders), [servers, order, folders]);
   const badges = useSel((s) => Object.keys(s.servers).map((id) => { const u = serverUnread(id); return `${id}:${u.unread ? 1 : 0}:${u.mentions}`; }).join('|'));
   const dmBadge = useSel((s) => Object.values(s.dms).reduce((n, c) => { const u = unreadInfo(c.id); return n + (u.mentions || (u.unread && !s.settings.mutedChannels[c.id] ? 1 : 0)); }, 0));
-  const [drag, setDrag] = useState(null); const [over, setOver] = useState(null);
   const info = Object.fromEntries(badges.split('|').filter(Boolean).map((x) => { const [id, u, m] = x.split(':'); return [id, { unread: u === '1', mentions: Number(m) }]; }));
 
-  // drag & drop: the middle of a server lets you drop on it (→ folder), the top / bottom edge reorders
-  const zoneFor = (e, target) => {
-    const r = e.currentTarget.getBoundingClientRect(); const y = horizontal ? (e.clientX - r.left) / Math.max(1, r.width) : (e.clientY - r.top) / Math.max(1, r.height);   // (along the bar, whichever way it lies)
-    const canMerge = drag?.kind === 'server' && !(target.kind === 'server' && target.folderId);
-    if (canMerge && y > 0.27 && y < 0.73) return 'merge';
-    return y < 0.5 ? 'before' : 'after';
-  };
-  const dnd = {
-    drag, over,
-    start(e, d) { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', d.id); setDrag(d); },
-    hover(e, target) {
-      if (!drag) return; e.preventDefault(); e.stopPropagation();
-      if (drag.kind === target.kind && drag.id === target.id) { if (over) setOver(null); return; }
-      const key = drag.kind === 'folder' && target.folderId ? { kind: 'folder', id: target.folderId } : target;   // folders only move between top-level entries
-      const zone = zoneFor(e, target);
-      if (!over || over.kind !== key.kind || over.id !== key.id || over.zone !== zone) setOver({ kind: key.kind, id: key.id, zone, nested: !!target.folderId });
-    },
-    drop(e, target) {
-      e.preventDefault(); e.stopPropagation();
-      const d = drag; const zone = over?.zone || zoneFor(e, target); setDrag(null); setOver(null);
-      if (d) { const next = applyDrop(layout, d, target, zone); if (next !== layout) saveLayout(next); }
-    },
-    end() { setDrag(null); setOver(null); },
-  };
-  return html`<nav class=${cx('rail panel', horizontal && 'h', `dock-${dock}`)} ref=${bar} aria-label="Servers">
+  // drag & drop (rail-dnd.js): a lifted copy follows the pointer, the others slide aside; over the middle of a server it makes a folder (or goes into a folder)
+  const dnd = useRailDnd({ layout, horizontal, applyDrop, save: saveLayout });
+  const shown = dnd.preview || layout;   // (while a drag is going on, the live preview of the new order)
+  return html`<nav class=${cx('rail panel', horizontal && 'h', `dock-${dock}`, dnd.drag && 'dnd')} ref=${(el) => { bar.current = el; dnd.root.current = el; }} aria-label="Servers">
     <div class=${cx('rail-item', themesOpen && 'active')}>
       <span class="rail-pill"></span>
       <button type="button" class="rail-btn themes glass glass-rail" data-tip=${t('Discovery')} data-tip-pos=${tip} aria-label=${t('Discovery')} aria-pressed=${themesOpen} onClick=${() => go('/themes')}><${Icon} name="globe-grid" size=${24} /></button>
@@ -256,7 +236,7 @@ export function ServerRail() {
         ${dmBadge ? html`<span class="rail-badge">${dmBadge > 99 ? '99+' : dmBadge}</span>` : null}</button>
     </div>
     <div class="rail-sep"></div>
-    ${layout.map((it) => (it.kind === 'folder'
+    ${shown.map((it) => (it.kind === 'folder'
       ? html`<${FolderItem} key=${it.id} folder=${it} info=${info} route=${route} dnd=${dnd} />`
       : html`<${ServerButton} key=${it.id} id=${it.id} active=${route === it.id} unread=${info[it.id]?.unread} mentions=${info[it.id]?.mentions || 0} dnd=${dnd} />`))}
     <div class="rail-item"><button type="button" class="rail-btn add glass glass-rail" data-tip=${t('Add a Server')} data-tip-pos=${tip} aria-label="Add a server" onClick=${() => openModal('add-server')}><${Icon} name="plus" size=${24} sw=${2.4} /></button></div>

@@ -429,7 +429,6 @@ export function ListeningCard({ listening: l }) {
   if (!l || l.endsAt < Date.now()) return null;
   const pos = Math.min(l.duration, Math.max(0, Date.now() - l.startedAt));
   return html`<div class="listening-card">
-    <h5><${Icon} name="music" size=${13} /> ${t('Listening to music')}</h5>
     <div class="lc-row"><${Art} src=${l.artwork} size=${60} playing=${true} />
       <div class="lc-text"><b class="lc-title" title=${l.title}>${l.title}</b><small>${l.artistId ? html`<a class="m-link" href=${`/music/artist/${l.artistId}`} onClick=${toArtist}>${l.artist}</a>` : l.artist}</small>
         <div class="lc-bar"><span>${clock(pos / 1000)}</span><i><b style=${{ width: `${(pos / l.duration) * 100}%` }}></b></i><span>${clock(l.duration / 1000)}</span></div></div></div>

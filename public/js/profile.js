@@ -72,6 +72,19 @@ export function Banner({ user, height = 96, server, shape = true }) {
   return html`<div class="pc-banner" style=${{ ...(user.banner && shape ? { aspectRatio: '3 / 1' } : { height: height + 'px' }), ...style }}></div>`;
 }
 
+/** "Connections" and "Orata Member Since" stay folded away until the arrow is pressed, so a profile opens on the person and not on their details. */
+function ProfileMore({ user, member }) {
+  const [open, setOpen] = useState(false);
+  const conn = user.discord && user.discord.show !== false ? user.discord : null;
+  return html`<div class=${cx('pc-more', open && 'open')}>
+    <button type="button" class="pc-more-btn" aria-expanded=${open} onClick=${() => setOpen(!open)}><span>${open ? t('Show less') : t('Show more')}</span><${Icon} name="chevron-down" size=${16} sw=${2.4} /></button>
+    <div class="pc-more-body"><div class="pc-more-in">
+      ${conn ? html`<div class="pc-section"><h5>${t('Connections')}</h5><div class="pc-conn"><img class="pc-conn-av" src=${conn.avatar} alt="" loading="lazy" referrerpolicy="no-referrer" /><span class="pc-conn-text"><b>${conn.name}</b><small>Discord · @${conn.username}</small></span></div></div>` : null}
+      <div class="pc-section"><h5>${t('Orata Member Since')}</h5><div class="pc-since"><span><${Icon} name="calendar" size=${15} />${formatMemberSince(user.createdAt)}</span>${member ? html`<span><span class="dot">•</span><${Icon} name="server" size=${14} />${formatMemberSince(member.joinedAt)}</span>` : null}</div></div>
+    </div></div>
+  </div>`;
+}
+
 export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOverride }) {
   const stateUser = useSel((s) => s.users[userId]); const user = userOverride || stateUser;
   const me = useSel((s) => s.me);
@@ -108,9 +121,8 @@ export function ProfileCard({ userId, serverId, mode = 'popout', onClose, userOv
       ${listening ? html`<${ListeningCard} listening=${listening} />` : null}
       ${mode === 'panel' && d ? html`<div class="pc-mutual-row">${d.mutualServers.length ? html`<span class="mut-avs">${d.mutualServers.slice(0, 3).map((s) => html`<span class="mut-av" title=${s.name}>${s.icon ? html`<img src=${s.icon} alt="" />` : s.name[0]}</span>`)}</span><span>${d.mutualServers.length} ${t('Mutual Servers')}</span>` : null}</div>` : null}
       ${bio ? html`<div class="pc-section"><h5>${t('About Me')}</h5><div class="pc-bio msg-content" dangerouslySetInnerHTML=${{ __html: bio }}></div></div>` : null}
-      ${user.discord && user.discord.show !== false ? html`<div class="pc-section"><h5>${t('Connections')}</h5><div class="pc-conn"><img class="pc-conn-av" src=${user.discord.avatar} alt="" loading="lazy" referrerpolicy="no-referrer" /><span class="pc-conn-text"><b>${user.discord.name}</b><small>Discord · @${user.discord.username}</small></span></div></div>` : null}
       ${roles.length ? html`<div class="pc-section"><h5>${roles.length > 1 ? t('Roles') : t('Role')}</h5><div class="pc-roles">${roles.map((r) => html`<span class="role-chip"><i style=${{ background: r.color || 'var(--text-3)' }}></i>${r.name}</span>`)}</div></div>` : null}
-      <div class="pc-section"><h5>${t('Orata Member Since')}</h5><div class="pc-since"><span><${Icon} name="calendar" size=${15} />${formatMemberSince(user.createdAt)}</span>${member ? html`<span><span class="dot">•</span><${Icon} name="server" size=${14} />${formatMemberSince(member.joinedAt)}</span>` : null}</div></div>
+      <${ProfileMore} user=${user} member=${member} />
       ${mode !== 'panel' && d && (d.mutualServers.length || d.mutualFriends.length) && mode === 'modal' ? html`<div class="pc-section"><h5>${t('Mutual Servers')} — ${d.mutualServers.length}</h5><div class="pc-list">${d.mutualServers.map((s) => html`<div class="pc-list-item"><span class="mut-av">${s.icon ? html`<img src=${s.icon} alt="" />` : s.name[0]}</span>${s.name}</div>`)}</div></div>
         <div class="pc-section"><h5>${t('Mutual Friends')} — ${d.mutualFriends.length}</h5><div class="pc-list">${d.mutualFriends.map((f) => html`<div class="pc-list-item"><${Avatar} user=${f} size=${26} />${f.displayName}</div>`)}</div></div>` : null}
       ${mode === 'popout' && !self ? html`<div class="pc-msg"><input class="input" placeholder=${`${t('Message')} @${user.username}`} value=${msg} onInput=${(e) => setMsg(e.target.value)} onKeyDown=${async (e) => { if (e.key === 'Enter' && msg.trim()) { const ch = await openDm(userId); if (ch) { const { sendMessage } = await import('/js/actions.js'); const { encodeMentions } = await import('/js/markdown.js'); await sendMessage(ch, { content: encodeMentions(msg.trim(), ch) }); } onClose?.(); closePopover(); } }} /></div>` : null}
